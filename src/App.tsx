@@ -3,14 +3,19 @@ import {
   Archive,
   ArrowRight,
   Check,
+  ChevronRight,
   Clock3,
   Copy,
+  Download,
   ExternalLink,
   FileText,
+  Folder,
+  FolderPlus,
   Globe2,
   Link2,
   Lock,
   LogOut,
+  Pencil,
   Plus,
   Search,
   ShieldCheck,
@@ -18,7 +23,8 @@ import {
   UploadCloud,
   WifiOff
 } from "lucide-react";
-import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { type CSSProperties, FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import {
   ApiError,
   createNote,
@@ -35,7 +41,9 @@ import {
   updateNote
 } from "./api";
 import { AdminPanel } from "./components/AdminPanel";
+import { ExportPanel } from "./components/ExportPanel";
 import { NotebookEditor } from "./components/NotebookEditor";
+import { openExportWindow, renderNotesToExportWindow } from "./export";
 import type { AuthUser, Note, NoteBlock, NoteSummary } from "./shared";
 
 type SaveStatus = "idle" | "saving" | "saved" | "error";
@@ -46,6 +54,27 @@ type PagePreset = {
   value: string;
   label: string;
 };
+
+/*
+const PAGE_PRESETS: PagePreset[] = [
+  { value: "📝", label: "笔记" },
+  { value: "💡", label: "灵感" },
+  { value: "📅", label: "会议" },
+  { value: "✅", label: "任务" },
+  { value: "📚", label: "资料" },
+  { value: "📌", label: "收藏" }
+];
+
+const LEGACY_ICON_MAP: Record<string, string> = {
+  Note: "📝",
+  Idea: "💡",
+  Plan: "📅",
+  Task: "✅",
+  Book: "📚",
+  Pin: "📌"
+};
+
+*/
 
 const PAGE_PRESETS: PagePreset[] = [
   { value: "📝", label: "笔记" },
@@ -90,12 +119,20 @@ function App() {
   const [shareOpen, setShareOpen] = useState(false);
   const [sharePending, setSharePending] = useState(false);
   const [shareCopied, setShareCopied] = useState(false);
+  const [exportOpen, setExportOpen] = useState(false);
+  const [exportPending, setExportPending] = useState(false);
+  const [exportSelection, setExportSelection] = useState<string[]>([]);
   const [publicNote, setPublicNote] = useState<Note | null>(null);
   const [publicPending, setPublicPending] = useState(isPublicView);
   const [publicError, setPublicError] = useState<string | null>(null);
   const [workspaceView, setWorkspaceView] = useState<WorkspaceView>("notes");
+  const [collapsedCategoryIds, setCollapsedCategoryIds] = useState<string[]>([]);
+  const [editingCategoryId, setEditingCategoryId] = useState<string | null>(null);
+  const [editingCategoryTitle, setEditingCategoryTitle] = useState("");
   const revisionRef = useRef(0);
   const selectedIdRef = useRef<string | null>(null);
+  const shareButtonRef = useRef<HTMLButtonElement | null>(null);
+  const [sharePanelStyle, setSharePanelStyle] = useState<CSSProperties>({});
   const isAdminView = workspaceView === "admin" && Boolean(sessionUser?.isAdmin);
 
   useEffect(() => {
@@ -114,7 +151,13 @@ function App() {
     setSelectedId(null);
     setShareOpen(false);
     setShareCopied(false);
+    setExportOpen(false);
+    setExportPending(false);
+    setExportSelection([]);
     setWorkspaceView("notes");
+    setCollapsedCategoryIds([]);
+    setEditingCategoryId(null);
+    setEditingCategoryTitle("");
   }, []);
 
   const loadNote = useCallback(
@@ -170,9 +213,10 @@ function App() {
       const nextNotes = (await listNotes()).map(normalizeNoteSummary);
       setNotes(nextNotes);
       const nextSelected =
-        selectedIdRef.current && nextNotes.some((note) => note.id === selectedIdRef.current)
+        selectedIdRef.current &&
+        nextNotes.some((note) => note.id === selectedIdRef.current && note.kind === "page")
           ? selectedIdRef.current
-          : nextNotes[0]?.id ?? null;
+          : getFirstPageId(nextNotes);
 
       if (nextSelected) {
         await loadNote(nextSelected);
@@ -245,18 +289,110 @@ function App() {
     }
   }, [sessionUser?.isAdmin, workspaceView]);
 
-  const visibleNotes = useMemo(() => {
-    const term = query.trim().toLowerCase();
-    const sorted = [...notes].sort(
-      (a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime()
-    );
+  useEffect(() => {
+    if (workspaceView === "admin") {
+      setExportOpen(false);
+    }
+  }, [workspaceView]);
 
-    if (!term) {
-      return sorted;
+  useEffect(() => {
+    setExportSelection((current) => current.filter((id) => notes.some((note) => note.id === id)));
+  }, [notes]);
+
+  useEffect(() => {
+    if (!shareOpen || typeof window === "undefined") {
+      return;
     }
 
-    return sorted.filter((note) => note.title.toLowerCase().includes(term));
-  }, [notes, query]);
+    const updateSharePanelLayout = () => {
+      if (window.innerWidth <= 760) {
+        setSharePanelStyle({});
+        return;
+      }
+
+      const button = shareButtonRef.current;
+      if (!button) {
+        return;
+      }
+
+      const rect = button.getBoundingClientRect();
+      setSharePanelStyle({
+        top: `${Math.round(rect.bottom + 12)}px`,
+        right: `${Math.max(Math.round(window.innerWidth - rect.right), 16)}px`,
+        bottom: "auto",
+        left: "auto"
+      });
+    };
+
+    updateSharePanelLayout();
+    window.addEventListener("resize", updateSharePanelLayout);
+    window.addEventListener("scroll", updateSharePanelLayout, true);
+
+    return () => {
+      window.removeEventListener("resize", updateSharePanelLayout);
+      window.removeEventListener("scroll", updateSharePanelLayout, true);
+    };
+  }, [shareOpen]);
+
+  const sortedRecords = useMemo(() => {
+    return [...notes].sort(
+      (a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime()
+    );
+  }, [notes]);
+
+  const categories = useMemo(
+    () => sortedRecords.filter((note) => note.kind === "category"),
+    [sortedRecords]
+  );
+
+  const sortedNotes = useMemo(
+    () => sortedRecords.filter((note) => note.kind === "page"),
+    [sortedRecords]
+  );
+
+  const visibleNotes = useMemo(() => {
+    const term = query.trim().toLowerCase();
+
+    if (!term) {
+      return sortedNotes;
+    }
+
+    return sortedNotes.filter((note) => note.title.toLowerCase().includes(term));
+  }, [query, sortedNotes]);
+
+  const noteCount = sortedNotes.length;
+
+  const pagesByCategory = useMemo(() => {
+    const groups = new Map<string | null, NoteSummary[]>();
+    visibleNotes.forEach((note) => {
+      const key = note.parentId ?? null;
+      const current = groups.get(key) ?? [];
+      current.push(note);
+      groups.set(key, current);
+    });
+    return groups;
+  }, [visibleNotes]);
+
+  const uncategorizedNotes = useMemo(
+    () => pagesByCategory.get(null) ?? [],
+    [pagesByCategory]
+  );
+
+  const visibleCategories = useMemo(() => {
+    const term = query.trim().toLowerCase();
+    if (!term) {
+      return categories;
+    }
+
+    const matchedParentIds = new Set(
+      visibleNotes.map((note) => note.parentId).filter((parentId): parentId is string => Boolean(parentId))
+    );
+
+    return categories.filter(
+      (category) =>
+        matchedParentIds.has(category.id) || category.title.toLowerCase().includes(term)
+    );
+  }, [categories, query, visibleNotes]);
 
   const shareUrl = useMemo(() => {
     if (!draft?.shareToken || typeof window === "undefined") {
@@ -317,14 +453,15 @@ function App() {
     setSaveStatus("saving");
     setDraft((current) => (current ? { ...current, ...patch } : current));
 
-    if (patch.title !== undefined || patch.icon !== undefined) {
+    if (patch.title !== undefined || patch.icon !== undefined || patch.parentId !== undefined) {
       setNotes((current) =>
         current.map((note) =>
           note.id === selectedIdRef.current
             ? {
                 ...note,
                 title: patch.title ?? note.title,
-                icon: patch.icon ?? note.icon
+                icon: patch.icon ?? note.icon,
+                parentId: patch.parentId === undefined ? note.parentId : patch.parentId
               }
             : note
         )
@@ -348,7 +485,7 @@ function App() {
     [dirty, draft, loadNote, saveDraft, selectedId]
   );
 
-  const createNewNote = useCallback(async () => {
+  const createNewNote = useCallback(async (parentId: string | null = null) => {
     setWorkspaceView("notes");
     if (draft && dirty) {
       await saveDraft(draft, revisionRef.current);
@@ -359,6 +496,8 @@ function App() {
         await createNote({
           title: "未命名",
           icon: "📝",
+          kind: "page",
+          parentId,
           content: []
         })
       );
@@ -374,6 +513,35 @@ function App() {
     }
   }, [dirty, draft, handleLoggedOut, hasUsers, loadNote, saveDraft]);
 
+  const createCategory = useCallback(async () => {
+    setWorkspaceView("notes");
+    if (draft && dirty) {
+      await saveDraft(draft, revisionRef.current);
+    }
+
+    try {
+      const created = normalizeNote(
+        await createNote({
+          title: "未命名分类",
+          icon: "📂",
+          kind: "category",
+          content: []
+        })
+      );
+      setNotes((current) => [normalizeNoteSummary(toSummary(created)), ...current]);
+      setCollapsedCategoryIds((current) => current.filter((id) => id !== created.id));
+      setEditingCategoryId(created.id);
+      setEditingCategoryTitle(created.title);
+    } catch (error) {
+      if (error instanceof ApiError && error.status === 401) {
+        handleLoggedOut(hasUsers);
+        setAppError("登录状态已失效，请重新登录。");
+      } else {
+        setAppError("新建分类失败。");
+      }
+    }
+  }, [dirty, draft, handleLoggedOut, hasUsers, saveDraft]);
+
   const archiveCurrent = useCallback(async () => {
     if (!draft) {
       return;
@@ -387,9 +555,11 @@ function App() {
       setSelectedId(null);
       setShareOpen(false);
       setShareCopied(false);
+      setExportOpen(false);
 
-      if (remaining[0]) {
-        await loadNote(remaining[0].id);
+      const nextPageId = getFirstPageId(remaining);
+      if (nextPageId) {
+        await loadNote(nextPageId);
       } else {
         setDirty(false);
         setSaveStatus("idle");
@@ -448,9 +618,69 @@ function App() {
     }
   };
 
+  const toggleCategoryCollapse = (id: string) => {
+    setCollapsedCategoryIds((current) =>
+      current.includes(id) ? current.filter((item) => item !== id) : [...current, id]
+    );
+  };
+
+  const startCategoryEdit = (category: NoteSummary) => {
+    setEditingCategoryId(category.id);
+    setEditingCategoryTitle(category.title);
+  };
+
+  const saveCategoryTitle = useCallback(
+    async (categoryId: string) => {
+      const nextTitle = editingCategoryTitle.trim();
+      setEditingCategoryId(null);
+
+      if (!nextTitle) {
+        setEditingCategoryTitle("");
+        return;
+      }
+
+      try {
+        const saved = normalizeNote(await updateNote(categoryId, { title: nextTitle }));
+        setNotes((current) =>
+          current.map((note) => (note.id === saved.id ? normalizeNoteSummary(toSummary(saved)) : note))
+        );
+      } catch (error) {
+        if (error instanceof ApiError && error.status === 401) {
+          handleLoggedOut(hasUsers);
+          setAppError("登录状态已失效，请重新登录。");
+        } else if (error instanceof ApiError) {
+          setAppError(error.message);
+        } else {
+          setAppError("分类名称保存失败。");
+        }
+      } finally {
+        setEditingCategoryTitle("");
+      }
+    },
+    [editingCategoryTitle, handleLoggedOut, hasUsers]
+  );
+
   const openSharePanel = () => {
+    setExportOpen(false);
     setShareOpen((current) => !current);
     setShareCopied(false);
+  };
+
+  const openExportPanel = () => {
+    setShareOpen(false);
+    setShareCopied(false);
+    setExportOpen(true);
+    setExportSelection((current) => {
+      if (current.length > 0) {
+        return current;
+      }
+
+      if (draft) {
+        return [draft.id];
+      }
+
+      return sortedNotes[0] ? [sortedNotes[0].id] : [];
+    });
   };
 
   const enableCurrentShare = async () => {
@@ -520,6 +750,187 @@ function App() {
       setAppError("复制链接失败，请手动复制。");
     }
   };
+
+  const toggleExportSelection = (id: string) => {
+    setExportSelection((current) =>
+      current.includes(id) ? current.filter((item) => item !== id) : [...current, id]
+    );
+  };
+
+  const selectAllExportNotes = () => {
+    setExportSelection(sortedNotes.map((note) => note.id));
+  };
+
+  const selectVisibleExportNotes = (ids: string[]) => {
+    setExportSelection((current) => {
+      const next = new Set(current);
+      ids.forEach((id) => next.add(id));
+      return sortedNotes.filter((note) => next.has(note.id)).map((note) => note.id);
+    });
+  };
+
+  const clearExportSelection = () => {
+    setExportSelection([]);
+  };
+
+  const exportSelectedNotesAsPdf = async () => {
+    const orderedIds = sortedNotes
+      .filter((note) => exportSelection.includes(note.id))
+      .map((note) => note.id);
+
+    if (orderedIds.length === 0) {
+      setAppError("请先勾选要导出的页面。");
+      return;
+    }
+
+    const exportWindow = openExportWindow();
+    if (!exportWindow) {
+      setAppError("浏览器拦截了导出窗口，请允许弹窗后重试。");
+      return;
+    }
+
+    setExportPending(true);
+    setAppError(null);
+
+    try {
+      const notesToExport = await Promise.all(
+        orderedIds.map(async (id) => {
+          if (draft && id === draft.id) {
+            return draft;
+          }
+
+          return normalizeNote(await getNote(id));
+        })
+      );
+
+      renderNotesToExportWindow(exportWindow, notesToExport);
+      setExportOpen(false);
+    } catch (error) {
+      exportWindow.close();
+
+      if (error instanceof ApiError && error.status === 401) {
+        handleLoggedOut(hasUsers);
+        setAppError("登录状态已失效，请重新登录。");
+      } else if (error instanceof ApiError) {
+        setAppError(error.message);
+      } else {
+        setAppError("导出失败，请稍后再试。");
+      }
+    } finally {
+      setExportPending(false);
+    }
+  };
+
+  const sharePanel =
+    shareOpen && draft && typeof document !== "undefined"
+      ? createPortal(
+          <>
+            <button
+              aria-label="关闭分享面板"
+              className="share-panel-backdrop"
+              onClick={() => {
+                setShareOpen(false);
+                setShareCopied(false);
+              }}
+              type="button"
+            />
+            <div
+              aria-label="页面分享"
+              aria-modal="true"
+              className="share-panel"
+              role="dialog"
+              style={sharePanelStyle}
+            >
+              <div className="share-panel-head">
+                <div>
+                  <strong>页面分享</strong>
+                  <p>由你主动开启，关闭后旧链接会立刻失效。</p>
+                </div>
+                {draft.shareToken ? (
+                  <span className="share-panel-badge">
+                    <Globe2 size={14} />
+                    已开启
+                  </span>
+                ) : (
+                  <span className="share-panel-badge muted">未开启</span>
+                )}
+              </div>
+
+              {draft.shareToken ? (
+                <>
+                  <label className="share-panel-field">
+                    <span>分享链接</span>
+                    <div className="share-input-row">
+                      <input className="share-link-input" readOnly type="text" value={shareUrl} />
+                      <button
+                        className="toolbar-button compact"
+                        onClick={() => void copyShareLink()}
+                        type="button"
+                      >
+                        <Copy size={15} />
+                        {shareCopied ? "已复制" : "复制"}
+                      </button>
+                    </div>
+                  </label>
+
+                  <div className="share-status-row">
+                    <span>开启时间：{draft.sharedAt ? formatDateTime(draft.sharedAt) : "刚刚"}</span>
+                    <span>任何拿到链接的人都能免登录查看此页</span>
+                  </div>
+
+                  <div className="share-panel-actions">
+                    <a className="toolbar-button" href={shareUrl} rel="noreferrer" target="_blank">
+                      <ExternalLink size={15} />
+                      打开链接
+                    </a>
+                    <button
+                      className="toolbar-button danger"
+                      disabled={sharePending}
+                      onClick={() => void disableCurrentShare()}
+                      type="button"
+                    >
+                      关闭分享
+                    </button>
+                  </div>
+                </>
+              ) : (
+                <>
+                  <p className="share-panel-copy">
+                    开启后会生成一个只读分享链接，别人打开时不会被登录页拦截。
+                  </p>
+                  <div className="share-panel-actions">
+                    <button
+                      className="primary-button share-primary"
+                      disabled={sharePending}
+                      onClick={() => void enableCurrentShare()}
+                      type="button"
+                    >
+                      <Globe2 size={16} />
+                      {sharePending ? "开启中" : "开启公开分享"}
+                    </button>
+                  </div>
+                </>
+              )}
+            </div>
+          </>,
+          document.body
+        )
+      : null;
+
+  const exportPanel = (
+    <ExportPanel
+      notes={sortedNotes}
+      onClear={clearExportSelection}
+      onClose={() => setExportOpen(false)}
+      onExportPdf={() => void exportSelectedNotesAsPdf()}
+      onSelectAll={selectAllExportNotes}
+      onSelectVisible={selectVisibleExportNotes}
+      onToggleNote={toggleExportSelection}
+      open={exportOpen}
+      pending={exportPending}
+      selectedIds={exportSelection}
+    />
+  );
 
   if (isPublicView) {
     if (publicPending) {
@@ -801,7 +1212,7 @@ function App() {
           <div className="brand-mark">MN</div>
           <div>
             <strong>Mini Notes</strong>
-            <span>{sessionUser?.username ?? "当前账号"} · {notes.length} 篇</span>
+            <span>{sessionUser?.username ?? "当前账号"} · {noteCount} 篇</span>
           </div>
         </div>
 
@@ -817,6 +1228,11 @@ function App() {
         <button className="new-page-button" onClick={() => void createNewNote()} type="button">
           <Plus size={16} />
           新页面
+        </button>
+
+        <button className="new-category-button" onClick={() => void createCategory()} type="button">
+          <FolderPlus size={16} />
+          新建分类
         </button>
 
         {sessionUser?.isAdmin ? (
@@ -841,7 +1257,7 @@ function App() {
         ) : null}
 
         <nav aria-label="页面列表" className="note-list">
-          {visibleNotes.map((note) => (
+          {query.trim() ? visibleNotes.map((note) => (
             <button
               className={clsx("note-row", note.id === selectedId && "active")}
               key={note.id}
@@ -857,7 +1273,132 @@ function App() {
                 </span>
               </span>
             </button>
-          ))}
+          )) : (
+            <>
+              {uncategorizedNotes.length > 0 ? (
+                <div className="note-group">
+                  <div className="note-group-title">未分类</div>
+                  {uncategorizedNotes.map((note) => (
+                    <button
+                      className={clsx("note-row", note.id === selectedId && "active")}
+                      key={note.id}
+                      onClick={() => void selectNote(note.id)}
+                      type="button"
+                    >
+                      <span className="note-icon">{normalizePageIcon(note.icon)}</span>
+                      <span className="note-row-text">
+                        <strong>{note.title}</strong>
+                        <span className="note-row-subline">
+                          <small>{formatRelative(note.updatedAt)}</small>
+                          {note.shareToken ? <em className="mini-share-badge">已共享</em> : null}
+                        </span>
+                      </span>
+                    </button>
+                  ))}
+                </div>
+              ) : null}
+
+              {visibleCategories.map((category) => {
+                const categoryNotes = pagesByCategory.get(category.id) ?? [];
+                const isCollapsed = collapsedCategoryIds.includes(category.id);
+                const isEditing = editingCategoryId === category.id;
+
+                return (
+                  <div className="note-group" key={category.id}>
+                    <div className="category-row">
+                      <button
+                        className="category-toggle"
+                        onClick={() => toggleCategoryCollapse(category.id)}
+                        type="button"
+                      >
+                        <ChevronRight
+                          className={clsx("category-chevron", isCollapsed && "collapsed")}
+                          size={14}
+                        />
+                        <Folder size={15} />
+                      </button>
+
+                      {isEditing ? (
+                        <input
+                          autoFocus
+                          className="category-title-input"
+                          onBlur={() => void saveCategoryTitle(category.id)}
+                          onChange={(event) => setEditingCategoryTitle(event.target.value)}
+                          onKeyDown={(event) => {
+                            if (event.key === "Enter") {
+                              event.preventDefault();
+                              void saveCategoryTitle(category.id);
+                            }
+
+                            if (event.key === "Escape") {
+                              event.preventDefault();
+                              setEditingCategoryId(null);
+                              setEditingCategoryTitle("");
+                            }
+                          }}
+                          type="text"
+                          value={editingCategoryTitle}
+                        />
+                      ) : (
+                        <button
+                          className="category-label"
+                          onClick={() => toggleCategoryCollapse(category.id)}
+                          type="button"
+                        >
+                          {category.title}
+                        </button>
+                      )}
+
+                      <div className="category-row-actions">
+                        <button
+                          className="category-action"
+                          onClick={() => void createNewNote(category.id)}
+                          title="在这个分类下新建页面"
+                          type="button"
+                        >
+                          <Plus size={14} />
+                        </button>
+                        <button
+                          className="category-action"
+                          onClick={() => startCategoryEdit(category)}
+                          title="重命名分类"
+                          type="button"
+                        >
+                          <Pencil size={14} />
+                        </button>
+                      </div>
+                    </div>
+
+                    {!isCollapsed ? (
+                      <div className="category-note-list">
+                        {categoryNotes.length > 0 ? (
+                          categoryNotes.map((note) => (
+                            <button
+                              className={clsx("note-row nested", note.id === selectedId && "active")}
+                              key={note.id}
+                              onClick={() => void selectNote(note.id)}
+                              type="button"
+                            >
+                              <span className="note-icon">{normalizePageIcon(note.icon)}</span>
+                              <span className="note-row-text">
+                                <strong>{note.title}</strong>
+                                <span className="note-row-subline">
+                                  <small>{formatRelative(note.updatedAt)}</small>
+                                  {note.shareToken ? <em className="mini-share-badge">已共享</em> : null}
+                                </span>
+                              </span>
+                            </button>
+                          ))
+                        ) : (
+                          <div className="category-empty">这个分类下还没有页面</div>
+                        )}
+                      </div>
+                    ) : null}
+                  </div>
+                );
+              })}
+            </>
+          )}
         </nav>
       </aside>
 
@@ -868,7 +1409,7 @@ function App() {
             <span>
               {isAdminView
                 ? "管理员后台"
-                : draft?.title ?? (notes.length > 0 ? "选择页面" : "还没有页面")}
+                : draft?.title ?? (noteCount > 0 ? "选择页面" : "还没有页面")}
             </span>
           </div>
 
@@ -884,129 +1425,63 @@ function App() {
                   返回笔记
                 </button>
               </>
-            ) : draft ? (
+            ) : (
               <>
-                {draft.shareToken ? (
-                  <span className="share-state">
-                    <Globe2 size={15} />
-                    共享中
-                  </span>
-                ) : null}
-
-                <span className={clsx("save-state", saveStatus)}>
-                  {saveStatus === "saving" ? <Clock3 size={15} /> : <Check size={15} />}
-                  {saveLabel(saveStatus)}
-                </span>
-
-                <div className="topbar-stack">
+                {noteCount > 0 ? (
                   <button
-                    aria-label="共享当前页面"
-                    className={clsx("toolbar-button", shareOpen && "active")}
-                    onClick={openSharePanel}
-                    title="共享当前页面"
+                    aria-label="批量导出页面"
+                    className={clsx("toolbar-button", exportOpen && "active")}
+                    onClick={openExportPanel}
+                    title="批量导出页面"
                     type="button"
                   >
-                    {draft.shareToken ? <Globe2 size={16} /> : <Link2 size={16} />}
-                    共享
+                    <Download size={16} />
+                    导出
                   </button>
+                ) : null}
 
-                  {shareOpen ? (
-                    <div className="share-panel">
-                      <div className="share-panel-head">
-                        <div>
-                          <strong>页面分享</strong>
-                          <p>由你主动开启，关闭后旧链接会立刻失效。</p>
-                        </div>
-                        {draft.shareToken ? (
-                          <span className="share-panel-badge">
-                            <Globe2 size={14} />
-                            已开启
-                          </span>
-                        ) : (
-                          <span className="share-panel-badge muted">未开启</span>
-                        )}
-                      </div>
+                {draft ? (
+                  <>
+                    {draft.shareToken ? (
+                      <span className="share-state">
+                        <Globe2 size={15} />
+                        共享中
+                      </span>
+                    ) : null}
 
-                      {draft.shareToken ? (
-                        <>
-                          <label className="share-panel-field">
-                            <span>分享链接</span>
-                            <div className="share-input-row">
-                              <input
-                                className="share-link-input"
-                                readOnly
-                                type="text"
-                                value={shareUrl}
-                              />
-                              <button
-                                className="toolbar-button compact"
-                                onClick={() => void copyShareLink()}
-                                type="button"
-                              >
-                                <Copy size={15} />
-                                {shareCopied ? "已复制" : "复制"}
-                              </button>
-                            </div>
-                          </label>
+                    <span className={clsx("save-state", saveStatus)}>
+                      {saveStatus === "saving" ? <Clock3 size={15} /> : <Check size={15} />}
+                      {saveLabel(saveStatus)}
+                    </span>
 
-                          <div className="share-status-row">
-                            <span>开启时间：{draft.sharedAt ? formatDateTime(draft.sharedAt) : "刚刚"}</span>
-                            <span>任何拿到链接的人都能免登录查看此页</span>
-                          </div>
-
-                          <div className="share-panel-actions">
-                            <a
-                              className="toolbar-button"
-                              href={shareUrl}
-                              rel="noreferrer"
-                              target="_blank"
-                            >
-                              <ExternalLink size={15} />
-                              打开链接
-                            </a>
-                            <button
-                              className="toolbar-button danger"
-                              disabled={sharePending}
-                              onClick={() => void disableCurrentShare()}
-                              type="button"
-                            >
-                              关闭分享
-                            </button>
-                          </div>
-                        </>
-                      ) : (
-                        <>
-                          <p className="share-panel-copy">
-                            开启后会生成一个只读分享链接，别人打开时不会被登录页拦截。
-                          </p>
-                          <div className="share-panel-actions">
-                            <button
-                              className="primary-button share-primary"
-                              disabled={sharePending}
-                              onClick={() => void enableCurrentShare()}
-                              type="button"
-                            >
-                              <Globe2 size={16} />
-                              {sharePending ? "开启中" : "开启公开分享"}
-                            </button>
-                          </div>
-                        </>
-                      )}
+                    <div className="topbar-stack">
+                      <button
+                        aria-label="共享当前页面"
+                        className={clsx("toolbar-button", shareOpen && "active")}
+                        onClick={openSharePanel}
+                        ref={shareButtonRef}
+                        title="共享当前页面"
+                        type="button"
+                      >
+                        {draft.shareToken ? <Globe2 size={16} /> : <Link2 size={16} />}
+                        共享
+                      </button>
                     </div>
-                  ) : null}
-                </div>
+                    {sharePanel}
 
-                <button
-                  aria-label="归档页面"
-                  className="icon-button"
-                  onClick={() => void archiveCurrent()}
-                  title="归档页面"
-                  type="button"
-                >
-                  <Archive size={17} />
-                </button>
+                    <button
+                      aria-label="归档页面"
+                      className="icon-button"
+                      onClick={() => void archiveCurrent()}
+                      title="归档页面"
+                      type="button"
+                    >
+                      <Archive size={17} />
+                    </button>
+                  </>
+                ) : null}
               </>
-            ) : null}
+            )}
 
             <button
               aria-label="退出登录"
@@ -1032,6 +1507,26 @@ function App() {
         ) : draft && !isLoadingNote ? (
           <article className="page">
             <div className="page-meta">
+              <div className="page-meta-field">
+                <span className="page-meta-label">所在分类</span>
+                <select
+                  className="page-category-select"
+                  onChange={(event) =>
+                    editDraft({
+                      parentId: event.target.value ? event.target.value : null
+                    })
+                  }
+                  value={draft.parentId ?? ""}
+                >
+                  <option value="">未分类</option>
+                  {categories.map((category) => (
+                    <option key={category.id} value={category.id}>
+                      {category.title}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
               <span className="page-meta-label">页面类型</span>
               <div aria-label="页面类型" className="icon-picker">
                 {PAGE_PRESETS.map((preset) => (
@@ -1065,7 +1560,7 @@ function App() {
               onChange={(content) => editDraft({ content })}
             />
           </article>
-        ) : notes.length === 0 && !isLoadingNote ? (
+        ) : noteCount === 0 && !isLoadingNote ? (
           <section className="workspace-empty">
             <div className="workspace-empty-panel">
               <div className="workspace-empty-copy">
@@ -1085,6 +1580,7 @@ function App() {
           </section>
         )}
       </section>
+      {exportPanel}
     </main>
   );
 }
@@ -1102,12 +1598,17 @@ function normalizeLegacyTitle(title: string): string {
     return "未命名";
   }
 
+  if (title === "Untitled" || title === "???") {
+    return "未命名";
+  }
+
   return title;
 }
 
 function normalizeNoteSummary(note: NoteSummary): NoteSummary {
   return {
     ...note,
+    kind: note.kind === "category" ? "category" : "page",
     title: normalizeLegacyTitle(note.title),
     icon: normalizePageIcon(note.icon)
   };
@@ -1116,6 +1617,7 @@ function normalizeNoteSummary(note: NoteSummary): NoteSummary {
 function normalizeNote(note: Note): Note {
   return {
     ...note,
+    kind: note.kind === "category" ? "category" : "page",
     title: normalizeLegacyTitle(note.title),
     icon: normalizePageIcon(note.icon)
   };
@@ -1128,6 +1630,10 @@ function toSummary(note: Note): NoteSummary {
 
 function updateSummary(notes: NoteSummary[], saved: Note): NoteSummary[] {
   return notes.map((note) => (note.id === saved.id ? normalizeNoteSummary(toSummary(saved)) : note));
+}
+
+function getFirstPageId(notes: NoteSummary[]): string | null {
+  return notes.find((note) => note.kind === "page")?.id ?? null;
 }
 
 function saveLabel(status: SaveStatus): string {

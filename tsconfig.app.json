@@ -20,10 +20,12 @@
   "include": [
     "src/App.tsx",
     "src/api.ts",
+    "src/bible.ts",
+    "src/editorSchema.tsx",
     "src/main.tsx",
+    "src/export.ts",
     "src/shared.ts",
     "src/vite-env.d.ts",
     "src/components/**/*.tsx"
   ]
 }
-

@@ -1,4 +1,4 @@
-import type {
+﻿import type {
   AdminUpload,
   AdminUploadUpdateInput,
   AdminUser,
@@ -9,6 +9,7 @@ import type {
   Note,
   NoteBlock,
   NoteCreateInput,
+  NoteKind,
   NoteSummary,
   NoteUpdateInput,
   RegisterInput,
@@ -27,6 +28,7 @@ type DbNoteRow = {
   id: string;
   title: string;
   icon: string;
+  kind: NoteKind;
   parentId: string | null;
   isArchived: number;
   shareToken: string | null;
@@ -82,7 +84,7 @@ type UploadedFormFile = Blob & {
 };
 
 const NOTE_COLUMNS =
-  "id, title, icon, parent_id AS parentId, is_archived AS isArchived, share_token AS shareToken, shared_at AS sharedAt, sort_order AS sortOrder, created_at AS createdAt, updated_at AS updatedAt";
+  "id, title, icon, kind, parent_id AS parentId, is_archived AS isArchived, share_token AS shareToken, shared_at AS sharedAt, sort_order AS sortOrder, created_at AS createdAt, updated_at AS updatedAt";
 
 const SESSION_COOKIE_NAME = "cloud_notes_session";
 const SESSION_TTL_SECONDS = 60 * 60 * 24 * 30;
@@ -467,7 +469,10 @@ async function listNotes(env: Env, userId: string): Promise<Response> {
     `SELECT ${NOTE_COLUMNS}
      FROM notes
      WHERE user_id = ? AND is_archived = 0
-     ORDER BY parent_id IS NOT NULL, sort_order DESC, updated_at DESC`
+     ORDER BY CASE kind WHEN 'category' THEN 0 ELSE 1 END,
+              parent_id IS NOT NULL,
+              sort_order DESC,
+              updated_at DESC`
   )
     .bind(userId)
     .all<DbNoteRow>();
@@ -489,6 +494,7 @@ async function searchNotes(
     `SELECT ${NOTE_COLUMNS}
      FROM notes
      WHERE user_id = ?
+       AND kind = 'page'
        AND is_archived = 0
        AND (title LIKE ? OR content LIKE ?)
      ORDER BY updated_at DESC
@@ -522,7 +528,7 @@ async function getNote(
 
 async function getPublicSharedNote(env: Env, shareToken: string): Promise<Response> {
   const note = await findSharedNoteByToken(env, shareToken);
-  if (!note) {
+  if (!note || cleanNoteKind(note.kind) !== "page") {
     return error("分享页面不存在或已关闭。", 404);
   }
 
@@ -535,32 +541,35 @@ async function createNote(
   userId: string
 ): Promise<Response> {
   const body = await readJson<NoteCreateInput>(request);
+  const kind = cleanNoteKind(body.kind);
   const now = new Date().toISOString();
   const id = crypto.randomUUID();
   const note: Note = {
     id,
-    title: cleanTitle(body.title),
-    icon: cleanIcon(body.icon),
-    parentId: cleanParentId(body.parentId),
+    title: cleanTitle(body.title, kind),
+    icon: cleanIcon(body.icon, kind),
+    kind,
+    parentId: await resolveParentIdForUser(env, userId, kind, body.parentId),
     isArchived: false,
     shareToken: null,
     sharedAt: null,
     sortOrder: Date.now(),
     createdAt: now,
     updatedAt: now,
-    content: normalizeBlocks(body.content)
+    content: kind === "category" ? [] : normalizeBlocks(body.content)
   };
 
   await env.DB.prepare(
     `INSERT INTO notes
-       (id, user_id, title, icon, parent_id, content, is_archived, sort_order, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?, ?)`
+       (id, user_id, title, icon, kind, parent_id, content, is_archived, sort_order, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?)`
   )
     .bind(
       note.id,
       userId,
       note.title,
       note.icon,
+      note.kind,
       note.parentId,
       JSON.stringify(note.content),
       note.sortOrder,
@@ -594,14 +603,32 @@ async function updateNote(
   const currentContent = parseBlocks(current.content);
   const next: Note = {
     ...rowToNote(current),
-    title: body.title === undefined ? current.title : cleanTitle(body.title),
-    icon: body.icon === undefined ? current.icon : cleanIcon(body.icon),
+    title:
+      body.title === undefined
+        ? current.title
+        : cleanTitle(body.title, cleanNoteKind(current.kind)),
+    icon:
+      body.icon === undefined
+        ? current.icon
+        : cleanIcon(body.icon, cleanNoteKind(current.kind)),
     parentId:
-      body.parentId === undefined ? current.parentId : cleanParentId(body.parentId),
+      body.parentId === undefined
+        ? current.parentId
+        : await resolveParentIdForUser(
+            env,
+            userId,
+            cleanNoteKind(current.kind),
+            body.parentId,
+            current.id
+          ),
     isArchived:
       body.isArchived === undefined ? Boolean(current.isArchived) : body.isArchived,
     content:
-      body.content === undefined ? currentContent : normalizeBlocks(body.content),
+      cleanNoteKind(current.kind) === "category"
+        ? []
+        : body.content === undefined
+          ? currentContent
+          : normalizeBlocks(body.content),
     updatedAt: new Date().toISOString()
   };
 
@@ -627,7 +654,14 @@ async function updateNote(
     )
     .run();
 
-  await cleanupRemovedUploadsForUser(env, userId, currentContent, next.isArchived ? [] : next.content);
+  if (cleanNoteKind(current.kind) === "page") {
+    await cleanupRemovedUploadsForUser(
+      env,
+      userId,
+      currentContent,
+      next.isArchived ? [] : next.content
+    );
+  }
 
   return json(next);
 }
@@ -647,6 +681,10 @@ async function enableNoteShare(
 
   if (!current) {
     return error("页面不存在。", 404);
+  }
+
+  if (cleanNoteKind(current.kind) !== "page") {
+    return error("分类不支持共享。", 400);
   }
 
   const shareToken = current.shareToken || generateRandomToken(18);
@@ -684,6 +722,10 @@ async function disableNoteShare(
     return error("页面不存在。", 404);
   }
 
+  if (cleanNoteKind(current.kind) !== "page") {
+    return error("分类不支持共享。", 400);
+  }
+
   await env.DB.prepare(
     "UPDATE notes SET share_token = NULL, shared_at = NULL, updated_at = ? WHERE id = ? AND user_id = ?"
   )
@@ -716,13 +758,25 @@ async function archiveNote(
     return error("页面不存在。", 404);
   }
 
+  if (cleanNoteKind(current.kind) === "category") {
+    await env.DB.prepare(
+      `UPDATE notes
+       SET parent_id = NULL, updated_at = ?
+       WHERE user_id = ? AND parent_id = ? AND is_archived = 0`
+    )
+      .bind(new Date().toISOString(), userId, id)
+      .run();
+  }
+
   await env.DB.prepare(
     "UPDATE notes SET is_archived = 1, updated_at = ? WHERE id = ? AND user_id = ?"
   )
     .bind(new Date().toISOString(), id, userId)
     .run();
 
-  await cleanupRemovedUploadsForUser(env, userId, parseBlocks(current.content), []);
+  if (cleanNoteKind(current.kind) === "page") {
+    await cleanupRemovedUploadsForUser(env, userId, parseBlocks(current.content), []);
+  }
 
   return json({ ok: true });
 }
@@ -1219,6 +1273,7 @@ function rowToSummary(row: DbNoteRow): NoteSummary {
     id: row.id,
     title: row.title,
     icon: row.icon,
+    kind: cleanNoteKind(row.kind),
     parentId: row.parentId,
     isArchived: Boolean(row.isArchived),
     shareToken: row.shareToken ?? null,
@@ -1285,21 +1340,27 @@ function normalizeBlocks(value: unknown): NoteBlock[] {
     : [];
 }
 
-function cleanTitle(value: unknown): string {
+function cleanTitle(value: unknown, kind: NoteKind = "page"): string {
+  const fallbackTitle = kind === "category" ? "未命名分类" : "未命名";
   if (typeof value !== "string") {
-    return "未命名";
+    return fallbackTitle;
   }
 
   const title = value.trim().slice(0, 120);
-  return title || "未命名";
+  return title || fallbackTitle;
 }
 
-function cleanIcon(value: unknown): string {
+function cleanIcon(value: unknown, kind: NoteKind = "page"): string {
+  const fallbackIcon = kind === "category" ? "📁" : "📝";
   if (typeof value !== "string") {
-    return "📝";
+    return fallbackIcon;
   }
 
-  return value.trim().slice(0, 16) || "📝";
+  return value.trim().slice(0, 16) || fallbackIcon;
+}
+
+function cleanNoteKind(value: unknown): NoteKind {
+  return value === "category" ? "category" : "page";
 }
 
 function cleanParentId(value: unknown): string | null {
@@ -1309,6 +1370,33 @@ function cleanParentId(value: unknown): string | null {
 
   const parentId = value.trim();
   return parentId ? parentId.slice(0, 80) : null;
+}
+
+async function resolveParentIdForUser(
+  env: Env,
+  userId: string,
+  kind: NoteKind,
+  value: unknown,
+  noteId?: string
+): Promise<string | null> {
+  const parentId = cleanParentId(value);
+  if (!parentId || kind === "category" || parentId === noteId) {
+    return null;
+  }
+
+  const parent = await env.DB.prepare(
+    `SELECT id, kind
+     FROM notes
+     WHERE id = ? AND user_id = ? AND is_archived = 0`
+  )
+    .bind(parentId, userId)
+    .first<{ id: string; kind: NoteKind }>();
+
+  if (!parent || cleanNoteKind(parent.kind) !== "category") {
+    return null;
+  }
+
+  return parent.id;
 }
 
 function cleanUsername(value: unknown): string {
@@ -2059,3 +2147,4 @@ type ByteRange = {
   end: number;
   length: number;
 };
+

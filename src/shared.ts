@@ -1,5 +1,7 @@
 export type NoteBlock = Record<string, unknown>;
 
+export type NoteKind = "page" | "category";
+
 export type AuthUser = {
   id: string;
   username: string;
@@ -10,6 +12,7 @@ export type NoteSummary = {
   id: string;
   title: string;
   icon: string;
+  kind: NoteKind;
   parentId: string | null;
   isArchived: boolean;
   shareToken: string | null;
@@ -26,6 +29,7 @@ export type Note = NoteSummary & {
 export type NoteCreateInput = {
   title?: string;
   icon?: string;
+  kind?: NoteKind;
   parentId?: string | null;
   content?: NoteBlock[];
 };
