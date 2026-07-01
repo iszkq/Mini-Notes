@@ -46,7 +46,9 @@ pnpm wrangler login
 pnpm db:create
 ```
 
-执行后会返回一个 `database_id`，把它填进 `wrangler.jsonc`：
+执行后会返回一个 `database_id`。
+
+你可以直接把它填进 `wrangler.jsonc`：
 
 ```json
 "d1_databases": [
@@ -59,13 +61,28 @@ pnpm db:create
 ]
 ```
 
+也可以不改仓库文件，改成部署前设置环境变量：
+
+```powershell
+$env:CLOUDFLARE_D1_DATABASE_ID="这里换成你的真实 database_id"
+```
+
 ### 2. 创建 R2 Bucket
 
 ```bash
 pnpm wrangler r2 bucket create mini-notes-files
 ```
 
-如果你想改成自己的桶名，也可以。改了以后，要同步修改 `wrangler.jsonc`：
+如果你想改成自己的桶名，也可以。改了以后，可以二选一：
+
+- 直接同步修改 `wrangler.jsonc`
+- 或者部署前设置环境变量 `CLOUDFLARE_R2_BUCKET_NAME`
+
+```powershell
+$env:CLOUDFLARE_R2_BUCKET_NAME="你的 bucket 名"
+```
+
+如果你选择直接改文件，对应配置如下：
 
 ```json
 "r2_buckets": [
@@ -130,6 +147,14 @@ wrangler deploy
 
 - `CLOUDFLARE_API_TOKEN`
 - `CLOUDFLARE_ACCOUNT_ID`
+
+再新增这个仓库变量：
+
+- `CLOUDFLARE_D1_DATABASE_ID`
+
+如果你把 R2 桶名改掉了，再补一个可选变量：
+
+- `CLOUDFLARE_R2_BUCKET_NAME`
 
 ### 3. Cloudflare API Token 权限建议
 
@@ -227,6 +252,7 @@ mini_notes
 如果你启用了 GitHub 自动部署，还要确认：
 
 - GitHub Secrets 已配置
+- GitHub Variables 里的 `CLOUDFLARE_D1_DATABASE_ID` 已配置
 - 默认分支名和工作流配置一致
 - 首次手动部署至少成功过一次
 

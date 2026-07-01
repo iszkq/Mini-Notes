@@ -55,9 +55,15 @@ pnpm db:create
 pnpm wrangler r2 bucket create mini-notes-files
 ```
 
-4. 把 D1 的 `database_id` 填到 [wrangler.jsonc](/C:/Users/Administrator/Desktop/note/wrangler.jsonc)。
+4. 二选一配置 D1 的 `database_id`：
 
-5. 如果你想换 R2 Bucket 名字，同步修改 [wrangler.jsonc](/C:/Users/Administrator/Desktop/note/wrangler.jsonc) 里的 `bucket_name` 和 `preview_bucket_name`。
+   - 直接填到 [wrangler.jsonc](/C:/Users/Administrator/Desktop/note/wrangler.jsonc)
+   - 或者部署前设置环境变量 `CLOUDFLARE_D1_DATABASE_ID`
+
+5. 如果你想换 R2 Bucket 名字，也有两种方式：
+
+   - 直接修改 [wrangler.jsonc](/C:/Users/Administrator/Desktop/note/wrangler.jsonc) 里的 `bucket_name` 和 `preview_bucket_name`
+   - 或者部署前设置环境变量 `CLOUDFLARE_R2_BUCKET_NAME`
 
 6. 执行数据库迁移。
 
