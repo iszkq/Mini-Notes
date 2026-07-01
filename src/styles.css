@@ -1108,28 +1108,6 @@ button:disabled {
     #f8f5ee;
 }
 
-.public-topbar {
-  position: sticky;
-  top: 0;
-  z-index: 10;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 16px;
-  padding: 16px 22px;
-  border-bottom: 1px solid rgba(225, 219, 206, 0.88);
-  background: rgba(248, 245, 238, 0.88);
-  backdrop-filter: blur(16px);
-}
-
-.brand-row-public {
-  padding: 0;
-}
-
-.public-home-link {
-  white-space: nowrap;
-}
-
 .public-page {
   width: min(100%, 980px);
   margin: 0 auto;
@@ -1170,33 +1148,11 @@ button:disabled {
   min-width: 0;
 }
 
-.public-note-badge {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  min-height: 28px;
-  padding: 0 10px;
-  border-radius: 999px;
-  color: #246569;
-  background: #edf8f5;
-  font-size: 0.76rem;
-  font-weight: 800;
-}
-
 .public-note-copy h1 {
   margin: 14px 0 10px;
   color: #1f1f1a;
   font-size: clamp(2.4rem, 5vw, 4rem);
   line-height: 1.04;
-}
-
-.public-meta {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 12px;
-  color: #6f6b62;
-  font-size: 0.84rem;
-  font-weight: 600;
 }
 
 .public-empty {
@@ -1902,10 +1858,6 @@ button:disabled {
 
   .sidebar-view-toggle {
     gap: 6px;
-  }
-
-  .public-topbar {
-    padding: 14px;
   }
 
   .public-page {

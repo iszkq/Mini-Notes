@@ -3,6 +3,7 @@ import { Download, Search, X } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
 import type { NoteSummary } from "../shared";
+import { NoteIcon } from "./NoteIcon";
 
 type ExportPanelProps = {
   notes: NoteSummary[];
@@ -134,7 +135,7 @@ export function ExportPanel({
                     onChange={() => onToggleNote(note.id)}
                     type="checkbox"
                   />
-                  <span className="note-icon export-note-icon">{note.icon}</span>
+                  <NoteIcon className="note-icon export-note-icon" icon={note.icon} />
                   <span className="export-note-copy">
                     <strong>{note.title}</strong>
                     <small>更新于 {formatNoteTime(note.updatedAt)}</small>

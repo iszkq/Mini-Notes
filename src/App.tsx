@@ -26,6 +26,7 @@ import {
   WifiOff
 } from "lucide-react";
 import {
+  Fragment,
   type CSSProperties,
   type DragEvent as ReactDragEvent,
   type FormEvent,
@@ -53,8 +54,11 @@ import {
   updateNote
 } from "./api";
 import { AdminPanel } from "./components/AdminPanel";
+import { EmojiPackPicker } from "./components/EmojiPackPicker";
 import { ExportPanel } from "./components/ExportPanel";
+import { NoteIcon } from "./components/NoteIcon";
 import { NotebookEditor } from "./components/NotebookEditor";
+import { isImageIcon, type EmojiItem } from "./emojiPacks";
 import { openExportWindow, renderNotesToExportWindow } from "./export";
 import type { AuthUser, Note, NoteBlock, NoteSummary } from "./shared";
 
@@ -69,6 +73,12 @@ type PagePreset = {
 
 type CategoryActionMenu = {
   categoryId: string;
+  left: number;
+  top: number;
+};
+
+type PageActionMenu = {
+  noteId: string;
   left: number;
   top: number;
 };
@@ -158,6 +168,8 @@ function App() {
   const [sharePanelStyle, setSharePanelStyle] = useState<CSSProperties>({});
   const [categoryMenuOpen, setCategoryMenuOpen] = useState(false);
   const [categoryActionMenu, setCategoryActionMenu] = useState<CategoryActionMenu | null>(null);
+  const [pageActionMenu, setPageActionMenu] = useState<PageActionMenu | null>(null);
+  const [pageIconPickerTargetId, setPageIconPickerTargetId] = useState<string | null>(null);
   const [draggedNoteId, setDraggedNoteId] = useState<string | null>(null);
   const [dropTarget, setDropTarget] = useState<NoteDropTarget | null>(null);
   const isAdminView = workspaceView === "admin" && Boolean(sessionUser?.isAdmin);
@@ -178,6 +190,7 @@ function App() {
     setSelectedId(null);
     setShareOpen(false);
     setShareCopied(false);
+    setPageActionMenu(null);
     setExportOpen(false);
     setExportPending(false);
     setExportSelection([]);
@@ -186,6 +199,8 @@ function App() {
     setEditingCategoryId(null);
     setEditingCategoryTitle("");
     setCategoryActionMenu(null);
+    setPageActionMenu(null);
+    setPageIconPickerTargetId(null);
     setDraggedNoteId(null);
     setDropTarget(null);
   }, []);
@@ -324,12 +339,14 @@ function App() {
       setExportOpen(false);
       setCategoryMenuOpen(false);
       setCategoryActionMenu(null);
+      setPageActionMenu(null);
     }
   }, [workspaceView]);
 
   useEffect(() => {
     setCategoryMenuOpen(false);
     setCategoryActionMenu(null);
+    setPageActionMenu(null);
   }, [draft?.id, isAdminView]);
 
   useEffect(() => {
@@ -393,6 +410,16 @@ function App() {
   const contextCategory = useMemo(
     () => categories.find((category) => category.id === categoryActionMenu?.categoryId) ?? null,
     [categories, categoryActionMenu?.categoryId]
+  );
+
+  const contextPage = useMemo(
+    () => sortedNotes.find((note) => note.id === pageActionMenu?.noteId) ?? null,
+    [pageActionMenu?.noteId, sortedNotes]
+  );
+
+  const iconPickerTarget = useMemo(
+    () => sortedNotes.find((note) => note.id === pageIconPickerTargetId) ?? null,
+    [pageIconPickerTargetId, sortedNotes]
   );
 
   const visibleNotes = useMemo(() => {
@@ -491,6 +518,30 @@ function App() {
 
     return () => window.clearTimeout(handle);
   }, [dirty, draft, isLocked, saveDraft]);
+
+  useEffect(() => {
+    if (isLocked || isPublicView || isAdminView) {
+      return;
+    }
+
+    const handleKeydown = (event: KeyboardEvent) => {
+      if (!(event.ctrlKey || event.metaKey) || event.shiftKey || event.altKey) {
+        return;
+      }
+
+      if (event.key.toLowerCase() !== "s") {
+        return;
+      }
+
+      event.preventDefault();
+      if (draft && dirty) {
+        void saveDraft(draft, revisionRef.current);
+      }
+    };
+
+    window.addEventListener("keydown", handleKeydown);
+    return () => window.removeEventListener("keydown", handleKeydown);
+  }, [dirty, draft, isAdminView, isLocked, isPublicView, saveDraft]);
 
   const editDraft = useCallback((patch: Partial<Note>) => {
     revisionRef.current += 1;
@@ -635,6 +686,33 @@ function App() {
     [calculateDropSortOrder, draggedNoteId, handleLoggedOut, hasUsers, notes]
   );
 
+  const getNoteDropTarget = useCallback(
+    (event: ReactDragEvent<HTMLElement>, note: NoteSummary): NoteDropTarget | null => {
+      if (!draggedNoteId || draggedNoteId === note.id) {
+        return null;
+      }
+
+      const parentId = note.parentId ?? null;
+      const siblings = sortedNotes.filter(
+        (item) => item.id !== draggedNoteId && (item.parentId ?? null) === parentId
+      );
+      const hoveredIndex = siblings.findIndex((item) => item.id === note.id);
+      if (hoveredIndex < 0) {
+        return null;
+      }
+
+      const bounds = event.currentTarget.getBoundingClientRect();
+      const insertBeforeHovered = event.clientY < bounds.top + bounds.height / 2;
+      const insertionIndex = insertBeforeHovered ? hoveredIndex : hoveredIndex + 1;
+
+      return {
+        parentId,
+        beforeId: siblings[insertionIndex]?.id ?? null
+      };
+    },
+    [draggedNoteId, sortedNotes]
+  );
+
   const handleNoteDragStart = (
     event: ReactDragEvent<HTMLButtonElement>,
     note: NoteSummary
@@ -648,6 +726,7 @@ function App() {
     setDropTarget(null);
     event.dataTransfer.effectAllowed = "move";
     event.dataTransfer.setData("text/plain", note.id);
+    setNoteDragImage(event, note);
   };
 
   const handleDragEnd = () => {
@@ -659,14 +738,15 @@ function App() {
     event: ReactDragEvent<HTMLElement>,
     note: NoteSummary
   ) => {
-    if (!draggedNoteId || draggedNoteId === note.id) {
+    const nextTarget = getNoteDropTarget(event, note);
+    if (!nextTarget) {
       return;
     }
 
     event.preventDefault();
     event.stopPropagation();
     event.dataTransfer.dropEffect = "move";
-    setDropTarget({ parentId: note.parentId ?? null, beforeId: note.id });
+    setDropTarget(nextTarget);
   };
 
   const handleNoteDrop = (
@@ -675,7 +755,11 @@ function App() {
   ) => {
     event.preventDefault();
     event.stopPropagation();
-    void moveDraggedNote(note.parentId ?? null, note.id);
+    const nextTarget = getNoteDropTarget(event, note) ?? {
+      parentId: note.parentId ?? null,
+      beforeId: note.id
+    };
+    void moveDraggedNote(nextTarget.parentId, nextTarget.beforeId);
   };
 
   const handleGroupDragOver = (
@@ -702,6 +786,14 @@ function App() {
     event.preventDefault();
     event.stopPropagation();
     void moveDraggedNote(parentId, null);
+  };
+
+  const renderDropPlaceholder = (parentId: string | null, beforeId: string | null, nested = false) => {
+    if (!draggedNoteId || dropTarget?.parentId !== parentId || dropTarget.beforeId !== beforeId) {
+      return null;
+    }
+
+    return <div aria-hidden="true" className={clsx("note-drop-placeholder", nested && "nested")} />;
   };
 
   const createNewNote = useCallback(async (parentId: string | null = null) => {
@@ -908,6 +1000,32 @@ function App() {
       : event.clientY;
 
     setCategoryActionMenu({ categoryId: category.id, left, top });
+    setPageActionMenu(null);
+  };
+
+  const openPageActionMenu = (
+    event: ReactMouseEvent<HTMLButtonElement>,
+    note: NoteSummary
+  ) => {
+    event.preventDefault();
+    event.stopPropagation();
+
+    const menuWidth = 220;
+    const menuHeight = Math.min(420, 196 + categories.length * 38);
+    const viewportWidth = typeof window === "undefined" ? 0 : window.innerWidth;
+    const viewportHeight = typeof window === "undefined" ? 0 : window.innerHeight;
+    const left = viewportWidth
+      ? Math.max(12, Math.min(event.clientX, Math.max(12, viewportWidth - menuWidth - 12)))
+      : event.clientX;
+    const top = viewportHeight
+      ? Math.max(12, Math.min(event.clientY, Math.max(12, viewportHeight - menuHeight - 12)))
+      : event.clientY;
+
+    setPageActionMenu({ noteId: note.id, left, top });
+    setCategoryActionMenu(null);
+    setCategoryMenuOpen(false);
+    setShareOpen(false);
+    setShareCopied(false);
   };
 
   const startCategoryEdit = (category: NoteSummary) => {
@@ -1064,11 +1182,7 @@ function App() {
     setExportSelection([]);
   };
 
-  const exportSelectedNotesAsPdf = async () => {
-    const orderedIds = sortedNotes
-      .filter((note) => exportSelection.includes(note.id))
-      .map((note) => note.id);
-
+  const exportNotesAsPdf = async (orderedIds: string[]) => {
     if (orderedIds.length === 0) {
       setAppError("请先勾选要导出的页面。");
       return;
@@ -1109,6 +1223,121 @@ function App() {
       }
     } finally {
       setExportPending(false);
+    }
+  };
+
+  const exportSelectedNotesAsPdf = async () => {
+    const orderedIds = sortedNotes
+      .filter((note) => exportSelection.includes(note.id))
+      .map((note) => note.id);
+
+    await exportNotesAsPdf(orderedIds);
+  };
+
+  const updatePageIcon = async (noteId: string, icon: string) => {
+    setPageActionMenu(null);
+    setPageIconPickerTargetId(null);
+
+    if (draft?.id === noteId) {
+      editDraft({ icon });
+      return;
+    }
+
+    try {
+      const saved = normalizeNote(await updateNote(noteId, { icon }));
+      setNotes((current) => updateSummary(current, saved));
+    } catch (error) {
+      if (error instanceof ApiError && error.status === 401) {
+        handleLoggedOut(hasUsers);
+        setAppError("登录状态已失效，请重新登录。");
+      } else if (error instanceof ApiError) {
+        setAppError(error.message);
+      } else {
+        setAppError("页面图标保存失败。");
+      }
+    }
+  };
+
+  const movePageToCategory = async (noteId: string, parentId: string | null) => {
+    setPageActionMenu(null);
+
+    if (draft?.id === noteId) {
+      editDraft({ parentId });
+      return;
+    }
+
+    try {
+      const saved = normalizeNote(await updateNote(noteId, { parentId }));
+      setNotes((current) => updateSummary(current, saved));
+    } catch (error) {
+      if (error instanceof ApiError && error.status === 401) {
+        handleLoggedOut(hasUsers);
+        setAppError("登录状态已失效，请重新登录。");
+      } else if (error instanceof ApiError) {
+        setAppError(error.message);
+      } else {
+        setAppError("页面分类保存失败。");
+      }
+    }
+  };
+
+  const togglePageShare = async (note: NoteSummary) => {
+    setPageActionMenu(null);
+    setSharePending(true);
+    setAppError(null);
+
+    try {
+      const saved = normalizeNote(
+        note.shareToken ? await disableShare(note.id) : await enableShare(note.id)
+      );
+      setNotes((current) => updateSummary(current, saved));
+      if (draft?.id === saved.id) {
+        setDraft(saved);
+        setShareCopied(false);
+      }
+    } catch (error) {
+      if (error instanceof ApiError && error.status === 401) {
+        handleLoggedOut(hasUsers);
+        setAppError("登录状态已失效，请重新登录。");
+      } else if (error instanceof ApiError) {
+        setAppError(error.message);
+      } else {
+        setAppError("共享状态更新失败。");
+      }
+    } finally {
+      setSharePending(false);
+    }
+  };
+
+  const archivePage = async (note: NoteSummary) => {
+    setPageActionMenu(null);
+
+    try {
+      await deleteNote(note.id);
+      const remaining = notes.filter((item) => item.id !== note.id);
+      setNotes(remaining);
+
+      if (selectedIdRef.current === note.id) {
+        setDraft(null);
+        setSelectedId(null);
+        setShareOpen(false);
+        setShareCopied(false);
+        setExportOpen(false);
+
+        const nextId = getFirstPageId(remaining);
+        if (nextId) {
+          await loadNote(nextId);
+        }
+      }
+    } catch (error) {
+      if (error instanceof ApiError && error.status === 401) {
+        handleLoggedOut(hasUsers);
+        setAppError("登录状态已失效，请重新登录。");
+      } else if (error instanceof ApiError) {
+        setAppError(error.message);
+      } else {
+        setAppError("页面归档失败。");
+      }
     }
   };
 
@@ -1264,6 +1493,107 @@ function App() {
         )
       : null;
 
+  const pageActionPanel =
+    pageActionMenu && contextPage && typeof document !== "undefined"
+      ? createPortal(
+          <>
+            <button
+              aria-label="关闭页面操作菜单"
+              className="category-context-backdrop"
+              onClick={() => setPageActionMenu(null)}
+              onContextMenu={(event) => {
+                event.preventDefault();
+                setPageActionMenu(null);
+              }}
+              type="button"
+            />
+            <div
+              aria-label={`${contextPage.title} 页面操作`}
+              className="category-context-menu page-context-menu"
+              role="menu"
+              style={{
+                left: `${pageActionMenu.left}px`,
+                top: `${pageActionMenu.top}px`
+              }}
+            >
+              <button
+                className="category-context-menu__item"
+                onClick={() => {
+                  setPageIconPickerTargetId(contextPage.id);
+                  setPageActionMenu(null);
+                }}
+                role="menuitem"
+                type="button"
+              >
+                <Pencil size={15} />
+                页面图标
+              </button>
+
+              <div className="page-context-menu__section" role="group" aria-label="分类">
+                <div className="page-context-menu__label">移动到分类</div>
+                <button
+                  className={clsx("category-context-menu__item compact", !contextPage.parentId && "active")}
+                  onClick={() => void movePageToCategory(contextPage.id, null)}
+                  role="menuitem"
+                  type="button"
+                >
+                  <Folder size={15} />
+                  未分类
+                </button>
+                {categories.map((category) => (
+                  <button
+                    className={clsx(
+                      "category-context-menu__item compact",
+                      contextPage.parentId === category.id && "active"
+                    )}
+                    key={category.id}
+                    onClick={() => void movePageToCategory(contextPage.id, category.id)}
+                    role="menuitem"
+                    type="button"
+                  >
+                    <Folder size={15} />
+                    {category.title}
+                  </button>
+                ))}
+              </div>
+
+              <button
+                className="category-context-menu__item"
+                onClick={() => {
+                  setPageActionMenu(null);
+                  void exportNotesAsPdf([contextPage.id]);
+                }}
+                role="menuitem"
+                type="button"
+              >
+                <Download size={15} />
+                导出页面
+              </button>
+              <button
+                className="category-context-menu__item"
+                disabled={sharePending}
+                onClick={() => void togglePageShare(contextPage)}
+                role="menuitem"
+                type="button"
+              >
+                {contextPage.shareToken ? <Globe2 size={15} /> : <Link2 size={15} />}
+                {contextPage.shareToken ? "关闭共享" : "开启共享"}
+              </button>
+              <button
+                className="category-context-menu__item danger"
+                onClick={() => void archivePage(contextPage)}
+                role="menuitem"
+                type="button"
+              >
+                <Archive size={15} />
+                归档页面
+              </button>
+            </div>
+          </>,
+          document.body
+        )
+      : null;
+
   const exportPanel = (
     <ExportPanel
       notes={sortedNotes}
@@ -1276,6 +1606,20 @@ function App() {
       open={exportOpen}
       pending={exportPending}
       selectedIds={exportSelection}
+    />
+  );
+
+  const pageIconPicker = (
+    <EmojiPackPicker
+      confirmLabel="设为页面图标"
+      onClose={() => setPageIconPickerTargetId(null)}
+      onSelect={(item: EmojiItem) => {
+        if (pageIconPickerTargetId) {
+          void updatePageIcon(pageIconPickerTargetId, item.url);
+        }
+      }}
+      open={Boolean(pageIconPickerTargetId && iconPickerTarget)}
+      title="选择页面图标"
     />
   );
 
@@ -1292,20 +1636,6 @@ function App() {
     if (publicError || !publicNote) {
       return (
         <main className="public-shell">
-          <header className="public-topbar">
-            <div className="brand-row brand-row-public">
-              <div className="brand-mark">MN</div>
-              <div>
-                <strong>Mini Notes</strong>
-                <span>公开分享</span>
-              </div>
-            </div>
-            <a className="toolbar-button public-home-link" href="/">
-              打开首页
-              <ExternalLink size={16} />
-            </a>
-          </header>
-
           <section className="public-page">
             <div className="public-empty">
               <Globe2 size={22} />
@@ -1319,36 +1649,12 @@ function App() {
 
     return (
       <main className="public-shell">
-        <header className="public-topbar">
-          <div className="brand-row brand-row-public">
-            <div className="brand-mark">MN</div>
-            <div>
-              <strong>Mini Notes</strong>
-              <span>公开分享</span>
-            </div>
-          </div>
-          <a className="toolbar-button public-home-link" href="/">
-            打开首页
-            <ExternalLink size={16} />
-          </a>
-        </header>
-
         <section className="public-page">
           <article className="public-note">
             <div className="public-note-head">
-              <div className="public-note-icon">{normalizePageIcon(publicNote.icon)}</div>
+              <NoteIcon className="public-note-icon" icon={normalizePageIcon(publicNote.icon)} />
               <div className="public-note-copy">
-                <span className="public-note-badge">
-                  <Globe2 size={14} />
-                  公开分享
-                </span>
                 <h1>{publicNote.title}</h1>
-                <div className="public-meta">
-                  <span>最后更新：{formatDateTime(publicNote.updatedAt)}</span>
-                  {publicNote.sharedAt ? (
-                    <span>开启分享：{formatDateTime(publicNote.sharedAt)}</span>
-                  ) : null}
-                </div>
               </div>
             </div>
 
@@ -1609,9 +1915,10 @@ function App() {
               className={clsx("note-row", note.id === selectedId && "active")}
               key={note.id}
               onClick={() => void selectNote(note.id)}
+              onContextMenu={(event) => openPageActionMenu(event, note)}
               type="button"
             >
-              <span className="note-icon">{normalizePageIcon(note.icon)}</span>
+              <NoteIcon icon={normalizePageIcon(note.icon)} />
               <span className="note-row-text">
                 <strong>{note.title}</strong>
                 <span className="note-row-subline">
@@ -1633,23 +1940,24 @@ function App() {
                 >
                   <div className="note-group-title">未分类</div>
                   {uncategorizedNotes.length > 0 ? uncategorizedNotes.map((note) => (
+                    <Fragment key={note.id}>
+                    {renderDropPlaceholder(null, note.id)}
                     <button
                       className={clsx(
                         "note-row",
                         note.id === selectedId && "active",
-                        draggedNoteId === note.id && "dragging",
-                        dropTarget?.beforeId === note.id && "drop-before"
+                        draggedNoteId === note.id && "dragging"
                       )}
                       draggable={!query.trim()}
                       onDragEnd={handleDragEnd}
                       onDragOver={(event) => handleNoteDragOver(event, note)}
                       onDragStart={(event) => handleNoteDragStart(event, note)}
                       onDrop={(event) => handleNoteDrop(event, note)}
-                      key={note.id}
                       onClick={() => void selectNote(note.id)}
+                      onContextMenu={(event) => openPageActionMenu(event, note)}
                       type="button"
                     >
-                      <span className="note-icon">{normalizePageIcon(note.icon)}</span>
+                      <NoteIcon icon={normalizePageIcon(note.icon)} />
                       <span className="note-row-text">
                         <strong>{note.title}</strong>
                         <span className="note-row-subline">
@@ -1658,9 +1966,11 @@ function App() {
                         </span>
                       </span>
                     </button>
+                    </Fragment>
                   )) : (
                     <div className="category-empty">拖到这里移出分类</div>
                   )}
+                  {renderDropPlaceholder(null, null)}
                 </div>
               ) : null}
 
@@ -1741,23 +2051,24 @@ function App() {
                       >
                         {categoryNotes.length > 0 ? (
                           categoryNotes.map((note) => (
+                            <Fragment key={note.id}>
+                            {renderDropPlaceholder(category.id, note.id, true)}
                             <button
                               className={clsx(
                                 "note-row nested",
                                 note.id === selectedId && "active",
-                                draggedNoteId === note.id && "dragging",
-                                dropTarget?.beforeId === note.id && "drop-before"
+                                draggedNoteId === note.id && "dragging"
                               )}
                               draggable={!query.trim()}
                               onDragEnd={handleDragEnd}
                               onDragOver={(event) => handleNoteDragOver(event, note)}
                               onDragStart={(event) => handleNoteDragStart(event, note)}
                               onDrop={(event) => handleNoteDrop(event, note)}
-                              key={note.id}
                               onClick={() => void selectNote(note.id)}
+                              onContextMenu={(event) => openPageActionMenu(event, note)}
                               type="button"
                             >
-                              <span className="note-icon">{normalizePageIcon(note.icon)}</span>
+                              <NoteIcon icon={normalizePageIcon(note.icon)} />
                               <span className="note-row-text">
                                 <strong>{note.title}</strong>
                                 <span className="note-row-subline">
@@ -1766,10 +2077,12 @@ function App() {
                                 </span>
                               </span>
                             </button>
+                            </Fragment>
                           ))
                         ) : (
                           <div className="category-empty">这个分类下还没有页面</div>
                         )}
+                        {renderDropPlaceholder(category.id, null, true)}
                       </div>
                     ) : null}
                   </div>
@@ -1948,24 +2261,15 @@ function App() {
         ) : draft && !isLoadingNote ? (
           <article className="page">
             <div className="page-meta">
-              <span className="page-meta-label">页面类型</span>
-              <div aria-label="页面类型" className="icon-picker">
-                {PAGE_PRESETS.map((preset) => (
-                  <button
-                    className={clsx(
-                      "icon-choice",
-                      normalizePageIcon(draft.icon) === preset.value && "selected"
-                    )}
-                    key={preset.value}
-                    onClick={() => editDraft({ icon: preset.value })}
-                    title={preset.label}
-                    type="button"
-                  >
-                    <span className="icon-choice-mark">{preset.value}</span>
-                    <span className="icon-choice-label">{preset.label}</span>
-                  </button>
-                ))}
-              </div>
+              <span className="page-meta-label">页面图标</span>
+              <button
+                className="page-icon-picker-button"
+                onClick={() => setPageIconPickerTargetId(draft.id)}
+                type="button"
+              >
+                <NoteIcon className="page-icon-picker-button__icon" icon={normalizePageIcon(draft.icon)} />
+                <span>更换图标</span>
+              </button>
             </div>
 
             <input
@@ -2002,7 +2306,9 @@ function App() {
         )}
       </section>
       {categoryActionPanel}
+      {pageActionPanel}
       {exportPanel}
+      {pageIconPicker}
     </main>
   );
 }
@@ -2061,6 +2367,42 @@ function compareNoteOrder(a: NoteSummary, b: NoteSummary): number {
   }
 
   return new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime();
+}
+
+function setNoteDragImage(
+  event: ReactDragEvent<HTMLElement>,
+  note: NoteSummary
+): void {
+  if (typeof document === "undefined") {
+    return;
+  }
+
+  const preview = document.createElement("div");
+  preview.className = "note-drag-preview";
+
+  const icon = document.createElement("span");
+  icon.className = "note-drag-preview__icon";
+  const iconValue = normalizePageIcon(note.icon);
+  if (isImageIcon(iconValue)) {
+    const image = document.createElement("img");
+    image.alt = "";
+    image.src = iconValue;
+    icon.appendChild(image);
+  } else {
+    icon.textContent = iconValue;
+  }
+
+  const title = document.createElement("span");
+  title.className = "note-drag-preview__title";
+  title.textContent = note.title;
+
+  preview.append(icon, title);
+  document.body.appendChild(preview);
+  event.dataTransfer.setDragImage(preview, 18, 22);
+
+  window.requestAnimationFrame(() => {
+    preview.remove();
+  });
 }
 
 function getFirstPageId(notes: NoteSummary[]): string | null {

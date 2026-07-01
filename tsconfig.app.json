@@ -21,6 +21,7 @@
     "src/App.tsx",
     "src/api.ts",
     "src/bible.ts",
+    "src/emojiPacks.ts",
     "src/editorSchema.tsx",
     "src/main.tsx",
     "src/export.ts",

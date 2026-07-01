@@ -19,11 +19,15 @@ const bibleVerseCard = createReactBlockSpec(
         default: 0
       }
     },
-    content: "none"
+    content: "inline"
   },
   {
-    render: ({ block, editor }) => {
+    meta: {
+      hardBreakShortcut: "enter"
+    },
+    render: ({ block, editor, contentRef }) => {
       const verses = parseBibleVersePayload(block.props.payload);
+      const hasEditableContent = Array.isArray(block.content) && block.content.length > 0;
       const title = getBibleCardTitle(
         block.props.title,
         block.props.titleEdited,
@@ -68,18 +72,24 @@ const bibleVerseCard = createReactBlockSpec(
             value={title}
           />
           <div className="bible-embed-card__body">
-            {verses.map((verse) => (
-              <p className="bible-embed-card__line" key={verse.id}>
-                <span className="bible-embed-card__ref">{formatBibleReference(verse)}</span>
-                <span>{verse.content}</span>
-              </p>
-            ))}
+            <div className="bible-embed-card__content" ref={contentRef} />
+            {!hasEditableContent ? (
+              <div className="bible-embed-card__fallback">
+                {verses.map((verse) => (
+                  <p className="bible-embed-card__line" key={verse.id}>
+                    <span className="bible-embed-card__ref">{formatBibleReference(verse)}</span>
+                    <span>{verse.content}</span>
+                  </p>
+                ))}
+              </div>
+            ) : null}
           </div>
         </div>
       );
     },
-    toExternalHTML: ({ block }) => {
+    toExternalHTML: ({ block, contentRef }) => {
       const verses = parseBibleVersePayload(block.props.payload);
+      const hasEditableContent = Array.isArray(block.content) && block.content.length > 0;
       const title = getBibleCardTitle(
         block.props.title,
         block.props.titleEdited,
@@ -91,12 +101,17 @@ const bibleVerseCard = createReactBlockSpec(
         <div className="bible-embed-card">
           <div className="bible-embed-card__header">{title}</div>
           <div className="bible-embed-card__body">
-            {verses.map((verse) => (
-              <p className="bible-embed-card__line" key={verse.id}>
-                <span className="bible-embed-card__ref">{formatBibleReference(verse)}</span>
-                <span>{verse.content}</span>
-              </p>
-            ))}
+            <div className="bible-embed-card__content" ref={contentRef} />
+            {!hasEditableContent ? (
+              <div className="bible-embed-card__fallback">
+                {verses.map((verse) => (
+                  <p className="bible-embed-card__line" key={verse.id}>
+                    <span className="bible-embed-card__ref">{formatBibleReference(verse)}</span>
+                    <span>{verse.content}</span>
+                  </p>
+                ))}
+              </div>
+            ) : null}
           </div>
         </div>
       );

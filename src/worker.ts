@@ -93,6 +93,7 @@ const NOTE_COLUMNS =
   "id, title, icon, kind, parent_id AS parentId, is_archived AS isArchived, share_token AS shareToken, shared_at AS sharedAt, sort_order AS sortOrder, created_at AS createdAt, updated_at AS updatedAt";
 
 let bibleDataPromise: Promise<BibleData> | null = null;
+let emojiIndexPromise: Promise<string> | null = null;
 
 const SESSION_COOKIE_NAME = "cloud_notes_session";
 const SESSION_TTL_SECONDS = 60 * 60 * 24 * 30;
@@ -211,6 +212,10 @@ async function handleApi(
 
     if (segments[0] === "bible" && segments[1] === "search" && request.method === "GET") {
       return searchBible(request, env, url);
+    }
+
+    if (segments[0] === "emoji-index" && request.method === "GET") {
+      return getEmojiIndex();
     }
 
     if (segments[0] === "notes" && request.method === "GET" && !segments[1]) {
@@ -441,6 +446,30 @@ function bibleCacheHeaders(): HeadersInit {
   return {
     "Cache-Control": "public, max-age=3600"
   };
+}
+
+async function getEmojiIndex(): Promise<Response> {
+  if (!emojiIndexPromise) {
+    emojiIndexPromise = fetch("https://image.527012.xyz/index.json")
+      .then(async (response) => {
+        if (!response.ok) {
+          throw new Error(`Emoji index failed to load: ${response.status}`);
+        }
+
+        return response.text();
+      })
+      .catch((cause) => {
+        emojiIndexPromise = null;
+        throw cause;
+      });
+  }
+
+  return new Response(await emojiIndexPromise, {
+    headers: {
+      "Cache-Control": "public, max-age=3600",
+      "Content-Type": "application/json; charset=utf-8"
+    }
+  });
 }
 
 async function registerUser(request: Request, env: Env): Promise<Response> {
@@ -1473,7 +1502,16 @@ function cleanIcon(value: unknown, kind: NoteKind = "page"): string {
     return fallbackIcon;
   }
 
-  return value.trim().slice(0, 16) || fallbackIcon;
+  const icon = value.trim();
+  if (!icon) {
+    return fallbackIcon;
+  }
+
+  if (/^https:\/\/image\.527012\.xyz\/.+\.(?:png|jpe?g|gif|webp|avif)(?:[?#].*)?$/i.test(icon)) {
+    return icon.slice(0, 512);
+  }
+
+  return icon.slice(0, 16);
 }
 
 function cleanNoteKind(value: unknown): NoteKind {

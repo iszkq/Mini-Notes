@@ -13,10 +13,17 @@ import {
 import { BookOpen } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { uploadAsset } from "../api";
-import { serializeBibleVerses, type BibleVerse } from "../bible";
+import {
+  formatBibleReference,
+  parseBibleVersePayload,
+  serializeBibleVerses,
+  type BibleVerse
+} from "../bible";
 import { noteSchema } from "../editorSchema";
 import type { Note, NoteBlock } from "../shared";
 import { BibleInsertModal } from "./BibleInsertModal";
+import { EmojiPackPicker } from "./EmojiPackPicker";
+import type { EmojiItem } from "../emojiPacks";
 
 type NotebookEditorProps = {
   note: Note;
@@ -36,9 +43,10 @@ type TextBlock = {
 export function NotebookEditor({ note, onChange, readOnly = false }: NotebookEditorProps) {
   const [bibleModalOpen, setBibleModalOpen] = useState(false);
   const [bibleInsertTarget, setBibleInsertTarget] = useState<BibleInsertTarget | null>(null);
+  const [emojiPickerOpen, setEmojiPickerOpen] = useState(false);
 
   const initialContent = useMemo(() => {
-    return note.content.length > 0 ? (note.content as PartialBlock[]) : undefined;
+    return note.content.length > 0 ? hydrateBibleVerseCards(note.content) : undefined;
   }, [note.id]);
 
   const dictionary = useMemo(
@@ -134,7 +142,8 @@ export function NotebookEditor({ note, onChange, readOnly = false }: NotebookEdi
             payload: serializeBibleVerses(verses),
             title: `经文摘录 · ${verses.length} 节`,
             titleEdited: true
-          }
+          },
+          content: createBibleVerseCardContent(verses)
         },
         {
           type: "paragraph",
@@ -161,6 +170,44 @@ export function NotebookEditor({ note, onChange, readOnly = false }: NotebookEdi
       setBibleInsertTarget(null);
     },
     [bibleInsertTarget, editor]
+  );
+
+  const insertEmojiImage = useCallback(
+    (item: EmojiItem) => {
+      const currentBlock = getCurrentTextBlock();
+      const plainText = getCurrentBlockTextFromDom();
+      const emojiBlock = {
+        type: "image",
+        props: {
+          url: item.url,
+          name: item.name,
+          caption: item.name,
+          showPreview: true,
+          previewWidth: 120
+        }
+      } as PartialBlock;
+      const spacerBlock = {
+        type: "paragraph",
+        content: []
+      } as PartialBlock;
+
+      if (!plainText || plainText.startsWith("/")) {
+        const result = editor.replaceBlocks([currentBlock.id], [emojiBlock, spacerBlock]);
+        const cursorBlock = result.insertedBlocks[1] ?? result.insertedBlocks[0];
+        if (cursorBlock) {
+          editor.setTextCursorPosition(cursorBlock);
+        }
+      } else {
+        const insertedBlocks = editor.insertBlocks([emojiBlock, spacerBlock], currentBlock.id, "after");
+        const cursorBlock = insertedBlocks[1] ?? insertedBlocks[0];
+        if (cursorBlock) {
+          editor.setTextCursorPosition(cursorBlock);
+        }
+      }
+
+      editor.focus();
+    },
+    [editor, getCurrentBlockTextFromDom, getCurrentTextBlock]
   );
 
   useEffect(() => {
@@ -194,7 +241,12 @@ export function NotebookEditor({ note, onChange, readOnly = false }: NotebookEdi
 
   const getSlashMenuItems = useCallback(
     async (query: string): Promise<DefaultReactSuggestionItem[]> => {
-      const defaultItems = getDefaultReactSlashMenuItems(editor);
+      const defaultItems = getDefaultReactSlashMenuItems(editor).filter(
+        (item) =>
+          !item.title.includes("表情") &&
+          !item.subtext?.includes("表情") &&
+          !item.aliases?.some((alias) => ["emoji", "emoticon"].includes(alias.toLowerCase()))
+      );
       const heading3Title = editor.dictionary.slash_menu.heading_3.title;
       const heading3Index = defaultItems.findIndex((item) => item.title === heading3Title);
       const bibleItem: DefaultReactSuggestionItem = {
@@ -206,8 +258,17 @@ export function NotebookEditor({ note, onChange, readOnly = false }: NotebookEdi
         icon: <BookOpen size={18} />,
         onItemClick: openBibleInsertModal
       };
+      const emojiItem: DefaultReactSuggestionItem = {
+        title: "表情符号",
+        subtext: "从表情包插入图片表情",
+        aliases: ["表情", "表情包", "emoji", "emoticon"],
+        group: "其他",
+        icon: <span className="slash-emoji-icon">☻</span>,
+        onItemClick: () => setEmojiPickerOpen(true)
+      };
       const items = [...defaultItems];
       items.splice(heading3Index >= 0 ? heading3Index + 1 : 0, 0, bibleItem);
+      items.push(emojiItem);
 
       return filterSuggestionItems(items, query);
     },
@@ -243,6 +304,71 @@ export function NotebookEditor({ note, onChange, readOnly = false }: NotebookEdi
           open={bibleModalOpen}
         />
       ) : null}
+
+      {!readOnly ? (
+        <EmojiPackPicker
+          onClose={() => setEmojiPickerOpen(false)}
+          onSelect={insertEmojiImage}
+          open={emojiPickerOpen}
+          title="插入表情包"
+        />
+      ) : null}
     </>
   );
+}
+
+function createBibleVerseCardContent(verses: BibleVerse[]) {
+  return verses.flatMap((verse, index) => [
+    ...(index > 0
+      ? [
+          {
+            type: "text",
+            text: "\n",
+            styles: {}
+          }
+        ]
+      : []),
+    {
+      type: "text",
+      text: formatBibleReference(verse),
+      styles: {
+        bold: true,
+        textColor: "#e35d4f"
+      }
+    },
+    {
+      type: "text",
+      text: ` ${verse.content}`,
+      styles: {}
+    }
+  ]);
+}
+
+function hydrateBibleVerseCards(blocks: NoteBlock[]): PartialBlock[] {
+  return blocks.map((block) => {
+    const next = { ...block };
+    const children = next.children;
+
+    if (Array.isArray(children)) {
+      next.children = hydrateBibleVerseCards(children as NoteBlock[]);
+    }
+
+    if (next.type !== "bibleVerseCard" || hasEditableContent(next.content)) {
+      return next as PartialBlock;
+    }
+
+    const props = typeof next.props === "object" && next.props !== null ? next.props : {};
+    const payload = "payload" in props && typeof props.payload === "string" ? props.payload : "";
+    const verses = parseBibleVersePayload(payload);
+
+    if (verses.length > 0) {
+      next.content = createBibleVerseCardContent(verses);
+    }
+
+    return next as PartialBlock;
+  });
+}
+
+function hasEditableContent(content: unknown): boolean {
+  return Array.isArray(content) ? content.length > 0 : typeof content === "string" && content.length > 0;
 }

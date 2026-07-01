@@ -1,4 +1,5 @@
 import { BlockNoteEditor } from "@blocknote/core";
+import { isImageIcon } from "./emojiPacks";
 import { noteSchema } from "./editorSchema";
 import type { Note } from "./shared";
 
@@ -124,7 +125,7 @@ function buildExportDocument(notes: Array<ExportableNote & { html: string }>): s
           </header>
 
           <section class="note-export-title">
-            <span class="note-export-icon">${escapeHtml(note.icon || "📝")}</span>
+            <span class="note-export-icon">${renderExportIcon(note.icon)}</span>
             <div>
               <h1>${escapeHtml(note.title || "未命名")}</h1>
             </div>
@@ -228,10 +229,18 @@ function buildExportDocument(notes: Array<ExportableNote & { html: string }>): s
         display: grid;
         width: 56px;
         height: 56px;
+        overflow: hidden;
         place-items: center;
         border-radius: 16px;
         background: #fff7e9;
         font-size: 1.75rem;
+      }
+
+      .note-export-icon img {
+        display: block;
+        width: 100%;
+        height: 100%;
+        object-fit: contain;
       }
 
       .note-export-title h1 {
@@ -402,7 +411,15 @@ function buildExportDocument(notes: Array<ExportableNote & { html: string }>): s
       });
     </script>
   </body>
-</html>`;
+  </html>`;
+}
+
+function renderExportIcon(icon: string): string {
+  if (isImageIcon(icon)) {
+    return `<img alt="" src="${escapeHtml(icon)}" />`;
+  }
+
+  return escapeHtml(icon || "📝");
 }
 
 function escapeHtml(value: string): string {

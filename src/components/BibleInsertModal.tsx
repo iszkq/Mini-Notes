@@ -207,6 +207,8 @@ export function BibleInsertModal({ open, onClose, onConfirm }: BibleInsertModalP
       ? `共 ${filteredVerses.length} 节 · 第 ${currentPage}/${totalPages} 页`
       : `共 ${filteredVerses.length} 节`;
   }, [currentPage, filteredVerses.length, totalPages]);
+  const isBrowseChapterSwitching =
+    tab === "browse" && chapterLoading && currentChapterVerses.length > 0;
 
   useEffect(() => {
     if (!open) {
@@ -454,9 +456,8 @@ export function BibleInsertModal({ open, onClose, onConfirm }: BibleInsertModalP
     setCurrentCovenant(target.covenant);
     setSelectedBook(target.book);
     setSelectedChapter(target.chapter);
-    setCurrentChapterVerses([]);
     setCurrentPage(1);
-    setBrowseControlsCollapsed(true);
+    setBrowseControlsCollapsed(false);
     setShowJumpInput(false);
   };
 
@@ -553,7 +554,6 @@ export function BibleInsertModal({ open, onClose, onConfirm }: BibleInsertModalP
                         setCurrentCovenant("old");
                         setSelectedBook(nextBook);
                         setSelectedChapter(nextBook ? data?.chaptersByBook[nextBook]?.[0] ?? null : null);
-                        setCurrentChapterVerses([]);
                         setCurrentPage(1);
                         setBrowseControlsCollapsed(false);
                       }}
@@ -568,7 +568,6 @@ export function BibleInsertModal({ open, onClose, onConfirm }: BibleInsertModalP
                         setCurrentCovenant("new");
                         setSelectedBook(nextBook);
                         setSelectedChapter(nextBook ? data?.chaptersByBook[nextBook]?.[0] ?? null : null);
-                        setCurrentChapterVerses([]);
                         setCurrentPage(1);
                         setBrowseControlsCollapsed(false);
                       }}
@@ -600,7 +599,6 @@ export function BibleInsertModal({ open, onClose, onConfirm }: BibleInsertModalP
                             onClick={() => {
                               setSelectedBook(book);
                               setSelectedChapter(data?.chaptersByBook[book]?.[0] ?? null);
-                              setCurrentChapterVerses([]);
                               setCurrentPage(1);
                               setBrowseControlsCollapsed(false);
                             }}
@@ -622,9 +620,8 @@ export function BibleInsertModal({ open, onClose, onConfirm }: BibleInsertModalP
                               key={`${selectedBook}-${chapter}`}
                               onClick={() => {
                                 setSelectedChapter(chapter);
-                                setCurrentChapterVerses([]);
                                 setCurrentPage(1);
-                                setBrowseControlsCollapsed(true);
+                                setBrowseControlsCollapsed(false);
                               }}
                               type="button"
                             >
@@ -819,7 +816,7 @@ export function BibleInsertModal({ open, onClose, onConfirm }: BibleInsertModalP
                 <span className="bp-count">{pageSummary}</span>
                 <button
                   className="bp-button bp-button--light"
-                  disabled={pagedVerses.length === 0}
+                  disabled={pagedVerses.length === 0 || isBrowseChapterSwitching}
                   onClick={() => void copyCurrentPage(pagedVerses, setCopyButtonLabel)}
                   type="button"
                 >
@@ -837,7 +834,9 @@ export function BibleInsertModal({ open, onClose, onConfirm }: BibleInsertModalP
             </div>
 
             {loading ? <div className="bp-state-box">正在加载经文索引...</div> : null}
-            {!loading && chapterLoading ? <div className="bp-state-box">正在加载本章经文...</div> : null}
+            {!loading && chapterLoading && filteredVerses.length === 0 ? (
+              <div className="bp-state-box">正在加载本章经文...</div>
+            ) : null}
             {!loading && searchLoading ? <div className="bp-state-box">正在搜索经文...</div> : null}
             {!loading && !chapterLoading && !searchLoading && error ? (
               <div className="bp-state-box is-error">{error}</div>
@@ -852,9 +851,15 @@ export function BibleInsertModal({ open, onClose, onConfirm }: BibleInsertModalP
               </div>
             ) : null}
 
-            {!loading && !chapterLoading && !searchLoading && !error && filteredVerses.length > 0 ? (
+            {!loading && !searchLoading && !error && filteredVerses.length > 0 ? (
               <>
-                <div className="bp-insert__verse-list">
+                {isBrowseChapterSwitching ? (
+                  <div className="bp-state-box bp-state-box--compact">正在切换章节...</div>
+                ) : null}
+                <div
+                  aria-busy={isBrowseChapterSwitching}
+                  className={clsx("bp-insert__verse-list", isBrowseChapterSwitching && "is-switching")}
+                >
                   {pagedVerses.map((verse) => (
                     <div
                       aria-checked={selectedMap.has(verse.id)}
@@ -865,8 +870,16 @@ export function BibleInsertModal({ open, onClose, onConfirm }: BibleInsertModalP
                       )}
                       data-verse-id={verse.id}
                       key={verse.id}
-                      onClick={() => toggleVerse(verse)}
+                      onClick={() => {
+                        if (!isBrowseChapterSwitching) {
+                          toggleVerse(verse);
+                        }
+                      }}
                       onKeyDown={(event) => {
+                        if (isBrowseChapterSwitching) {
+                          return;
+                        }
+
                         if (event.key === "Enter" || event.key === " ") {
                           event.preventDefault();
                           toggleVerse(verse);
@@ -892,6 +905,7 @@ export function BibleInsertModal({ open, onClose, onConfirm }: BibleInsertModalP
                       {tab === "search" ? (
                         <button
                           className="bp-copy-mini"
+                          disabled={isBrowseChapterSwitching}
                           onClick={(event) => {
                             event.stopPropagation();
                             handleJumpToVerse(verse);
@@ -903,6 +917,7 @@ export function BibleInsertModal({ open, onClose, onConfirm }: BibleInsertModalP
                       ) : (
                         <button
                           className="bp-copy-mini"
+                          disabled={isBrowseChapterSwitching}
                           onClick={(event) => {
                             event.stopPropagation();
                             void copyVerse(verse, copiedVerseId, setCopiedVerseId);
