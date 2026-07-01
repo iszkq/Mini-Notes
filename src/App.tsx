@@ -155,6 +155,7 @@ function App() {
   const [exportOpen, setExportOpen] = useState(false);
   const [exportPending, setExportPending] = useState(false);
   const [exportSelection, setExportSelection] = useState<string[]>([]);
+  const [findReplaceOpen, setFindReplaceOpen] = useState(false);
   const [publicNote, setPublicNote] = useState<Note | null>(null);
   const [publicPending, setPublicPending] = useState(isPublicView);
   const [publicError, setPublicError] = useState<string | null>(null);
@@ -165,6 +166,7 @@ function App() {
   const revisionRef = useRef(0);
   const selectedIdRef = useRef<string | null>(null);
   const shareButtonRef = useRef<HTMLButtonElement | null>(null);
+  const findReplaceButtonRef = useRef<HTMLButtonElement | null>(null);
   const [sharePanelStyle, setSharePanelStyle] = useState<CSSProperties>({});
   const [categoryMenuOpen, setCategoryMenuOpen] = useState(false);
   const [categoryActionMenu, setCategoryActionMenu] = useState<CategoryActionMenu | null>(null);
@@ -337,6 +339,7 @@ function App() {
   useEffect(() => {
     if (workspaceView === "admin") {
       setExportOpen(false);
+      setFindReplaceOpen(false);
       setCategoryMenuOpen(false);
       setCategoryActionMenu(null);
       setPageActionMenu(null);
@@ -347,6 +350,7 @@ function App() {
     setCategoryMenuOpen(false);
     setCategoryActionMenu(null);
     setPageActionMenu(null);
+    setFindReplaceOpen(false);
   }, [draft?.id, isAdminView]);
 
   useEffect(() => {
@@ -1083,6 +1087,7 @@ function App() {
 
   const openSharePanel = () => {
     setExportOpen(false);
+    setFindReplaceOpen(false);
     setCategoryMenuOpen(false);
     setCategoryActionMenu(null);
     setShareOpen((current) => !current);
@@ -1092,6 +1097,7 @@ function App() {
   const openExportPanel = () => {
     setShareOpen(false);
     setShareCopied(false);
+    setFindReplaceOpen(false);
     setCategoryMenuOpen(false);
     setCategoryActionMenu(null);
     setExportOpen(true);
@@ -2135,6 +2141,27 @@ function App() {
             ) : (
               <>
                 {draft ? (
+                  <button
+                    aria-label="查找替换"
+                    className={clsx("toolbar-button", findReplaceOpen && "active")}
+                    onClick={() => {
+                      setExportOpen(false);
+                      setShareOpen(false);
+                      setShareCopied(false);
+                      setCategoryMenuOpen(false);
+                      setCategoryActionMenu(null);
+                      setFindReplaceOpen((current) => !current);
+                    }}
+                    ref={findReplaceButtonRef}
+                    title="查找替换"
+                    type="button"
+                  >
+                    <Search size={16} />
+                    查找替换
+                  </button>
+                ) : null}
+
+                {draft ? (
                   <div className="topbar-category-picker">
                     {categoryMenuOpen ? (
                       <button
@@ -2152,6 +2179,7 @@ function App() {
                         setExportOpen(false);
                         setShareOpen(false);
                         setShareCopied(false);
+                        setFindReplaceOpen(false);
                         setCategoryActionMenu(null);
                         setCategoryMenuOpen((current) => !current);
                       }}
@@ -2296,8 +2324,11 @@ function App() {
             />
 
             <NotebookEditor
+              findReplaceAnchorRef={findReplaceButtonRef}
+              findReplaceOpen={findReplaceOpen}
               key={draft.id}
               note={draft}
+              onFindReplaceClose={() => setFindReplaceOpen(false)}
               onChange={(content) => editDraft({ content })}
             />
           </article>

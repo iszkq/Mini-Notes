@@ -12,7 +12,7 @@ import {
   useCreateBlockNote
 } from "@blocknote/react";
 import { BookOpen } from "lucide-react";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState, type RefObject } from "react";
 import { uploadAsset } from "../api";
 import {
   formatBibleReference,
@@ -25,10 +25,14 @@ import type { Note, NoteBlock } from "../shared";
 import { BibleInsertModal } from "./BibleInsertModal";
 import { EmojiPackPicker } from "./EmojiPackPicker";
 import type { EmojiItem } from "../emojiPacks";
+import { EditorFindReplacePanel } from "./EditorFindReplacePanel";
 import { NotebookFormattingToolbar } from "./NotebookFormattingToolbar";
 
 type NotebookEditorProps = {
+  findReplaceAnchorRef?: RefObject<HTMLElement | null>;
+  findReplaceOpen?: boolean;
   note: Note;
+  onFindReplaceClose?: () => void;
   readOnly?: boolean;
   onChange: (blocks: NoteBlock[]) => void;
 };
@@ -42,7 +46,14 @@ type TextBlock = {
   id: string;
 };
 
-export function NotebookEditor({ note, onChange, readOnly = false }: NotebookEditorProps) {
+export function NotebookEditor({
+  findReplaceAnchorRef,
+  findReplaceOpen = false,
+  note,
+  onChange,
+  onFindReplaceClose,
+  readOnly = false
+}: NotebookEditorProps) {
   const [bibleModalOpen, setBibleModalOpen] = useState(false);
   const [bibleInsertTarget, setBibleInsertTarget] = useState<BibleInsertTarget | null>(null);
   const [emojiPickerOpen, setEmojiPickerOpen] = useState(false);
@@ -320,6 +331,15 @@ export function NotebookEditor({ note, onChange, readOnly = false }: NotebookEdi
           onSelect={insertEmojiImage}
           open={emojiPickerOpen}
           title="插入表情包"
+        />
+      ) : null}
+
+      {!readOnly && findReplaceAnchorRef && onFindReplaceClose ? (
+        <EditorFindReplacePanel
+          anchorRef={findReplaceAnchorRef}
+          editor={editor}
+          onClose={onFindReplaceClose}
+          open={findReplaceOpen}
         />
       ) : null}
     </>

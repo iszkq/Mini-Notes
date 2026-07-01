@@ -1,6 +1,20 @@
-import { BlockNoteSchema, defaultBlockSpecs } from "@blocknote/core";
-import { createReactBlockSpec } from "@blocknote/react";
+import { BlockNoteSchema, defaultBlockSpecs, defaultStyleSpecs } from "@blocknote/core";
+import { createReactBlockSpec, createReactStyleSpec } from "@blocknote/react";
 import { formatBibleReference, parseBibleVersePayload } from "./bible";
+
+const FONT_SIZE_VALUES = new Set(["12px", "14px", "16px", "18px", "20px", "24px", "28px", "32px"]);
+
+const fontSize = createReactStyleSpec(
+  {
+    type: "fontSize",
+    propSchema: "string"
+  },
+  {
+    render: ({ value, contentRef }) => (
+      <span ref={contentRef} style={{ fontSize: normalizeFontSize(value) }} />
+    )
+  }
+);
 
 const bibleVerseCard = createReactBlockSpec(
   {
@@ -136,5 +150,13 @@ export const noteSchema = BlockNoteSchema.create({
   blockSpecs: {
     ...defaultBlockSpecs,
     bibleVerseCard
+  },
+  styleSpecs: {
+    ...defaultStyleSpecs,
+    fontSize
   }
 });
+
+function normalizeFontSize(value: string): string {
+  return FONT_SIZE_VALUES.has(value) ? value : "16px";
+}
