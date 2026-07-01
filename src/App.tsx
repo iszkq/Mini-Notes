@@ -3,6 +3,7 @@ import {
   Archive,
   ArrowRight,
   Check,
+  ChevronDown,
   ChevronRight,
   Clock3,
   Copy,
@@ -20,6 +21,7 @@ import {
   Search,
   ShieldCheck,
   Sparkles,
+  Trash2,
   UploadCloud,
   WifiOff
 } from "lucide-react";
@@ -133,6 +135,7 @@ function App() {
   const selectedIdRef = useRef<string | null>(null);
   const shareButtonRef = useRef<HTMLButtonElement | null>(null);
   const [sharePanelStyle, setSharePanelStyle] = useState<CSSProperties>({});
+  const [categoryMenuOpen, setCategoryMenuOpen] = useState(false);
   const isAdminView = workspaceView === "admin" && Boolean(sessionUser?.isAdmin);
 
   useEffect(() => {
@@ -292,8 +295,13 @@ function App() {
   useEffect(() => {
     if (workspaceView === "admin") {
       setExportOpen(false);
+      setCategoryMenuOpen(false);
     }
   }, [workspaceView]);
+
+  useEffect(() => {
+    setCategoryMenuOpen(false);
+  }, [draft?.id, isAdminView]);
 
   useEffect(() => {
     setExportSelection((current) => current.filter((id) => notes.some((note) => note.id === id)));
@@ -348,6 +356,11 @@ function App() {
   const sortedNotes = useMemo(
     () => sortedRecords.filter((note) => note.kind === "page"),
     [sortedRecords]
+  );
+
+  const selectedCategory = useMemo(
+    () => categories.find((category) => category.id === draft?.parentId) ?? null,
+    [categories, draft?.parentId]
   );
 
   const visibleNotes = useMemo(() => {
@@ -574,6 +587,50 @@ function App() {
     }
   }, [createNewNote, draft, handleLoggedOut, hasUsers, loadNote, notes]);
 
+  const archiveCategory = useCallback(
+    async (category: NoteSummary) => {
+      const confirmed =
+        typeof window === "undefined" ||
+        window.confirm(`删除分类“${category.title}”？分类下的页面会移到未分类。`);
+
+      if (!confirmed) {
+        return;
+      }
+
+      if (draft && dirty) {
+        await saveDraft(draft, revisionRef.current);
+      }
+
+      try {
+        await deleteNote(category.id);
+        setNotes((current) =>
+          current
+            .filter((note) => note.id !== category.id)
+            .map((note) => (note.parentId === category.id ? { ...note, parentId: null } : note))
+        );
+        setDraft((current) =>
+          current?.parentId === category.id ? { ...current, parentId: null } : current
+        );
+        setCollapsedCategoryIds((current) => current.filter((id) => id !== category.id));
+        setCategoryMenuOpen(false);
+        if (editingCategoryId === category.id) {
+          setEditingCategoryId(null);
+          setEditingCategoryTitle("");
+        }
+      } catch (error) {
+        if (error instanceof ApiError && error.status === 401) {
+          handleLoggedOut(hasUsers);
+          setAppError("登录状态已失效，请重新登录。");
+        } else if (error instanceof ApiError) {
+          setAppError(error.message);
+        } else {
+          setAppError("删除分类失败。");
+        }
+      }
+    },
+    [dirty, draft, editingCategoryId, handleLoggedOut, hasUsers, saveDraft]
+  );
+
   const submitAuth = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     setAppError(null);
@@ -662,6 +719,7 @@ function App() {
 
   const openSharePanel = () => {
     setExportOpen(false);
+    setCategoryMenuOpen(false);
     setShareOpen((current) => !current);
     setShareCopied(false);
   };
@@ -669,6 +727,7 @@ function App() {
   const openExportPanel = () => {
     setShareOpen(false);
     setShareCopied(false);
+    setCategoryMenuOpen(false);
     setExportOpen(true);
     setExportSelection((current) => {
       if (current.length > 0) {
@@ -1366,6 +1425,14 @@ function App() {
                         >
                           <Pencil size={14} />
                         </button>
+                        <button
+                          className="category-action danger"
+                          onClick={() => void archiveCategory(category)}
+                          title="删除分类"
+                          type="button"
+                        >
+                          <Trash2 size={14} />
+                        </button>
                       </div>
                     </div>
 
@@ -1427,6 +1494,68 @@ function App() {
               </>
             ) : (
               <>
+                {draft ? (
+                  <div className="topbar-category-picker">
+                    {categoryMenuOpen ? (
+                      <button
+                        aria-label="关闭分类菜单"
+                        className="topbar-category-backdrop"
+                        onClick={() => setCategoryMenuOpen(false)}
+                        type="button"
+                      />
+                    ) : null}
+                    <button
+                      aria-expanded={categoryMenuOpen}
+                      aria-haspopup="menu"
+                      className={clsx("toolbar-button topbar-category-button", categoryMenuOpen && "active")}
+                      onClick={() => {
+                        setExportOpen(false);
+                        setShareOpen(false);
+                        setShareCopied(false);
+                        setCategoryMenuOpen((current) => !current);
+                      }}
+                      title="选择所在分类"
+                      type="button"
+                    >
+                      <Folder size={16} />
+                      <span>{selectedCategory?.title ?? "未分类"}</span>
+                      <ChevronDown size={15} />
+                    </button>
+                    {categoryMenuOpen ? (
+                      <div className="topbar-category-menu" role="menu">
+                        <button
+                          className={clsx("topbar-category-menu__item", !draft.parentId && "active")}
+                          onClick={() => {
+                            editDraft({ parentId: null });
+                            setCategoryMenuOpen(false);
+                          }}
+                          role="menuitem"
+                          type="button"
+                        >
+                          未分类
+                        </button>
+                        {categories.map((category) => (
+                          <button
+                            className={clsx(
+                              "topbar-category-menu__item",
+                              draft.parentId === category.id && "active"
+                            )}
+                            key={category.id}
+                            onClick={() => {
+                              editDraft({ parentId: category.id });
+                              setCategoryMenuOpen(false);
+                            }}
+                            role="menuitem"
+                            type="button"
+                          >
+                            {category.title}
+                          </button>
+                        ))}
+                      </div>
+                    ) : null}
+                  </div>
+                ) : null}
+
                 {noteCount > 0 ? (
                   <button
                     aria-label="批量导出页面"
@@ -1507,26 +1636,6 @@ function App() {
         ) : draft && !isLoadingNote ? (
           <article className="page">
             <div className="page-meta">
-              <div className="page-meta-field">
-                <span className="page-meta-label">所在分类</span>
-                <select
-                  className="page-category-select"
-                  onChange={(event) =>
-                    editDraft({
-                      parentId: event.target.value ? event.target.value : null
-                    })
-                  }
-                  value={draft.parentId ?? ""}
-                >
-                  <option value="">未分类</option>
-                  {categories.map((category) => (
-                    <option key={category.id} value={category.id}>
-                      {category.title}
-                    </option>
-                  ))}
-                </select>
-              </div>
-
               <span className="page-meta-label">页面类型</span>
               <div aria-label="页面类型" className="icon-picker">
                 {PAGE_PRESETS.map((preset) => (

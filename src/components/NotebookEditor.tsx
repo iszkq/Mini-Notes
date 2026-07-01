@@ -1,11 +1,17 @@
 import type { PartialBlock } from "@blocknote/core";
 import "@blocknote/core/fonts/inter.css";
+import { filterSuggestionItems } from "@blocknote/core/extensions";
 import { zh } from "@blocknote/core/locales";
 import { BlockNoteView } from "@blocknote/mantine";
 import "@blocknote/mantine/style.css";
-import { useCreateBlockNote } from "@blocknote/react";
+import {
+  getDefaultReactSlashMenuItems,
+  SuggestionMenuController,
+  type DefaultReactSuggestionItem,
+  useCreateBlockNote
+} from "@blocknote/react";
 import { BookOpen } from "lucide-react";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import { uploadAsset } from "../api";
 import { serializeBibleVerses, type BibleVerse } from "../bible";
 import { noteSchema } from "../editorSchema";
@@ -23,11 +29,6 @@ type BibleInsertTarget = {
   mode: "after" | "replace";
 };
 
-type SlashMenuState = {
-  left: number;
-  top: number;
-};
-
 type TextBlock = {
   id: string;
 };
@@ -35,8 +36,6 @@ type TextBlock = {
 export function NotebookEditor({ note, onChange, readOnly = false }: NotebookEditorProps) {
   const [bibleModalOpen, setBibleModalOpen] = useState(false);
   const [bibleInsertTarget, setBibleInsertTarget] = useState<BibleInsertTarget | null>(null);
-  const [slashMenuState, setSlashMenuState] = useState<SlashMenuState | null>(null);
-  const slashSyncFrameRef = useRef<number | null>(null);
 
   const initialContent = useMemo(() => {
     return note.content.length > 0 ? (note.content as PartialBlock[]) : undefined;
@@ -98,125 +97,6 @@ export function NotebookEditor({ note, onChange, readOnly = false }: NotebookEdi
     return blockElement?.textContent?.trim() ?? "";
   }, []);
 
-  const syncSlashMenuState = useCallback(() => {
-    if (readOnly || typeof window === "undefined") {
-      setSlashMenuState(null);
-      return;
-    }
-
-    const plainText = getCurrentBlockTextFromDom();
-    if (!plainText.startsWith("/")) {
-      setSlashMenuState(null);
-      return;
-    }
-
-    const query = plainText.slice(1).trim().toLowerCase();
-    const matchesBibleMenu =
-      query.length === 0 ||
-      "圣经".includes(query) ||
-      "经文".includes(query) ||
-      "bible".includes(query);
-
-    if (!matchesBibleMenu) {
-      setSlashMenuState(null);
-      return;
-    }
-
-    const selection = window.getSelection();
-    const range = selection && selection.rangeCount > 0 ? selection.getRangeAt(0) : null;
-    const rect = range?.getBoundingClientRect();
-    const editorRect = document.querySelector(".tiptap.ProseMirror")?.getBoundingClientRect();
-    const anchorRect =
-      rect && (rect.width > 0 || rect.height > 0)
-        ? rect
-        : editorRect
-          ? {
-              bottom: editorRect.top + 36,
-              left: editorRect.left + 20
-            }
-          : null;
-
-    if (!anchorRect) {
-      setSlashMenuState(null);
-      return;
-    }
-
-    const menuWidth = 280;
-    const left = Math.max(16, Math.min(anchorRect.left, window.innerWidth - menuWidth - 16));
-    const top = Math.min(anchorRect.bottom + 10, window.innerHeight - 84);
-    setSlashMenuState({ left, top });
-  }, [getCurrentBlockTextFromDom, readOnly]);
-
-  const scheduleSlashMenuSync = useCallback(() => {
-    if (typeof window === "undefined") {
-      return;
-    }
-
-    if (slashSyncFrameRef.current != null) {
-      window.cancelAnimationFrame(slashSyncFrameRef.current);
-    }
-
-    slashSyncFrameRef.current = window.requestAnimationFrame(() => {
-      slashSyncFrameRef.current = null;
-      syncSlashMenuState();
-    });
-  }, [syncSlashMenuState]);
-
-  useEffect(() => {
-    return () => {
-      if (typeof window !== "undefined" && slashSyncFrameRef.current != null) {
-        window.cancelAnimationFrame(slashSyncFrameRef.current);
-      }
-    };
-  }, []);
-
-  useEffect(() => {
-    setSlashMenuState(null);
-  }, [note.id, readOnly]);
-
-  useEffect(() => {
-    if (readOnly || typeof window === "undefined") {
-      return;
-    }
-
-    const bindListeners = () => {
-      const editorElement = document.querySelector(".tiptap.ProseMirror");
-      if (!(editorElement instanceof HTMLElement)) {
-        return () => {};
-      }
-
-      const handleInteraction = () => {
-        scheduleSlashMenuSync();
-      };
-
-      editorElement.addEventListener("input", handleInteraction);
-      editorElement.addEventListener("keyup", handleInteraction);
-      editorElement.addEventListener("mouseup", handleInteraction);
-      editorElement.addEventListener("focus", handleInteraction);
-
-      return () => {
-        editorElement.removeEventListener("input", handleInteraction);
-        editorElement.removeEventListener("keyup", handleInteraction);
-        editorElement.removeEventListener("mouseup", handleInteraction);
-        editorElement.removeEventListener("focus", handleInteraction);
-      };
-    };
-
-    let cleanup = bindListeners();
-    scheduleSlashMenuSync();
-
-    const timer = window.setTimeout(() => {
-      cleanup();
-      cleanup = bindListeners();
-      scheduleSlashMenuSync();
-    }, 0);
-
-    return () => {
-      window.clearTimeout(timer);
-      cleanup();
-    };
-  }, [note.id, readOnly, scheduleSlashMenuSync]);
-
   const openBibleInsertModal = useCallback(() => {
     const currentBlock = getCurrentTextBlock();
     const plainText = getCurrentBlockTextFromDom();
@@ -235,7 +115,6 @@ export function NotebookEditor({ note, onChange, readOnly = false }: NotebookEdi
       } as PartialBlock);
     }
 
-    setSlashMenuState(null);
     setBibleInsertTarget(target);
     setBibleModalOpen(true);
   }, [editor, getCurrentBlockTextFromDom, getCurrentTextBlock]);
@@ -278,9 +157,29 @@ export function NotebookEditor({ note, onChange, readOnly = false }: NotebookEdi
       editor.focus();
       setBibleModalOpen(false);
       setBibleInsertTarget(null);
-      setSlashMenuState(null);
     },
     [bibleInsertTarget, editor]
+  );
+
+  const getSlashMenuItems = useCallback(
+    async (query: string): Promise<DefaultReactSuggestionItem[]> => {
+      const defaultItems = getDefaultReactSlashMenuItems(editor);
+      const heading3Title = editor.dictionary.slash_menu.heading_3.title;
+      const heading3Index = defaultItems.findIndex((item) => item.title === heading3Title);
+      const bibleItem: DefaultReactSuggestionItem = {
+        title: "圣经",
+        subtext: "插入经文",
+        aliases: ["经文", "圣经", "bible", "scripture"],
+        group: heading3Index >= 0 ? defaultItems[heading3Index]?.group : defaultItems[0]?.group,
+        icon: <BookOpen size={18} />,
+        onItemClick: openBibleInsertModal
+      };
+      const items = [...defaultItems];
+      items.splice(heading3Index >= 0 ? heading3Index + 1 : 0, 0, bibleItem);
+
+      return filterSuggestionItems(items, query);
+    },
+    [editor, openBibleInsertModal]
   );
 
   return (
@@ -292,41 +191,15 @@ export function NotebookEditor({ note, onChange, readOnly = false }: NotebookEdi
         onChange={() => {
           if (!readOnly) {
             onChange(editor.document as NoteBlock[]);
-            scheduleSlashMenuSync();
           }
         }}
-        onSelectionChange={() => {
-          if (!readOnly) {
-            scheduleSlashMenuSync();
-          }
-        }}
+        slashMenu={false}
         theme="light"
-      />
-
-      {!readOnly && slashMenuState ? (
-        <div
-          className="note-slash-menu"
-          style={{
-            left: `${slashMenuState.left}px`,
-            top: `${slashMenuState.top}px`
-          }}
-        >
-          <button
-            className="note-slash-menu__item"
-            onClick={openBibleInsertModal}
-            onMouseDown={(event) => event.preventDefault()}
-            type="button"
-          >
-            <span className="note-slash-menu__icon">
-              <BookOpen size={16} />
-            </span>
-            <span className="note-slash-menu__meta">
-              <strong>圣经</strong>
-              <span>插入经文</span>
-            </span>
-          </button>
-        </div>
-      ) : null}
+      >
+        {!readOnly ? (
+          <SuggestionMenuController getItems={getSlashMenuItems} triggerCharacter="/" />
+        ) : null}
+      </BlockNoteView>
 
       {!readOnly ? (
         <BibleInsertModal

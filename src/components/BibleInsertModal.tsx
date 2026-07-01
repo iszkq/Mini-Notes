@@ -457,7 +457,7 @@ export function BibleInsertModal({ open, onClose, onConfirm }: BibleInsertModalP
 
         <div className="bp-insert__body">
           <aside className="bp-insert__sidebar">
-            <div className="bp-segment">
+            <div className="bp-segment bp-insert__tabs">
               <button
                 className={clsx("bp-segment__item", tab === "browse" && "is-selected")}
                 onClick={() => {
