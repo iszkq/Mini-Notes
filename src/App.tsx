@@ -762,13 +762,11 @@ function App() {
                   type="password"
                   value={authInviteCode}
                 />
-                <small className="auth-field-hint">邀请码由管理员单独发放，页面不会明文展示。</small>
               </label>
             ) : null}
 
             {appError ? (
               <div className="form-error-panel" role="alert">
-                <strong>提交失败</strong>
                 <p className="form-error">{appError}</p>
               </div>
             ) : null}

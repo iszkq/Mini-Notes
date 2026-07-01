@@ -71,8 +71,6 @@ const SESSION_COOKIE_NAME = "cloud_notes_session";
 const SESSION_TTL_SECONDS = 60 * 60 * 24 * 30;
 const PBKDF2_ITERATIONS = 60000;
 const LEGACY_PBKDF2_ITERATIONS = [210000];
-const LEGACY_REGISTRATION_INVITE_CODE_HASH =
-  "60413d5b3b136ee629ce4e1045dde96a421b8960687542f66520adb9bb24c2b6";
 const DEFAULT_FILE_NAME = "未命名文件";
 const DEFAULT_FILE_MIME_TYPE = "application/octet-stream";
 const MIME_TYPE_BY_EXTENSION: Record<string, string> = {
@@ -269,11 +267,12 @@ async function registerUser(request: Request, env: Env): Promise<Response> {
   }
 
   const configuredInviteCode = env.REGISTRATION_INVITE_CODE?.trim();
-  const inviteCodeMatches = configuredInviteCode
-    ? inviteCode === configuredInviteCode
-    : (await hashSessionToken(inviteCode)) === LEGACY_REGISTRATION_INVITE_CODE_HASH;
+  if (!configuredInviteCode) {
+    console.error("REGISTRATION_INVITE_CODE is not configured.");
+    return error("注册暂未开放。", 503);
+  }
 
-  if (!inviteCodeMatches) {
+  if (inviteCode !== configuredInviteCode) {
     return error("注册码不正确。", 403);
   }
 

@@ -1133,25 +1133,13 @@ button:disabled {
   font-weight: 800;
 }
 
-.auth-field-hint {
-  color: #8a9099;
-  font-size: 0.76rem;
-  line-height: 1.5;
-  font-weight: 500;
-}
-
 .form-error-panel {
   display: grid;
-  gap: 8px;
   padding: 12px 14px;
   border: 1px solid #efcbc2;
   border-radius: 14px;
   color: #8f322d;
   background: #fff3ef;
-}
-
-.form-error-panel strong {
-  font-size: 0.82rem;
 }
 
 .form-error {
