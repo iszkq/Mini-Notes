@@ -43,5 +43,13 @@ jobs:
       - name: Build project
         run: pnpm check
 
+      - name: Validate Cloudflare deploy config
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "${CLOUDFLARE_API_TOKEN:-}" || { echo "Missing GitHub secret: CLOUDFLARE_API_TOKEN"; exit 1; }
+          test -n "${CLOUDFLARE_ACCOUNT_ID:-}" || { echo "Missing GitHub secret: CLOUDFLARE_ACCOUNT_ID"; exit 1; }
+          test -n "${CLOUDFLARE_D1_DATABASE_ID:-}" || { echo "Missing GitHub variable: CLOUDFLARE_D1_DATABASE_ID"; exit 1; }
+
       - name: Apply D1 migrations and deploy Worker
         run: pnpm cf:release

@@ -13,7 +13,7 @@
     "cf:deploy": "pnpm build && pnpm cf:config && wrangler deploy --config .wrangler/deploy.wrangler.jsonc",
     "cf:release": "pnpm db:migrate && wrangler deploy --config .wrangler/deploy.wrangler.jsonc",
     "db:create": "wrangler d1 create mini_notes",
-    "db:migrate": "pnpm cf:config && wrangler d1 migrations apply DB --config .wrangler/deploy.wrangler.jsonc",
+    "db:migrate": "pnpm cf:config && wrangler d1 migrations apply DB --remote --config .wrangler/deploy.wrangler.jsonc",
     "db:migrate:local": "wrangler d1 migrations apply DB --local"
   },
   "dependencies": {
