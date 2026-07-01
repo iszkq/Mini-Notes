@@ -40,6 +40,7 @@ type DbNoteRow = {
   shareToken: string | null;
   sharedAt: string | null;
   sortOrder: number;
+  summary?: string | null;
   createdAt: string;
   updatedAt: string;
   content?: string;
@@ -92,9 +93,9 @@ type UploadedFormFile = Blob & {
 };
 
 const NOTE_COLUMNS =
-  "id, title, icon, kind, parent_id AS parentId, is_archived AS isArchived, share_token AS shareToken, shared_at AS sharedAt, sort_order AS sortOrder, created_at AS createdAt, updated_at AS updatedAt, content_key AS contentKey, content_size AS contentSize";
+  "id, title, icon, kind, parent_id AS parentId, is_archived AS isArchived, share_token AS shareToken, shared_at AS sharedAt, sort_order AS sortOrder, summary, created_at AS createdAt, updated_at AS updatedAt, content_key AS contentKey, content_size AS contentSize";
 const QUALIFIED_NOTE_COLUMNS =
-  "notes.id, notes.title, notes.icon, notes.kind, notes.parent_id AS parentId, notes.is_archived AS isArchived, notes.share_token AS shareToken, notes.shared_at AS sharedAt, notes.sort_order AS sortOrder, notes.created_at AS createdAt, notes.updated_at AS updatedAt, notes.content_key AS contentKey, notes.content_size AS contentSize";
+  "notes.id, notes.title, notes.icon, notes.kind, notes.parent_id AS parentId, notes.is_archived AS isArchived, notes.share_token AS shareToken, notes.shared_at AS sharedAt, notes.sort_order AS sortOrder, notes.summary, notes.created_at AS createdAt, notes.updated_at AS updatedAt, notes.content_key AS contentKey, notes.content_size AS contentSize";
 
 let bibleDataPromise: Promise<BibleData> | null = null;
 let emojiIndexPromise: Promise<string> | null = null;
@@ -103,10 +104,11 @@ const SESSION_COOKIE_NAME = "cloud_notes_session";
 const SESSION_TTL_SECONDS = 60 * 60 * 24 * 30;
 const PBKDF2_ITERATIONS = 60000;
 const LEGACY_PBKDF2_ITERATIONS = [210000];
-const LARGE_NOTE_CONTENT_THRESHOLD_BYTES = 512 * 1024;
 const NOTE_CONTENT_OBJECT_PREFIX = "note-content";
-const NOTE_SEARCH_TEXT_MAX_LENGTH = 60000;
+const NOTE_SEARCH_TEXT_MAX_BYTES = 16 * 1024;
+const NOTE_SUMMARY_MAX_BYTES = 512;
 const NOTE_SEARCH_PATTERN_MAX_BYTES = 50;
+const LEGACY_NOTE_CONTENT_MIGRATION_BATCH_SIZE = 8;
 const DEFAULT_FILE_NAME = "未命名文件";
 const DEFAULT_FILE_MIME_TYPE = "application/octet-stream";
 const MIME_TYPE_BY_EXTENSION: Record<string, string> = {
@@ -544,7 +546,7 @@ async function registerUser(request: Request, env: Env): Promise<Response> {
        SELECT id,
               ?,
               title,
-              substr(title || ' ' || content, 1, 60000),
+              substr(title || ' ' || content, 1, 16000),
               updated_at
        FROM notes
        WHERE user_id = ?
@@ -628,6 +630,8 @@ async function logoutUser(request: Request, env: Env): Promise<Response> {
 }
 
 async function listNotes(env: Env, userId: string): Promise<Response> {
+  await migrateLegacyNoteContentsForUser(env, userId, LEGACY_NOTE_CONTENT_MIGRATION_BATCH_SIZE);
+
   const { results } = await env.DB.prepare(
     `SELECT ${NOTE_COLUMNS}
      FROM notes
@@ -690,7 +694,7 @@ async function getNote(
     return error("页面不存在。", 404);
   }
 
-  return json(await rowToNote(env, row));
+  return json(await rowToNote(env, row, userId));
 }
 
 async function getPublicSharedNote(env: Env, shareToken: string): Promise<Response> {
@@ -712,7 +716,8 @@ async function createNote(
   const now = new Date().toISOString();
   const id = crypto.randomUUID();
   const content = kind === "category" ? [] : normalizeBlocks(body.content);
-  const storedContent = await persistNoteContent(env, userId, id, content);
+  const storedContent = await persistNoteContent(env, userId, id, content, kind === "page");
+  const summary = kind === "page" ? extractNoteSummary(content) : "";
   const note: Note = {
     id,
     title: cleanTitle(body.title, kind),
@@ -730,8 +735,8 @@ async function createNote(
 
   await env.DB.prepare(
     `INSERT INTO notes
-       (id, user_id, title, icon, kind, parent_id, content, content_key, content_size, is_archived, sort_order, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?)`
+       (id, user_id, title, icon, kind, parent_id, content, content_key, content_size, summary, is_archived, sort_order, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?)`
   )
     .bind(
       note.id,
@@ -743,13 +748,14 @@ async function createNote(
       storedContent.dbContent,
       storedContent.contentKey,
       storedContent.contentSize,
+      summary,
       note.sortOrder,
       note.createdAt,
       note.updatedAt
     )
     .run();
 
-  await syncNoteSearch(env, userId, note.id, note.kind, note.title, note.content, note.updatedAt);
+  await syncNoteIndexes(env, userId, note.id, note.kind, note.title, note.content, note.updatedAt);
 
   return json(note, 201);
 }
@@ -773,7 +779,7 @@ async function updateNote(
   }
 
   const body = await readJson<NoteUpdateInput>(request);
-  const currentContent = await readNoteContent(env, current);
+  const currentContent = await readNoteContent(env, current, userId);
   const next: Note = {
     ...rowToSummary(current),
     title:
@@ -812,8 +818,10 @@ async function updateNote(
     env,
     userId,
     id,
-    next.content
+    next.content,
+    cleanNoteKind(current.kind) === "page"
   );
+  const nextSummary = cleanNoteKind(current.kind) === "page" ? extractNoteSummary(next.content) : "";
 
   await env.DB.prepare(
     `UPDATE notes
@@ -823,6 +831,7 @@ async function updateNote(
          content = ?,
          content_key = ?,
          content_size = ?,
+         summary = ?,
          is_archived = ?,
          sort_order = ?,
          updated_at = ?
@@ -835,6 +844,7 @@ async function updateNote(
       storedContent.dbContent,
       storedContent.contentKey,
       storedContent.contentSize,
+      nextSummary,
       next.isArchived ? 1 : 0,
       next.sortOrder,
       next.updatedAt,
@@ -854,7 +864,7 @@ async function updateNote(
     );
   }
 
-  await syncNoteSearch(env, userId, next.id, next.kind, next.title, next.content, next.updatedAt);
+  await syncNoteIndexes(env, userId, next.id, next.kind, next.title, next.content, next.updatedAt);
 
   return json(next);
 }
@@ -894,7 +904,7 @@ async function enableNoteShare(
       ...current,
       shareToken,
       sharedAt
-    })
+    }, userId)
   );
 }
 
@@ -930,7 +940,7 @@ async function disableNoteShare(
       ...current,
       shareToken: null,
       sharedAt: null
-    })
+    }, userId)
   );
 }
 
@@ -952,7 +962,7 @@ async function deleteNoteRecord(
   }
 
   const currentContent =
-    cleanNoteKind(current.kind) === "page" ? await readNoteContent(env, current) : [];
+    cleanNoteKind(current.kind) === "page" ? await readNoteContent(env, current, userId) : [];
 
   if (cleanNoteKind(current.kind) === "category") {
     await env.DB.prepare(
@@ -971,6 +981,9 @@ async function deleteNoteRecord(
     .run();
 
   await env.DB.prepare("DELETE FROM note_search WHERE note_id = ?")
+    .bind(id)
+    .run();
+  await env.DB.prepare("DELETE FROM note_upload_refs WHERE note_id = ?")
     .bind(id)
     .run();
   await deleteStaleNoteContent(env, current.contentKey, null);
@@ -1052,7 +1065,7 @@ async function getPublicStoredFile(
     return error("分享页面不存在或已关闭。", 404);
   }
 
-  const blocks = await readNoteContent(env, note);
+  const blocks = await readNoteContent(env, note, note.userId ?? undefined);
   if (!extractUploadIdsFromBlocks(blocks).has(uploadId)) {
     return error("文件不存在。", 404);
   }
@@ -1485,15 +1498,15 @@ function rowToSummary(row: DbNoteRow): NoteSummary {
   };
 }
 
-async function rowToNote(env: Env, row: DbNoteRow): Promise<Note> {
+async function rowToNote(env: Env, row: DbNoteRow, userId?: string): Promise<Note> {
   return {
     ...rowToSummary(row),
-    content: await readNoteContent(env, row)
+    content: await readNoteContent(env, row, userId)
   };
 }
 
 async function rowToPublicNote(env: Env, row: DbNoteRow, shareToken: string): Promise<Note> {
-  const content = await readNoteContent(env, row);
+  const content = await readNoteContent(env, row, row.userId ?? undefined);
   return {
     ...rowToSummary(row),
     content: rewriteBlocksForPublicShare(content, shareToken)
@@ -1536,9 +1549,22 @@ function parseBlocks(value: unknown): NoteBlock[] {
   }
 }
 
-async function readNoteContent(env: Env, row: DbNoteRow): Promise<NoteBlock[]> {
+async function readNoteContent(env: Env, row: DbNoteRow, userId?: string): Promise<NoteBlock[]> {
   if (!row.contentKey) {
-    return parseBlocks(row.content);
+    const blocks = parseBlocks(row.content);
+    if (userId && cleanNoteKind(row.kind) === "page") {
+      try {
+        await migrateLegacyNoteContentToR2(env, userId, row, blocks);
+      } catch (cause) {
+        console.error("Failed to migrate legacy note content", {
+          noteId: row.id,
+          userId,
+          cause
+        });
+      }
+    }
+
+    return blocks;
   }
 
   try {
@@ -1562,16 +1588,89 @@ async function readNoteContent(env: Env, row: DbNoteRow): Promise<NoteBlock[]> {
   }
 }
 
+async function migrateLegacyNoteContentsForUser(
+  env: Env,
+  userId: string,
+  limit: number
+): Promise<void> {
+  const { results } = await env.DB.prepare(
+    `SELECT ${NOTE_COLUMNS}, user_id AS userId, content
+     FROM notes
+     WHERE user_id = ?
+       AND kind = 'page'
+       AND is_archived = 0
+       AND content_key IS NULL
+     ORDER BY updated_at DESC
+     LIMIT ?`
+  )
+    .bind(userId, limit)
+    .all<DbNoteRow>();
+
+  await Promise.all(
+    results.map(async (note) => {
+      try {
+        await readNoteContent(env, note, userId);
+      } catch (cause) {
+        console.error("Failed to migrate legacy note content", {
+          noteId: note.id,
+          userId,
+          cause
+        });
+      }
+    })
+  );
+}
+
+async function migrateLegacyNoteContentToR2(
+  env: Env,
+  userId: string,
+  row: DbNoteRow,
+  blocks: NoteBlock[]
+): Promise<void> {
+  if (row.contentKey) {
+    return;
+  }
+
+  const storedContent = await persistNoteContent(env, userId, row.id, blocks, true);
+  const summary = extractNoteSummary(blocks);
+  await env.DB.prepare(
+    `UPDATE notes
+     SET content = ?,
+         content_key = ?,
+         content_size = ?,
+         summary = ?
+     WHERE id = ?
+       AND user_id = ?
+       AND content_key IS NULL`
+  )
+    .bind(
+      storedContent.dbContent,
+      storedContent.contentKey,
+      storedContent.contentSize,
+      summary,
+      row.id,
+      userId
+    )
+    .run();
+
+  row.content = storedContent.dbContent;
+  row.contentKey = storedContent.contentKey;
+  row.contentSize = storedContent.contentSize;
+  row.summary = summary;
+  await syncNoteIndexes(env, userId, row.id, cleanNoteKind(row.kind), row.title, blocks, row.updatedAt);
+}
+
 async function persistNoteContent(
   env: Env,
   userId: string,
   noteId: string,
-  blocks: NoteBlock[]
+  blocks: NoteBlock[],
+  storeExternally: boolean
 ): Promise<{ contentKey: string | null; contentSize: number; dbContent: string }> {
   const dbContent = JSON.stringify(blocks);
   const contentSize = byteLength(dbContent);
 
-  if (contentSize <= LARGE_NOTE_CONTENT_THRESHOLD_BYTES) {
+  if (!storeExternally) {
     return { contentKey: null, contentSize, dbContent };
   }
 
@@ -1608,7 +1707,7 @@ async function deleteStaleNoteContent(
   }
 }
 
-async function syncNoteSearch(
+async function syncNoteIndexes(
   env: Env,
   userId: string,
   noteId: string,
@@ -1621,6 +1720,9 @@ async function syncNoteSearch(
     await env.DB.prepare("DELETE FROM note_search WHERE note_id = ?")
       .bind(noteId)
       .run();
+    await env.DB.prepare("DELETE FROM note_upload_refs WHERE note_id = ?")
+      .bind(noteId)
+      .run();
     return;
   }
 
@@ -1631,6 +1733,35 @@ async function syncNoteSearch(
   )
     .bind(noteId, userId, title, extractSearchTextFromBlocks(content), updatedAt)
     .run();
+
+  await syncNoteUploadRefs(env, userId, noteId, content);
+}
+
+async function syncNoteUploadRefs(
+  env: Env,
+  userId: string,
+  noteId: string,
+  content: NoteBlock[]
+): Promise<void> {
+  const uploadIds = Array.from(extractUploadIdsFromBlocks(content));
+  await env.DB.prepare("DELETE FROM note_upload_refs WHERE note_id = ?")
+    .bind(noteId)
+    .run();
+
+  if (uploadIds.length === 0) {
+    return;
+  }
+
+  await Promise.all(
+    uploadIds.map((uploadId) =>
+      env.DB.prepare(
+        `INSERT OR IGNORE INTO note_upload_refs (note_id, user_id, upload_id)
+         VALUES (?, ?, ?)`
+      )
+        .bind(noteId, userId, uploadId)
+        .run()
+    )
+  );
 }
 
 function getNoteContentObjectKey(userId: string, noteId: string): string {
@@ -1650,11 +1781,11 @@ function normalizeBlocks(value: unknown): NoteBlock[] {
 function extractSearchTextFromBlocks(blocks: NoteBlock[]): string {
   const parts: string[] = [];
   collectSearchText(blocks, parts);
-  return normalizeSearchText(parts.join(" ")).slice(0, NOTE_SEARCH_TEXT_MAX_LENGTH);
+  return truncateUtf8(normalizeSearchText(parts.join(" ")), NOTE_SEARCH_TEXT_MAX_BYTES);
 }
 
 function collectSearchText(value: unknown, parts: string[], key = ""): void {
-  if (parts.join(" ").length >= NOTE_SEARCH_TEXT_MAX_LENGTH) {
+  if (byteLength(parts.join(" ")) >= NOTE_SEARCH_TEXT_MAX_BYTES) {
     return;
   }
 
@@ -1700,8 +1831,31 @@ function cleanSearchTextValue(value: string, key: string): string {
   return text.slice(0, 1000);
 }
 
+function extractNoteSummary(blocks: NoteBlock[]): string {
+  const parts: string[] = [];
+  collectSearchText(blocks, parts);
+  return truncateUtf8(normalizeSearchText(parts.join(" ")), NOTE_SUMMARY_MAX_BYTES);
+}
+
 function normalizeSearchText(value: string): string {
   return value.replace(/\s+/g, " ").trim();
+}
+
+function truncateUtf8(value: string, maxBytes: number): string {
+  if (byteLength(value) <= maxBytes) {
+    return value;
+  }
+
+  let result = "";
+  for (const char of value) {
+    if (byteLength(result + char) > maxBytes) {
+      break;
+    }
+
+    result += char;
+  }
+
+  return result;
 }
 
 function createSafeLikePattern(value: string): string | null {
@@ -2146,6 +2300,9 @@ async function deleteAllUserResources(env: Env, userId: string): Promise<void> {
   await env.DB.prepare("DELETE FROM note_search WHERE user_id = ?")
     .bind(userId)
     .run();
+  await env.DB.prepare("DELETE FROM note_upload_refs WHERE user_id = ?")
+    .bind(userId)
+    .run();
   await env.DB.prepare("DELETE FROM notes WHERE user_id = ?")
     .bind(userId)
     .run();
@@ -2156,36 +2313,55 @@ async function detachUploadFromUserNotes(
   userId: string,
   uploadId: string
 ): Promise<void> {
-  const pattern = `%/api/files/${uploadId}%`;
-  const { results } = await env.DB.prepare(
-    `SELECT ${NOTE_COLUMNS}, content
-     FROM notes
-     WHERE user_id = ?
-       AND is_archived = 0
-       AND (content_key IS NOT NULL OR content LIKE ?)`
-  )
-    .bind(userId, pattern)
-    .all<DbNoteRow>();
+  const [indexedNotes, legacyNotes] = await Promise.all([
+    env.DB.prepare(
+      `SELECT ${QUALIFIED_NOTE_COLUMNS}, notes.content
+       FROM note_upload_refs
+       JOIN notes ON notes.id = note_upload_refs.note_id
+       WHERE note_upload_refs.user_id = ?
+         AND note_upload_refs.upload_id = ?
+         AND notes.is_archived = 0`
+    )
+      .bind(userId, uploadId)
+      .all<DbNoteRow>(),
+    env.DB.prepare(
+      `SELECT ${NOTE_COLUMNS}, content
+       FROM notes
+       WHERE user_id = ?
+         AND is_archived = 0
+         AND content_key IS NULL
+         AND content LIKE ?`
+    )
+      .bind(userId, `%/api/files/${uploadId}%`)
+      .all<DbNoteRow>()
+  ]);
+  const notesById = new Map<string, DbNoteRow>();
+  [...indexedNotes.results, ...legacyNotes.results].forEach((note) => {
+    notesById.set(note.id, note);
+  });
+  const notesToUpdate = Array.from(notesById.values());
 
-  if (results.length === 0) {
+  if (notesToUpdate.length === 0) {
     return;
   }
 
   const now = new Date().toISOString();
   await Promise.all(
-    results.map(async (note) => {
-      const currentBlocks = await readNoteContent(env, note);
+    notesToUpdate.map(async (note) => {
+      const currentBlocks = await readNoteContent(env, note, userId);
       if (!extractUploadIdsFromBlocks(currentBlocks).has(uploadId)) {
         return;
       }
 
       const nextBlocks = stripUploadReferencesFromBlocks(currentBlocks, uploadId);
-      const storedContent = await persistNoteContent(env, userId, note.id, nextBlocks);
+      const storedContent = await persistNoteContent(env, userId, note.id, nextBlocks, true);
+      const nextSummary = extractNoteSummary(nextBlocks);
       await env.DB.prepare(
         `UPDATE notes
          SET content = ?,
              content_key = ?,
              content_size = ?,
+             summary = ?,
              updated_at = ?
          WHERE id = ?`
       )
@@ -2193,12 +2369,13 @@ async function detachUploadFromUserNotes(
           storedContent.dbContent,
           storedContent.contentKey,
           storedContent.contentSize,
+          nextSummary,
           now,
           note.id
         )
         .run();
       await deleteStaleNoteContent(env, note.contentKey, storedContent.contentKey);
-      await syncNoteSearch(env, userId, note.id, cleanNoteKind(note.kind), note.title, nextBlocks, now);
+      await syncNoteIndexes(env, userId, note.id, cleanNoteKind(note.kind), note.title, nextBlocks, now);
     })
   );
 }
@@ -2208,23 +2385,35 @@ async function isUploadReferencedByActiveNote(
   userId: string,
   uploadId: string
 ): Promise<boolean> {
-  const { results } = await env.DB.prepare(
-    `SELECT ${NOTE_COLUMNS}, content
+  const row = await env.DB.prepare(
+    `SELECT note_upload_refs.note_id
+     FROM note_upload_refs
+     JOIN notes ON notes.id = note_upload_refs.note_id
+     WHERE note_upload_refs.user_id = ?
+       AND note_upload_refs.upload_id = ?
+       AND notes.is_archived = 0
+     LIMIT 1`
+  )
+    .bind(userId, uploadId)
+    .first<{ note_id: string }>();
+
+  if (row) {
+    return true;
+  }
+
+  const legacyRow = await env.DB.prepare(
+    `SELECT id
      FROM notes
      WHERE user_id = ?
        AND is_archived = 0
-       AND (content_key IS NOT NULL OR content LIKE ?)`
+       AND content_key IS NULL
+       AND content LIKE ?
+     LIMIT 1`
   )
     .bind(userId, `%/api/files/${uploadId}%`)
-    .all<DbNoteRow>();
+    .first<{ id: string }>();
 
-  for (const note of results) {
-    if (extractUploadIdsFromBlocks(await readNoteContent(env, note)).has(uploadId)) {
-      return true;
-    }
-  }
-
-  return false;
+  return Boolean(legacyRow);
 }
 
 function extractUploadIdsFromBlocks(blocks: NoteBlock[]): Set<string> {
