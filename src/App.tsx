@@ -793,7 +793,23 @@ function App() {
       return null;
     }
 
-    return <div aria-hidden="true" className={clsx("note-drop-placeholder", nested && "nested")} />;
+    return (
+      <div
+        aria-hidden="true"
+        className={clsx("note-drop-placeholder", nested && "nested")}
+        onDragOver={(event) => {
+          event.preventDefault();
+          event.stopPropagation();
+          event.dataTransfer.dropEffect = "move";
+          setDropTarget({ parentId, beforeId });
+        }}
+        onDrop={(event) => {
+          event.preventDefault();
+          event.stopPropagation();
+          void moveDraggedNote(parentId, beforeId);
+        }}
+      />
+    );
   };
 
   const createNewNote = useCallback(async (parentId: string | null = null) => {
