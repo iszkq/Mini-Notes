@@ -48,6 +48,24 @@ type MatchResult = {
   matches: TextMatch[];
 };
 
+const FIND_MATCH_HIGHLIGHT_NAME = "mini-notes-find-match";
+const FIND_CURRENT_HIGHLIGHT_NAME = "mini-notes-find-current";
+const FIND_HIGHLIGHT_STYLE_ID = "mini-notes-find-highlight-styles";
+const FIND_HIGHLIGHT_STYLE = `
+::highlight(${FIND_MATCH_HIGHLIGHT_NAME}) {
+  background-color: rgba(250, 204, 21, 0.42);
+  color: inherit;
+}
+
+::highlight(${FIND_CURRENT_HIGHLIGHT_NAME}) {
+  background-color: rgba(251, 146, 60, 0.55);
+  color: inherit;
+  text-decoration: underline;
+  text-decoration-color: rgba(194, 65, 12, 0.72);
+  text-decoration-thickness: 2px;
+}
+`;
+
 export function EditorFindReplacePanel({
   anchorRef,
   editor,
@@ -169,6 +187,16 @@ export function EditorFindReplacePanel({
     document.addEventListener("mousedown", handlePointerDown);
     return () => document.removeEventListener("mousedown", handlePointerDown);
   }, [anchorRef, onClose, open]);
+
+  useEffect(() => {
+    if (!open || !hasQuery || error || matches.length === 0) {
+      clearFindHighlights();
+      return;
+    }
+
+    applyFindHighlights(editor, matches, activeIndex);
+    return clearFindHighlights;
+  }, [activeIndex, editor, error, hasQuery, matches, open]);
 
   const selectMatch = useCallback(
     (nextIndex: number) => {
@@ -487,6 +515,110 @@ function focusTextRange(editor: BlockNoteEditor<any, any, any>, from: number, to
   editor.focus();
   editor._tiptapEditor.commands.setTextSelection({ from, to });
   editor.prosemirrorView.dispatch(editor.prosemirrorState.tr.scrollIntoView());
+}
+
+type HighlightValue = unknown;
+
+type HighlightConstructor = new (...ranges: Range[]) => HighlightValue;
+
+type HighlightRegistry = {
+  delete: (name: string) => void;
+  set: (name: string, highlight: HighlightValue) => void;
+};
+
+type HighlightWindow = Window &
+  typeof globalThis & {
+    CSS?: {
+      highlights?: HighlightRegistry;
+    };
+    Highlight?: HighlightConstructor;
+  };
+
+function applyFindHighlights(
+  editor: BlockNoteEditor<any, any, any>,
+  matches: TextMatch[],
+  activeIndex: number
+) {
+  const api = getHighlightApi();
+  if (!api) {
+    return;
+  }
+
+  ensureFindHighlightStyles(editor.prosemirrorView.dom.ownerDocument);
+
+  const currentIndex = Math.min(Math.max(activeIndex, 0), matches.length - 1);
+  const matchRanges: Range[] = [];
+  let currentRange: Range | null = null;
+
+  matches.forEach((match, index) => {
+    const range = createRangeFromTextMatch(editor, match);
+    if (!range) {
+      return;
+    }
+
+    if (index === currentIndex) {
+      currentRange = range;
+    } else {
+      matchRanges.push(range);
+    }
+  });
+
+  api.registry.set(FIND_MATCH_HIGHLIGHT_NAME, new api.Highlight(...matchRanges));
+  if (currentRange) {
+    api.registry.set(FIND_CURRENT_HIGHLIGHT_NAME, new api.Highlight(currentRange));
+  } else {
+    api.registry.delete(FIND_CURRENT_HIGHLIGHT_NAME);
+  }
+}
+
+function clearFindHighlights() {
+  const api = getHighlightApi();
+  if (!api) {
+    return;
+  }
+
+  api.registry.delete(FIND_MATCH_HIGHLIGHT_NAME);
+  api.registry.delete(FIND_CURRENT_HIGHLIGHT_NAME);
+}
+
+function getHighlightApi() {
+  if (typeof window === "undefined") {
+    return null;
+  }
+
+  const highlightWindow = window as HighlightWindow;
+  const Highlight = highlightWindow.Highlight;
+  const registry = highlightWindow.CSS?.highlights;
+  if (!Highlight || !registry) {
+    return null;
+  }
+
+  return { Highlight, registry };
+}
+
+function ensureFindHighlightStyles(document: Document) {
+  if (document.getElementById(FIND_HIGHLIGHT_STYLE_ID)) {
+    return;
+  }
+
+  const style = document.createElement("style");
+  style.id = FIND_HIGHLIGHT_STYLE_ID;
+  style.textContent = FIND_HIGHLIGHT_STYLE;
+  document.head.appendChild(style);
+}
+
+function createRangeFromTextMatch(editor: BlockNoteEditor<any, any, any>, match: TextMatch) {
+  try {
+    const view = editor.prosemirrorView;
+    const from = view.domAtPos(match.from);
+    const to = view.domAtPos(match.to);
+    const range = view.dom.ownerDocument.createRange();
+    range.setStart(from.node, from.offset);
+    range.setEnd(to.node, to.offset);
+    return range;
+  } catch {
+    return null;
+  }
 }
 
 function isWholeWordMatch(text: string, from: number, to: number) {
