@@ -5,7 +5,6 @@ import {
   Check,
   Clock3,
   Copy,
-  Database,
   ExternalLink,
   FileText,
   Globe2,
@@ -63,19 +62,6 @@ const LEGACY_ICON_MAP: Record<string, string> = {
   Book: "📚",
   Pin: "📌"
 };
-
-const WELCOME_CONTENT: NoteBlock[] = [
-  {
-    type: "paragraph",
-    content: [
-      {
-        type: "text",
-        text: "写下第一条想法，Mini Notes 会自动保存。",
-        styles: {}
-      }
-    ]
-  }
-];
 
 function App() {
   const initialShareToken =
@@ -176,16 +162,7 @@ function App() {
 
       setIsLocked(false);
 
-      let nextNotes = (await listNotes()).map(normalizeNoteSummary);
-      if (nextNotes.length === 0) {
-        const welcome = await createNote({
-          title: "今天的工作台",
-          icon: "📝",
-          content: WELCOME_CONTENT
-        });
-        nextNotes = [normalizeNoteSummary(toSummary(welcome))];
-      }
-
+      const nextNotes = (await listNotes()).map(normalizeNoteSummary);
       setNotes(nextNotes);
       const nextSelected =
         selectedIdRef.current && nextNotes.some((note) => note.id === selectedIdRef.current)
@@ -194,6 +171,11 @@ function App() {
 
       if (nextSelected) {
         await loadNote(nextSelected);
+      } else {
+        setSelectedId(null);
+        setDraft(null);
+        setDirty(false);
+        setSaveStatus("idle");
       }
     } catch (error) {
       if (error instanceof ApiError && error.status === 401) {
@@ -396,7 +378,8 @@ function App() {
       if (remaining[0]) {
         await loadNote(remaining[0].id);
       } else {
-        await createNewNote();
+        setDirty(false);
+        setSaveStatus("idle");
       }
     } catch (error) {
       if (error instanceof ApiError && error.status === 401) {
@@ -628,77 +611,85 @@ function App() {
               <div className="brand-mark">MN</div>
               <div className="auth-brand-copy">
                 <strong>Mini Notes</strong>
-                <span>部署在 Cloudflare 上的在线个人笔记空间</span>
+                <span>在线笔记空间</span>
               </div>
             </div>
 
             <div className="auth-copy-block">
-              <span className="auth-kicker">Workspace Access</span>
-              <h1>把页面、素材和账号权限，收进一个更安静的工作台。</h1>
-              <p>
-                登录后只看到自己的笔记和附件。需要新建账号时，先填写注册码
-                `221819` 完成校验，再创建独立账户。
-              </p>
+              <h1>继续你的空间。</h1>
             </div>
 
-            <div className="auth-preview" aria-hidden="true">
-              <div className="auth-preview-sidebar">
-                <span className="auth-preview-label">最近页面</span>
-                <div className="auth-preview-nav">
-                  <div className="auth-preview-item active">
-                    <span>📝</span>
-                    <div>
-                      <strong>产品周报</strong>
-                      <small>刚刚更新</small>
-                    </div>
+            <div className="auth-frame" aria-hidden="true">
+              <div className="auth-window">
+                <div className="auth-window-bar">
+                  <div className="auth-window-dots">
+                    <span />
+                    <span />
+                    <span />
                   </div>
-                  <div className="auth-preview-item">
-                    <span>📚</span>
-                    <div>
-                      <strong>资料库</strong>
-                      <small>3 个附件</small>
-                    </div>
-                  </div>
-                  <div className="auth-preview-item">
-                    <span>✅</span>
-                    <div>
-                      <strong>上线清单</strong>
-                      <small>自动保存</small>
-                    </div>
-                  </div>
-                </div>
-              </div>
-
-              <div className="auth-preview-main">
-                <div className="auth-preview-header">
-                  <div>
-                    <span className="auth-preview-tag">私有工作区</span>
-                    <h2>今日工作台</h2>
-                  </div>
-                  <div className="auth-preview-avatars">
-                    <span>MN</span>
-                    <span>R2</span>
-                  </div>
+                  <div className="auth-window-search">搜索页面</div>
+                  <div className="auth-window-badge">MN</div>
                 </div>
 
-                <div className="auth-preview-lines">
-                  <span className="w-100" />
-                  <span className="w-76" />
-                  <span className="w-92" />
-                </div>
+                <div className="auth-window-body">
+                  <div className="auth-window-sidebar">
+                    <div className="auth-window-sidebar-title">最近页面</div>
+                    <div className="auth-window-list">
+                      <div className="auth-window-row active">
+                        <span>📝</span>
+                        <div>
+                          <strong>今天的工作台</strong>
+                          <small>刚刚更新</small>
+                        </div>
+                      </div>
+                      <div className="auth-window-row">
+                        <span>📚</span>
+                        <div>
+                          <strong>资料库</strong>
+                          <small>4 个文件</small>
+                        </div>
+                      </div>
+                      <div className="auth-window-row">
+                        <span>✅</span>
+                        <div>
+                          <strong>上线检查单</strong>
+                          <small>共享已开启</small>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
 
-                <div className="auth-preview-footer">
-                  <div className="auth-preview-pill">
-                    <ShieldCheck size={14} />
-                    账户隔离
-                  </div>
-                  <div className="auth-preview-pill">
-                    <UploadCloud size={14} />
-                    R2 直传
-                  </div>
-                  <div className="auth-preview-pill">
-                    <Database size={14} />
-                    D1 存储
+                  <div className="auth-window-main">
+                    <div className="auth-window-toolbar">
+                      <span className="auth-window-tag">私人空间</span>
+                      <div className="auth-window-actions">
+                        <span>共享</span>
+                        <span>保存中</span>
+                      </div>
+                    </div>
+
+                    <div className="auth-window-title">今天的工作台</div>
+                    <div className="auth-window-lines">
+                      <span className="w-100" />
+                      <span className="w-82" />
+                      <span className="w-92" />
+                      <span className="w-68" />
+                    </div>
+
+                    <div className="auth-meta-row">
+                      <span className="auth-meta-pill">
+                        <ShieldCheck size={14} />
+                        账号隔离
+                      </span>
+                      <span className="auth-meta-pill">
+                        <UploadCloud size={14} />
+                        文件上传
+                      </span>
+                      <span className="auth-meta-pill">
+                        <Globe2 size={14} />
+                        单页分享
+                      </span>
+                    </div>
                   </div>
                 </div>
               </div>
@@ -710,17 +701,7 @@ function App() {
               <div className="lock-mark">
                 <Lock size={22} />
               </div>
-              <span className="auth-eyebrow">
-                {authMode === "register" ? "注册校验" : "账户登录"}
-              </span>
               <h2>{authMode === "register" ? "创建账号" : "登录 Mini Notes"}</h2>
-              <p className="lock-copy">
-                {authMode === "register"
-                  ? "填写用户名、密码和注册码后，即可创建自己的独立笔记空间。"
-                  : hasUsers
-                    ? "已有账号直接登录，没有账号可切换到注册。"
-                    : "当前还没有可用账号，先用注册码创建第一个账户。"}
-              </p>
             </div>
 
             <div className="auth-tabs" role="tablist" aria-label="登录方式">
@@ -773,14 +754,15 @@ function App() {
 
             {authMode === "register" ? (
               <label className="auth-field">
-                <span>注册码</span>
+                <span>邀请码</span>
                 <input
                   className="token-input"
                   onChange={(event) => setAuthInviteCode(event.target.value)}
-                  placeholder="输入注册码 221819"
+                  placeholder="输入邀请码"
                   type="password"
                   value={authInviteCode}
                 />
+                <small className="auth-field-hint">邀请码由管理员单独发放，页面不会明文展示。</small>
               </label>
             ) : null}
 
@@ -795,17 +777,6 @@ function App() {
               <span>{authPending ? "提交中" : authMode === "register" ? "验证并注册" : "进入工作区"}</span>
               <ArrowRight size={16} />
             </button>
-
-            <div className="auth-helper-row">
-              <div className="auth-helper-item">
-                <ShieldCheck size={15} />
-                每个账号的笔记和附件彼此隔离
-              </div>
-              <div className="auth-helper-item">
-                <UploadCloud size={15} />
-                图片、音频、视频和文件都支持直接上传
-              </div>
-            </div>
           </form>
         </section>
       </main>
@@ -862,7 +833,7 @@ function App() {
         <header className="topbar">
           <div className="topbar-left">
             <FileText size={17} />
-            <span>{draft?.title ?? "未命名"}</span>
+            <span>{draft?.title ?? (notes.length > 0 ? "选择页面" : "还没有页面")}</span>
           </div>
 
           <div className="topbar-actions">
@@ -1042,6 +1013,18 @@ function App() {
               onChange={(content) => editDraft({ content })}
             />
           </article>
+        ) : notes.length === 0 && !isLoadingNote ? (
+          <section className="workspace-empty">
+            <div className="workspace-empty-panel">
+              <div className="workspace-empty-badge">Mini Notes</div>
+              <h2>还没有页面</h2>
+              <p>这里先保持空白。需要的时候，再手动创建第一篇笔记。</p>
+              <button className="primary-button workspace-empty-action" onClick={() => void createNewNote()} type="button">
+                <Plus size={16} />
+                新建第一页
+              </button>
+            </div>
+          </section>
         ) : (
           <section className="center-screen inset">
             <Sparkles className="pulse-icon" size={24} />

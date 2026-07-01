@@ -15,6 +15,7 @@ type Env = {
   DB: D1Database;
   ASSETS: Fetcher;
   FILES: R2Bucket;
+  REGISTRATION_INVITE_CODE?: string;
 };
 
 type DbNoteRow = {
@@ -70,7 +71,8 @@ const SESSION_COOKIE_NAME = "cloud_notes_session";
 const SESSION_TTL_SECONDS = 60 * 60 * 24 * 30;
 const PBKDF2_ITERATIONS = 60000;
 const LEGACY_PBKDF2_ITERATIONS = [210000];
-const REGISTRATION_INVITE_CODE = "221819";
+const LEGACY_REGISTRATION_INVITE_CODE_HASH =
+  "60413d5b3b136ee629ce4e1045dde96a421b8960687542f66520adb9bb24c2b6";
 const DEFAULT_FILE_NAME = "未命名文件";
 const DEFAULT_FILE_MIME_TYPE = "application/octet-stream";
 const MIME_TYPE_BY_EXTENSION: Record<string, string> = {
@@ -266,7 +268,12 @@ async function registerUser(request: Request, env: Env): Promise<Response> {
     return error("请输入至少 6 位密码。", 400);
   }
 
-  if (inviteCode !== REGISTRATION_INVITE_CODE) {
+  const configuredInviteCode = env.REGISTRATION_INVITE_CODE?.trim();
+  const inviteCodeMatches = configuredInviteCode
+    ? inviteCode === configuredInviteCode
+    : (await hashSessionToken(inviteCode)) === LEGACY_REGISTRATION_INVITE_CODE_HASH;
+
+  if (!inviteCodeMatches) {
     return error("注册码不正确。", 403);
   }
 
