@@ -835,127 +835,130 @@ function App() {
           </div>
 
           <div className="topbar-actions">
-            {draft?.shareToken ? (
-              <span className="share-state">
-                <Globe2 size={15} />
-                共享中
-              </span>
+            {draft ? (
+              <>
+                {draft.shareToken ? (
+                  <span className="share-state">
+                    <Globe2 size={15} />
+                    共享中
+                  </span>
+                ) : null}
+
+                <span className={clsx("save-state", saveStatus)}>
+                  {saveStatus === "saving" ? <Clock3 size={15} /> : <Check size={15} />}
+                  {saveLabel(saveStatus)}
+                </span>
+
+                <div className="topbar-stack">
+                  <button
+                    aria-label="共享当前页面"
+                    className={clsx("toolbar-button", shareOpen && "active")}
+                    onClick={openSharePanel}
+                    title="共享当前页面"
+                    type="button"
+                  >
+                    {draft.shareToken ? <Globe2 size={16} /> : <Link2 size={16} />}
+                    共享
+                  </button>
+
+                  {shareOpen ? (
+                    <div className="share-panel">
+                      <div className="share-panel-head">
+                        <div>
+                          <strong>页面分享</strong>
+                          <p>由你主动开启，关闭后旧链接会立刻失效。</p>
+                        </div>
+                        {draft.shareToken ? (
+                          <span className="share-panel-badge">
+                            <Globe2 size={14} />
+                            已开启
+                          </span>
+                        ) : (
+                          <span className="share-panel-badge muted">未开启</span>
+                        )}
+                      </div>
+
+                      {draft.shareToken ? (
+                        <>
+                          <label className="share-panel-field">
+                            <span>分享链接</span>
+                            <div className="share-input-row">
+                              <input
+                                className="share-link-input"
+                                readOnly
+                                type="text"
+                                value={shareUrl}
+                              />
+                              <button
+                                className="toolbar-button compact"
+                                onClick={() => void copyShareLink()}
+                                type="button"
+                              >
+                                <Copy size={15} />
+                                {shareCopied ? "已复制" : "复制"}
+                              </button>
+                            </div>
+                          </label>
+
+                          <div className="share-status-row">
+                            <span>开启时间：{draft.sharedAt ? formatDateTime(draft.sharedAt) : "刚刚"}</span>
+                            <span>任何拿到链接的人都能免登录查看此页</span>
+                          </div>
+
+                          <div className="share-panel-actions">
+                            <a
+                              className="toolbar-button"
+                              href={shareUrl}
+                              rel="noreferrer"
+                              target="_blank"
+                            >
+                              <ExternalLink size={15} />
+                              打开链接
+                            </a>
+                            <button
+                              className="toolbar-button danger"
+                              disabled={sharePending}
+                              onClick={() => void disableCurrentShare()}
+                              type="button"
+                            >
+                              关闭分享
+                            </button>
+                          </div>
+                        </>
+                      ) : (
+                        <>
+                          <p className="share-panel-copy">
+                            开启后会生成一个只读分享链接，别人打开时不会被登录页拦截。
+                          </p>
+                          <div className="share-panel-actions">
+                            <button
+                              className="primary-button share-primary"
+                              disabled={sharePending}
+                              onClick={() => void enableCurrentShare()}
+                              type="button"
+                            >
+                              <Globe2 size={16} />
+                              {sharePending ? "开启中" : "开启公开分享"}
+                            </button>
+                          </div>
+                        </>
+                      )}
+                    </div>
+                  ) : null}
+                </div>
+
+                <button
+                  aria-label="归档页面"
+                  className="icon-button"
+                  onClick={() => void archiveCurrent()}
+                  title="归档页面"
+                  type="button"
+                >
+                  <Archive size={17} />
+                </button>
+              </>
             ) : null}
 
-            <span className={clsx("save-state", saveStatus)}>
-              {saveStatus === "saving" ? <Clock3 size={15} /> : <Check size={15} />}
-              {saveLabel(saveStatus)}
-            </span>
-
-            <div className="topbar-stack">
-              <button
-                aria-label="共享当前页面"
-                className={clsx("toolbar-button", shareOpen && "active")}
-                disabled={!draft}
-                onClick={openSharePanel}
-                title="共享当前页面"
-                type="button"
-              >
-                {draft?.shareToken ? <Globe2 size={16} /> : <Link2 size={16} />}
-                共享
-              </button>
-
-              {shareOpen && draft ? (
-                <div className="share-panel">
-                  <div className="share-panel-head">
-                    <div>
-                      <strong>页面分享</strong>
-                      <p>由你主动开启，关闭后旧链接会立刻失效。</p>
-                    </div>
-                    {draft.shareToken ? (
-                      <span className="share-panel-badge">
-                        <Globe2 size={14} />
-                        已开启
-                      </span>
-                    ) : (
-                      <span className="share-panel-badge muted">未开启</span>
-                    )}
-                  </div>
-
-                  {draft.shareToken ? (
-                    <>
-                      <label className="share-panel-field">
-                        <span>分享链接</span>
-                        <div className="share-input-row">
-                          <input
-                            className="share-link-input"
-                            readOnly
-                            type="text"
-                            value={shareUrl}
-                          />
-                          <button
-                            className="toolbar-button compact"
-                            onClick={() => void copyShareLink()}
-                            type="button"
-                          >
-                            <Copy size={15} />
-                            {shareCopied ? "已复制" : "复制"}
-                          </button>
-                        </div>
-                      </label>
-
-                      <div className="share-status-row">
-                        <span>开启时间：{draft.sharedAt ? formatDateTime(draft.sharedAt) : "刚刚"}</span>
-                        <span>任何拿到链接的人都能免登录查看此页</span>
-                      </div>
-
-                      <div className="share-panel-actions">
-                        <a
-                          className="toolbar-button"
-                          href={shareUrl}
-                          rel="noreferrer"
-                          target="_blank"
-                        >
-                          <ExternalLink size={15} />
-                          打开链接
-                        </a>
-                        <button
-                          className="toolbar-button danger"
-                          disabled={sharePending}
-                          onClick={() => void disableCurrentShare()}
-                          type="button"
-                        >
-                          关闭分享
-                        </button>
-                      </div>
-                    </>
-                  ) : (
-                    <>
-                      <p className="share-panel-copy">
-                        开启后会生成一个只读分享链接，别人打开时不会被登录页拦截。
-                      </p>
-                      <div className="share-panel-actions">
-                        <button
-                          className="primary-button share-primary"
-                          disabled={sharePending}
-                          onClick={() => void enableCurrentShare()}
-                          type="button"
-                        >
-                          <Globe2 size={16} />
-                          {sharePending ? "开启中" : "开启公开分享"}
-                        </button>
-                      </div>
-                    </>
-                  )}
-                </div>
-              ) : null}
-            </div>
-
-            <button
-              aria-label="归档页面"
-              className="icon-button"
-              disabled={!draft}
-              onClick={() => void archiveCurrent()}
-              title="归档页面"
-              type="button"
-            >
-              <Archive size={17} />
-            </button>
             <button
               aria-label="退出登录"
               className="icon-button"
@@ -1014,9 +1017,10 @@ function App() {
         ) : notes.length === 0 && !isLoadingNote ? (
           <section className="workspace-empty">
             <div className="workspace-empty-panel">
-              <div className="workspace-empty-badge">Mini Notes</div>
-              <h2>还没有页面</h2>
-              <p>这里先保持空白。需要的时候，再手动创建第一篇笔记。</p>
+              <div className="workspace-empty-copy">
+                <h2>还没有页面</h2>
+                <p>这里先保持空白。需要的时候，再手动创建第一篇笔记。</p>
+              </div>
               <button className="primary-button workspace-empty-action" onClick={() => void createNewNote()} type="button">
                 <Plus size={16} />
                 新建第一页
