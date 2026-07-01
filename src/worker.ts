@@ -855,6 +855,17 @@ async function updateNote(
 
   await deleteStaleNoteContent(env, current.contentKey, storedContent.contentKey);
 
+  await syncNoteIndexes(
+    env,
+    userId,
+    next.id,
+    next.kind,
+    next.title,
+    next.content,
+    next.updatedAt,
+    next.isArchived
+  );
+
   if (cleanNoteKind(current.kind) === "page") {
     await cleanupRemovedUploadsForUser(
       env,
@@ -863,8 +874,6 @@ async function updateNote(
       next.isArchived ? [] : next.content
     );
   }
-
-  await syncNoteIndexes(env, userId, next.id, next.kind, next.title, next.content, next.updatedAt);
 
   return json(next);
 }
@@ -1714,9 +1723,10 @@ async function syncNoteIndexes(
   kind: NoteKind,
   title: string,
   content: NoteBlock[],
-  updatedAt: string
+  updatedAt: string,
+  isArchived = false
 ): Promise<void> {
-  if (kind !== "page") {
+  if (kind !== "page" || isArchived) {
     await env.DB.prepare("DELETE FROM note_search WHERE note_id = ?")
       .bind(noteId)
       .run();
