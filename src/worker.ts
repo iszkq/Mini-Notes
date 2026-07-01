@@ -23,10 +23,13 @@ type DbNoteRow = {
   icon: string;
   parentId: string | null;
   isArchived: number;
+  shareToken: string | null;
+  sharedAt: string | null;
   sortOrder: number;
   createdAt: string;
   updatedAt: string;
   content?: string;
+  userId?: string | null;
 };
 
 type DbUserRow = {
@@ -61,11 +64,12 @@ type UploadedFormFile = Blob & {
 };
 
 const NOTE_COLUMNS =
-  "id, title, icon, parent_id AS parentId, is_archived AS isArchived, sort_order AS sortOrder, created_at AS createdAt, updated_at AS updatedAt";
+  "id, title, icon, parent_id AS parentId, is_archived AS isArchived, share_token AS shareToken, shared_at AS sharedAt, sort_order AS sortOrder, created_at AS createdAt, updated_at AS updatedAt";
 
 const SESSION_COOKIE_NAME = "cloud_notes_session";
 const SESSION_TTL_SECONDS = 60 * 60 * 24 * 30;
-const PBKDF2_ITERATIONS = 210000;
+const PBKDF2_ITERATIONS = 60000;
+const LEGACY_PBKDF2_ITERATIONS = [210000];
 const REGISTRATION_INVITE_CODE = "221819";
 const DEFAULT_FILE_NAME = "未命名文件";
 const DEFAULT_FILE_MIME_TYPE = "application/octet-stream";
@@ -137,16 +141,34 @@ async function handleApi(
       return logoutUser(request, env);
     }
 
-    const user = await requireUser(request, env);
-    if (!user) {
-      return error("请先登录。", 401);
-    }
-
     const segments = url.pathname
       .replace(/^\/api\/?/, "")
       .split("/")
       .filter(Boolean)
       .map(decodeURIComponent);
+
+    if (
+      segments[0] === "public" &&
+      segments[1] === "notes" &&
+      segments[2] &&
+      request.method === "GET"
+    ) {
+      return getPublicSharedNote(env, segments[2]);
+    }
+
+    if (
+      segments[0] === "public" &&
+      segments[1] === "files" &&
+      segments[2] &&
+      request.method === "GET"
+    ) {
+      return getPublicStoredFile(request, env, segments[2], url.searchParams.get("share"));
+    }
+
+    const user = await requireUser(request, env);
+    if (!user) {
+      return error("请先登录。", 401);
+    }
 
     if (segments[0] === "notes" && request.method === "GET" && !segments[1]) {
       return listNotes(env, user.id);
@@ -158,6 +180,24 @@ async function handleApi(
 
     if (segments[0] === "notes" && segments[1] && request.method === "GET") {
       return getNote(env, user.id, segments[1]);
+    }
+
+    if (
+      segments[0] === "notes" &&
+      segments[1] &&
+      segments[2] === "share" &&
+      request.method === "POST"
+    ) {
+      return enableNoteShare(env, user.id, segments[1]);
+    }
+
+    if (
+      segments[0] === "notes" &&
+      segments[1] &&
+      segments[2] === "share" &&
+      request.method === "DELETE"
+    ) {
+      return disableNoteShare(env, user.id, segments[1]);
     }
 
     if (
@@ -296,9 +336,17 @@ async function loginUser(request: Request, env: Env): Promise<Response> {
     return error("用户名或密码不正确。", 401);
   }
 
-  const passwordHash = await hashPassword(password, user.passwordSalt);
-  if (passwordHash !== user.passwordHash) {
+  const passwordHash = await verifyPassword(password, user.passwordSalt, user.passwordHash);
+  if (!passwordHash) {
     return error("用户名或密码不正确。", 401);
+  }
+
+  if (passwordHash !== user.passwordHash) {
+    await env.DB.prepare(
+      "UPDATE users SET password_hash = ? WHERE id = ?"
+    )
+      .bind(passwordHash, user.id)
+      .run();
   }
 
   return createSessionResponse(request, env, {
@@ -384,6 +432,15 @@ async function getNote(
   return json(rowToNote(row));
 }
 
+async function getPublicSharedNote(env: Env, shareToken: string): Promise<Response> {
+  const note = await findSharedNoteByToken(env, shareToken);
+  if (!note) {
+    return error("分享页面不存在或已关闭。", 404);
+  }
+
+  return json(rowToPublicNote(note, shareToken));
+}
+
 async function createNote(
   request: Request,
   env: Env,
@@ -398,6 +455,8 @@ async function createNote(
     icon: cleanIcon(body.icon),
     parentId: cleanParentId(body.parentId),
     isArchived: false,
+    shareToken: null,
+    sharedAt: null,
     sortOrder: Date.now(),
     createdAt: now,
     updatedAt: now,
@@ -485,6 +544,73 @@ async function updateNote(
   return json(next);
 }
 
+async function enableNoteShare(
+  env: Env,
+  userId: string,
+  id: string
+): Promise<Response> {
+  const current = await env.DB.prepare(
+    `SELECT ${NOTE_COLUMNS}, content
+     FROM notes
+     WHERE id = ? AND user_id = ? AND is_archived = 0`
+  )
+    .bind(id, userId)
+    .first<DbNoteRow>();
+
+  if (!current) {
+    return error("页面不存在。", 404);
+  }
+
+  const shareToken = current.shareToken || generateRandomToken(18);
+  const sharedAt = current.sharedAt || new Date().toISOString();
+
+  await env.DB.prepare(
+    "UPDATE notes SET share_token = ?, shared_at = ?, updated_at = ? WHERE id = ? AND user_id = ?"
+  )
+    .bind(shareToken, sharedAt, new Date().toISOString(), id, userId)
+    .run();
+
+  return json(
+    rowToNote({
+      ...current,
+      shareToken,
+      sharedAt
+    })
+  );
+}
+
+async function disableNoteShare(
+  env: Env,
+  userId: string,
+  id: string
+): Promise<Response> {
+  const current = await env.DB.prepare(
+    `SELECT ${NOTE_COLUMNS}, content
+     FROM notes
+     WHERE id = ? AND user_id = ? AND is_archived = 0`
+  )
+    .bind(id, userId)
+    .first<DbNoteRow>();
+
+  if (!current) {
+    return error("页面不存在。", 404);
+  }
+
+  await env.DB.prepare(
+    "UPDATE notes SET share_token = NULL, shared_at = NULL, updated_at = ? WHERE id = ? AND user_id = ?"
+  )
+    .bind(new Date().toISOString(), id, userId)
+    .run();
+
+  return json(
+    rowToNote({
+      ...current,
+      shareToken: null,
+      sharedAt: null
+    })
+  );
+}
+
 async function archiveNote(
   env: Env,
   userId: string,
@@ -563,6 +689,57 @@ async function getStoredFile(
   uploadId: string
 ): Promise<Response> {
   const upload = await findUpload(env, userId, uploadId);
+  if (!upload) {
+    return error("文件不存在。", 404);
+  }
+
+  const object = await env.FILES.get(upload.objectKey, {
+    range: request.headers
+  });
+  if (!object) {
+    return error("文件不存在。", 404);
+  }
+
+  const totalSize = Number(upload.size);
+  const requestedRangeHeader = request.headers.get("Range");
+  const range = requestedRangeHeader
+    ? parseRangeHeader(requestedRangeHeader, totalSize) ?? getServedRange(object.range, totalSize)
+    : null;
+  const headers = buildStoredFileHeaders(
+    object,
+    upload.fileName,
+    upload.mimeType,
+    totalSize,
+    range
+  );
+
+  return new Response(object.body, {
+    status: range ? 206 : 200,
+    headers
+  });
+}
+
+async function getPublicStoredFile(
+  request: Request,
+  env: Env,
+  uploadId: string,
+  shareToken: string | null
+): Promise<Response> {
+  if (!shareToken) {
+    return error("缺少分享参数。", 400);
+  }
+
+  const note = await findSharedNoteByToken(env, shareToken);
+  if (!note) {
+    return error("分享页面不存在或已关闭。", 404);
+  }
+
+  const blocks = parseBlocks(note.content);
+  if (!extractUploadIdsFromBlocks(blocks).has(uploadId)) {
+    return error("文件不存在。", 404);
+  }
+
+  const upload = await findUpload(env, note.userId ?? "", uploadId);
   if (!upload) {
     return error("文件不存在。", 404);
   }
@@ -710,6 +887,8 @@ function rowToSummary(row: DbNoteRow): NoteSummary {
     icon: row.icon,
     parentId: row.parentId,
     isArchived: Boolean(row.isArchived),
+    shareToken: row.shareToken ?? null,
+    sharedAt: row.sharedAt ?? null,
     sortOrder: row.sortOrder,
     createdAt: row.createdAt,
     updatedAt: row.updatedAt
@@ -720,6 +899,13 @@ function rowToNote(row: DbNoteRow): Note {
   return {
     ...rowToSummary(row),
     content: parseBlocks(row.content)
+  };
+}
+
+function rowToPublicNote(row: DbNoteRow, shareToken: string): Note {
+  return {
+    ...rowToNote(row),
+    content: rewriteBlocksForPublicShare(parseBlocks(row.content), shareToken)
   };
 }
 
@@ -793,7 +979,31 @@ function cleanInviteCode(value: unknown): string {
   return value.trim().slice(0, 32);
 }
 
-async function hashPassword(password: string, salt: string): Promise<string> {
+async function verifyPassword(
+  password: string,
+  salt: string,
+  expectedHash: string
+): Promise<string | null> {
+  const currentHash = await hashPassword(password, salt, PBKDF2_ITERATIONS);
+  if (currentHash === expectedHash) {
+    return currentHash;
+  }
+
+  for (const iterations of LEGACY_PBKDF2_ITERATIONS) {
+    const legacyHash = await hashPassword(password, salt, iterations);
+    if (legacyHash === expectedHash) {
+      return currentHash;
+    }
+  }
+
+  return null;
+}
+
+async function hashPassword(
+  password: string,
+  salt: string,
+  iterations = PBKDF2_ITERATIONS
+): Promise<string> {
   const encoder = new TextEncoder();
   const key = await crypto.subtle.importKey(
     "raw",
@@ -806,7 +1016,7 @@ async function hashPassword(password: string, salt: string): Promise<string> {
     {
       name: "PBKDF2",
       salt: encoder.encode(salt),
-      iterations: PBKDF2_ITERATIONS,
+      iterations,
       hash: "SHA-256"
     },
     key,
@@ -858,6 +1068,21 @@ async function findUpload(
   )
     .bind(uploadId, userId)
     .first<DbUploadRow>();
+}
+
+async function findSharedNoteByToken(
+  env: Env,
+  shareToken: string
+): Promise<DbNoteRow | null> {
+  return env.DB.prepare(
+    `SELECT ${NOTE_COLUMNS},
+            user_id AS userId,
+            content
+     FROM notes
+     WHERE share_token = ? AND is_archived = 0`
+  )
+    .bind(shareToken)
+    .first<DbNoteRow>();
 }
 
 async function cleanupRemovedUploadsForUser(
@@ -958,7 +1183,7 @@ function collectUploadIds(value: unknown, uploadIds: Set<string>): void {
 function extractUploadIdFromUrl(value: string): string | null {
   try {
     const url = new URL(value, "https://mini-notes.local");
-    const match = /^\/api\/files\/([^/]+)$/.exec(url.pathname);
+    const match = /^\/api\/(?:public\/)?files\/([^/]+)$/.exec(url.pathname);
     if (!match) {
       return null;
     }
@@ -968,6 +1193,34 @@ function extractUploadIdFromUrl(value: string): string | null {
   } catch {
     return null;
   }
+}
+
+function rewriteBlocksForPublicShare(blocks: NoteBlock[], shareToken: string): NoteBlock[] {
+  return rewriteValueForPublicShare(blocks, shareToken) as NoteBlock[];
+}
+
+function rewriteValueForPublicShare(value: unknown, shareToken: string): unknown {
+  if (typeof value === "string") {
+    return value.replace(
+      /\/api\/files\/([a-zA-Z0-9-]{8,80})/g,
+      (_match, uploadId: string) => `/api/public/files/${uploadId}?share=${encodeURIComponent(shareToken)}`
+    );
+  }
+
+  if (Array.isArray(value)) {
+    return value.map((item) => rewriteValueForPublicShare(item, shareToken));
+  }
+
+  if (value && typeof value === "object") {
+    return Object.fromEntries(
+      Object.entries(value as Record<string, unknown>).map(([key, nestedValue]) => [
+        key,
+        rewriteValueForPublicShare(nestedValue, shareToken)
+      ])
+    );
+  }
+
+  return value;
 }
 
 function cleanFileName(value: string): string {

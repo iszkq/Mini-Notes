@@ -11,6 +11,8 @@ export type NoteSummary = {
   icon: string;
   parentId: string | null;
   isArchived: boolean;
+  shareToken: string | null;
+  sharedAt: string | null;
   sortOrder: number;
   createdAt: string;
   updatedAt: string;

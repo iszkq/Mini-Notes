@@ -1,14 +1,22 @@
 import clsx from "clsx";
 import {
   Archive,
+  ArrowRight,
   Check,
   Clock3,
+  Copy,
+  Database,
+  ExternalLink,
   FileText,
+  Globe2,
+  Link2,
   Lock,
   LogOut,
   Plus,
   Search,
+  ShieldCheck,
   Sparkles,
+  UploadCloud,
   WifiOff
 } from "lucide-react";
 import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -16,7 +24,10 @@ import {
   ApiError,
   createNote,
   deleteNote,
+  disableShare,
+  enableShare,
   getNote,
+  getPublicNote,
   getStatus,
   listNotes,
   login,
@@ -59,7 +70,7 @@ const WELCOME_CONTENT: NoteBlock[] = [
     content: [
       {
         type: "text",
-        text: "写下第一个想法。",
+        text: "写下第一条想法，Mini Notes 会自动保存。",
         styles: {}
       }
     ]
@@ -67,6 +78,10 @@ const WELCOME_CONTENT: NoteBlock[] = [
 ];
 
 function App() {
+  const initialShareToken =
+    typeof window === "undefined" ? null : getShareTokenFromPath(window.location.pathname);
+  const isPublicView = Boolean(initialShareToken);
+
   const [authMode, setAuthMode] = useState<AuthMode>("login");
   const [sessionUser, setSessionUser] = useState<AuthUser | null>(null);
   const [authUsername, setAuthUsername] = useState("");
@@ -75,7 +90,7 @@ function App() {
   const [hasUsers, setHasUsers] = useState(false);
   const [authPending, setAuthPending] = useState(false);
   const [isLocked, setIsLocked] = useState(false);
-  const [isBooting, setIsBooting] = useState(true);
+  const [isBooting, setIsBooting] = useState(!isPublicView);
   const [isLoadingNote, setIsLoadingNote] = useState(false);
   const [notes, setNotes] = useState<NoteSummary[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -84,6 +99,12 @@ function App() {
   const [dirty, setDirty] = useState(false);
   const [saveStatus, setSaveStatus] = useState<SaveStatus>("idle");
   const [appError, setAppError] = useState<string | null>(null);
+  const [shareOpen, setShareOpen] = useState(false);
+  const [sharePending, setSharePending] = useState(false);
+  const [shareCopied, setShareCopied] = useState(false);
+  const [publicNote, setPublicNote] = useState<Note | null>(null);
+  const [publicPending, setPublicPending] = useState(isPublicView);
+  const [publicError, setPublicError] = useState<string | null>(null);
   const revisionRef = useRef(0);
   const selectedIdRef = useRef<string | null>(null);
 
@@ -101,34 +122,41 @@ function App() {
     setNotes([]);
     setDraft(null);
     setSelectedId(null);
+    setShareOpen(false);
+    setShareCopied(false);
   }, []);
 
-  const loadNote = useCallback(async (id: string) => {
-    selectedIdRef.current = id;
-    setSelectedId(id);
-    setIsLoadingNote(true);
-    setAppError(null);
+  const loadNote = useCallback(
+    async (id: string) => {
+      selectedIdRef.current = id;
+      setSelectedId(id);
+      setIsLoadingNote(true);
+      setAppError(null);
+      setShareOpen(false);
+      setShareCopied(false);
 
-    try {
-      const note = normalizeNote(await getNote(id));
-      if (selectedIdRef.current === id) {
-        setDraft(note);
-        setDirty(false);
-        setSaveStatus("idle");
+      try {
+        const note = normalizeNote(await getNote(id));
+        if (selectedIdRef.current === id) {
+          setDraft(note);
+          setDirty(false);
+          setSaveStatus("idle");
+        }
+      } catch (error) {
+        if (error instanceof ApiError && error.status === 401) {
+          handleLoggedOut(hasUsers);
+          setAppError("登录状态已失效，请重新登录。");
+        } else {
+          setAppError("页面加载失败。");
+        }
+      } finally {
+        if (selectedIdRef.current === id) {
+          setIsLoadingNote(false);
+        }
       }
-    } catch (error) {
-      if (error instanceof ApiError && error.status === 401) {
-        handleLoggedOut(hasUsers);
-        setAppError("登录状态已失效，请重新登录。");
-      } else {
-        setAppError("页面加载失败。");
-      }
-    } finally {
-      if (selectedIdRef.current === id) {
-        setIsLoadingNote(false);
-      }
-    }
-  }, [handleLoggedOut, hasUsers]);
+    },
+    [handleLoggedOut, hasUsers]
+  );
 
   const bootstrap = useCallback(async () => {
     setIsBooting(true);
@@ -179,8 +207,50 @@ function App() {
   }, [handleLoggedOut, hasUsers, loadNote]);
 
   useEffect(() => {
+    if (isPublicView) {
+      setIsBooting(false);
+      return;
+    }
+
     void bootstrap();
-  }, [bootstrap]);
+  }, [bootstrap, isPublicView]);
+
+  useEffect(() => {
+    if (!initialShareToken) {
+      return;
+    }
+
+    let cancelled = false;
+    setPublicPending(true);
+    setPublicError(null);
+
+    void getPublicNote(initialShareToken)
+      .then((note) => {
+        if (!cancelled) {
+          setPublicNote(normalizeNote(note));
+        }
+      })
+      .catch((error) => {
+        if (cancelled) {
+          return;
+        }
+
+        if (error instanceof ApiError) {
+          setPublicError(error.message);
+        } else {
+          setPublicError("分享页面暂时无法打开，请稍后重试。");
+        }
+      })
+      .finally(() => {
+        if (!cancelled) {
+          setPublicPending(false);
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [initialShareToken]);
 
   const visibleNotes = useMemo(() => {
     const term = query.trim().toLowerCase();
@@ -195,34 +265,45 @@ function App() {
     return sorted.filter((note) => note.title.toLowerCase().includes(term));
   }, [notes, query]);
 
-  const saveDraft = useCallback(async (snapshot: Note, revision: number) => {
-    try {
-      setSaveStatus("saving");
-      const saved = normalizeNote(
-        await updateNote(snapshot.id, {
-          title: snapshot.title,
-          icon: snapshot.icon,
-          parentId: snapshot.parentId,
-          content: snapshot.content
-        })
-      );
-
-      setNotes((current) => updateSummary(current, saved));
-      if (selectedIdRef.current === snapshot.id && revisionRef.current === revision) {
-        setDraft(saved);
-        setDirty(false);
-        setSaveStatus("saved");
-      }
-    } catch (error) {
-      if (error instanceof ApiError && error.status === 401) {
-        handleLoggedOut(hasUsers);
-        setAppError("登录状态已失效，请重新登录。");
-      } else {
-        setSaveStatus("error");
-        setAppError("自动保存失败。");
-      }
+  const shareUrl = useMemo(() => {
+    if (!draft?.shareToken || typeof window === "undefined") {
+      return "";
     }
-  }, [handleLoggedOut, hasUsers]);
+
+    return new URL(`/share/${draft.shareToken}`, window.location.origin).toString();
+  }, [draft?.shareToken]);
+
+  const saveDraft = useCallback(
+    async (snapshot: Note, revision: number) => {
+      try {
+        setSaveStatus("saving");
+        const saved = normalizeNote(
+          await updateNote(snapshot.id, {
+            title: snapshot.title,
+            icon: snapshot.icon,
+            parentId: snapshot.parentId,
+            content: snapshot.content
+          })
+        );
+
+        setNotes((current) => updateSummary(current, saved));
+        if (selectedIdRef.current === snapshot.id && revisionRef.current === revision) {
+          setDraft(saved);
+          setDirty(false);
+          setSaveStatus("saved");
+        }
+      } catch (error) {
+        if (error instanceof ApiError && error.status === 401) {
+          handleLoggedOut(hasUsers);
+          setAppError("登录状态已失效，请重新登录。");
+        } else {
+          setSaveStatus("error");
+          setAppError("自动保存失败。");
+        }
+      }
+    },
+    [handleLoggedOut, hasUsers]
+  );
 
   useEffect(() => {
     if (!draft || !dirty || isLocked) {
@@ -258,17 +339,20 @@ function App() {
     }
   }, []);
 
-  const selectNote = useCallback(async (id: string) => {
-    if (id === selectedId) {
-      return;
-    }
+  const selectNote = useCallback(
+    async (id: string) => {
+      if (id === selectedId) {
+        return;
+      }
 
-    if (draft && dirty) {
-      await saveDraft(draft, revisionRef.current);
-    }
+      if (draft && dirty) {
+        await saveDraft(draft, revisionRef.current);
+      }
 
-    await loadNote(id);
-  }, [dirty, draft, loadNote, saveDraft, selectedId]);
+      await loadNote(id);
+    },
+    [dirty, draft, loadNote, saveDraft, selectedId]
+  );
 
   const createNewNote = useCallback(async () => {
     if (draft && dirty) {
@@ -306,6 +390,8 @@ function App() {
       setNotes(remaining);
       setDraft(null);
       setSelectedId(null);
+      setShareOpen(false);
+      setShareCopied(false);
 
       if (remaining[0]) {
         await loadNote(remaining[0].id);
@@ -366,6 +452,164 @@ function App() {
     }
   };
 
+  const openSharePanel = () => {
+    setShareOpen((current) => !current);
+    setShareCopied(false);
+  };
+
+  const enableCurrentShare = async () => {
+    if (!draft) {
+      return;
+    }
+
+    setSharePending(true);
+    setAppError(null);
+
+    try {
+      const shared = normalizeNote(await enableShare(draft.id));
+      setDraft(shared);
+      setNotes((current) => updateSummary(current, shared));
+      setShareOpen(true);
+      setShareCopied(false);
+    } catch (error) {
+      if (error instanceof ApiError && error.status === 401) {
+        handleLoggedOut(hasUsers);
+        setAppError("登录状态已失效，请重新登录。");
+      } else if (error instanceof ApiError) {
+        setAppError(error.message);
+      } else {
+        setAppError("开启分享失败。");
+      }
+    } finally {
+      setSharePending(false);
+    }
+  };
+
+  const disableCurrentShare = async () => {
+    if (!draft) {
+      return;
+    }
+
+    setSharePending(true);
+    setAppError(null);
+
+    try {
+      const unshared = normalizeNote(await disableShare(draft.id));
+      setDraft(unshared);
+      setNotes((current) => updateSummary(current, unshared));
+      setShareCopied(false);
+    } catch (error) {
+      if (error instanceof ApiError && error.status === 401) {
+        handleLoggedOut(hasUsers);
+        setAppError("登录状态已失效，请重新登录。");
+      } else if (error instanceof ApiError) {
+        setAppError(error.message);
+      } else {
+        setAppError("关闭分享失败。");
+      }
+    } finally {
+      setSharePending(false);
+    }
+  };
+
+  const copyShareLink = async () => {
+    if (!shareUrl) {
+      return;
+    }
+
+    try {
+      await navigator.clipboard.writeText(shareUrl);
+      setShareCopied(true);
+    } catch {
+      setAppError("复制链接失败，请手动复制。");
+    }
+  };
+
+  if (isPublicView) {
+    if (publicPending) {
+      return (
+        <main className="center-screen">
+          <Sparkles className="pulse-icon" size={28} />
+          <span>正在打开分享页面</span>
+        </main>
+      );
+    }
+
+    if (publicError || !publicNote) {
+      return (
+        <main className="public-shell">
+          <header className="public-topbar">
+            <div className="brand-row brand-row-public">
+              <div className="brand-mark">MN</div>
+              <div>
+                <strong>Mini Notes</strong>
+                <span>公开分享</span>
+              </div>
+            </div>
+            <a className="toolbar-button public-home-link" href="/">
+              打开首页
+              <ExternalLink size={16} />
+            </a>
+          </header>
+
+          <section className="public-page">
+            <div className="public-empty">
+              <Globe2 size={22} />
+              <h1>这个分享链接暂时不可用</h1>
+              <p>{publicError ?? "该页面可能已关闭分享，或链接已经失效。"}</p>
+            </div>
+          </section>
+        </main>
+      );
+    }
+
+    return (
+      <main className="public-shell">
+        <header className="public-topbar">
+          <div className="brand-row brand-row-public">
+            <div className="brand-mark">MN</div>
+            <div>
+              <strong>Mini Notes</strong>
+              <span>公开分享</span>
+            </div>
+          </div>
+          <a className="toolbar-button public-home-link" href="/">
+            打开首页
+            <ExternalLink size={16} />
+          </a>
+        </header>
+
+        <section className="public-page">
+          <article className="public-note">
+            <div className="public-note-head">
+              <div className="public-note-icon">{normalizePageIcon(publicNote.icon)}</div>
+              <div className="public-note-copy">
+                <span className="public-note-badge">
+                  <Globe2 size={14} />
+                  公开分享
+                </span>
+                <h1>{publicNote.title}</h1>
+                <div className="public-meta">
+                  <span>最后更新：{formatDateTime(publicNote.updatedAt)}</span>
+                  {publicNote.sharedAt ? (
+                    <span>开启分享：{formatDateTime(publicNote.sharedAt)}</span>
+                  ) : null}
+                </div>
+              </div>
+            </div>
+
+            <NotebookEditor
+              key={`public-${publicNote.id}`}
+              note={publicNote}
+              onChange={() => undefined}
+              readOnly
+            />
+          </article>
+        </section>
+      </main>
+    );
+  }
+
   if (isBooting) {
     return (
       <main className="center-screen">
@@ -378,72 +622,192 @@ function App() {
   if (isLocked) {
     return (
       <main className="lock-screen">
-        <form className="lock-panel" onSubmit={submitAuth}>
-          <div className="lock-mark">
-            <Lock size={22} />
-          </div>
-          <h1>{authMode === "register" ? "创建账号" : "登录账号"}</h1>
-          <p className="lock-copy">
-            {authMode === "register"
-              ? "注册时需要先填写注册码，账号数据会独立保存。"
-              : "先登录；如果还没有账号，可以切换到注册。"}
-          </p>
+        <section className="auth-shell">
+          <section className="auth-showcase">
+            <div className="auth-brand">
+              <div className="brand-mark">MN</div>
+              <div className="auth-brand-copy">
+                <strong>Mini Notes</strong>
+                <span>部署在 Cloudflare 上的在线个人笔记空间</span>
+              </div>
+            </div>
 
-          <div className="auth-tabs" role="tablist" aria-label="登录方式">
-            <button
-              className={clsx("auth-tab", authMode === "login" && "active")}
-              onClick={() => {
-                setAuthMode("login");
-                setAppError(null);
-              }}
-              type="button"
-            >
-              登录
-            </button>
-            <button
-              className={clsx("auth-tab", authMode === "register" && "active")}
-              onClick={() => {
-                setAuthMode("register");
-                setAppError(null);
-              }}
-              type="button"
-            >
-              注册
-            </button>
-          </div>
+            <div className="auth-copy-block">
+              <span className="auth-kicker">Workspace Access</span>
+              <h1>把页面、素材和账号权限，收进一个更安静的工作台。</h1>
+              <p>
+                登录后只看到自己的笔记和附件。需要新建账号时，先填写注册码
+                `221819` 完成校验，再创建独立账户。
+              </p>
+            </div>
 
-          <input
-            autoFocus
-            className="token-input"
-            onChange={(event) => setAuthUsername(event.target.value)}
-            autoComplete="username"
-            placeholder="用户名"
-            type="text"
-            value={authUsername}
-          />
-          <input
-            className="token-input"
-            onChange={(event) => setAuthPassword(event.target.value)}
-            autoComplete={authMode === "register" ? "new-password" : "current-password"}
-            placeholder="密码（至少 6 位）"
-            type="password"
-            value={authPassword}
-          />
-          {authMode === "register" ? (
-            <input
-              className="token-input"
-              onChange={(event) => setAuthInviteCode(event.target.value)}
-              placeholder="注册码"
-              type="password"
-              value={authInviteCode}
-            />
-          ) : null}
-          {appError ? <p className="form-error">{appError}</p> : null}
-          <button className="primary-button" disabled={authPending} type="submit">
-            <Lock size={16} />
-            {authPending ? "提交中" : authMode === "register" ? "验证并注册" : "进入工作区"}
-          </button>
-        </form>
+            <div className="auth-preview" aria-hidden="true">
+              <div className="auth-preview-sidebar">
+                <span className="auth-preview-label">最近页面</span>
+                <div className="auth-preview-nav">
+                  <div className="auth-preview-item active">
+                    <span>📝</span>
+                    <div>
+                      <strong>产品周报</strong>
+                      <small>刚刚更新</small>
+                    </div>
+                  </div>
+                  <div className="auth-preview-item">
+                    <span>📚</span>
+                    <div>
+                      <strong>资料库</strong>
+                      <small>3 个附件</small>
+                    </div>
+                  </div>
+                  <div className="auth-preview-item">
+                    <span>✅</span>
+                    <div>
+                      <strong>上线清单</strong>
+                      <small>自动保存</small>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <div className="auth-preview-main">
+                <div className="auth-preview-header">
+                  <div>
+                    <span className="auth-preview-tag">私有工作区</span>
+                    <h2>今日工作台</h2>
+                  </div>
+                  <div className="auth-preview-avatars">
+                    <span>MN</span>
+                    <span>R2</span>
+                  </div>
+                </div>
+
+                <div className="auth-preview-lines">
+                  <span className="w-100" />
+                  <span className="w-76" />
+                  <span className="w-92" />
+                </div>
+
+                <div className="auth-preview-footer">
+                  <div className="auth-preview-pill">
+                    <ShieldCheck size={14} />
+                    账户隔离
+                  </div>
+                  <div className="auth-preview-pill">
+                    <UploadCloud size={14} />
+                    R2 直传
+                  </div>
+                  <div className="auth-preview-pill">
+                    <Database size={14} />
+                    D1 存储
+                  </div>
+                </div>
+              </div>
+            </div>
+          </section>
+
+          <form className="auth-surface" onSubmit={submitAuth}>
+            <div className="auth-surface-top">
+              <div className="lock-mark">
+                <Lock size={22} />
+              </div>
+              <span className="auth-eyebrow">
+                {authMode === "register" ? "注册校验" : "账户登录"}
+              </span>
+              <h2>{authMode === "register" ? "创建账号" : "登录 Mini Notes"}</h2>
+              <p className="lock-copy">
+                {authMode === "register"
+                  ? "填写用户名、密码和注册码后，即可创建自己的独立笔记空间。"
+                  : hasUsers
+                    ? "已有账号直接登录，没有账号可切换到注册。"
+                    : "当前还没有可用账号，先用注册码创建第一个账户。"}
+              </p>
+            </div>
+
+            <div className="auth-tabs" role="tablist" aria-label="登录方式">
+              <button
+                className={clsx("auth-tab", authMode === "login" && "active")}
+                onClick={() => {
+                  setAuthMode("login");
+                  setAppError(null);
+                }}
+                type="button"
+              >
+                登录
+              </button>
+              <button
+                className={clsx("auth-tab", authMode === "register" && "active")}
+                onClick={() => {
+                  setAuthMode("register");
+                  setAppError(null);
+                }}
+                type="button"
+              >
+                注册
+              </button>
+            </div>
+
+            <label className="auth-field">
+              <span>用户名</span>
+              <input
+                autoComplete="username"
+                autoFocus
+                className="token-input"
+                onChange={(event) => setAuthUsername(event.target.value)}
+                placeholder="输入用户名"
+                type="text"
+                value={authUsername}
+              />
+            </label>
+
+            <label className="auth-field">
+              <span>密码</span>
+              <input
+                autoComplete={authMode === "register" ? "new-password" : "current-password"}
+                className="token-input"
+                onChange={(event) => setAuthPassword(event.target.value)}
+                placeholder="至少 6 位"
+                type="password"
+                value={authPassword}
+              />
+            </label>
+
+            {authMode === "register" ? (
+              <label className="auth-field">
+                <span>注册码</span>
+                <input
+                  className="token-input"
+                  onChange={(event) => setAuthInviteCode(event.target.value)}
+                  placeholder="输入注册码 221819"
+                  type="password"
+                  value={authInviteCode}
+                />
+              </label>
+            ) : null}
+
+            {appError ? (
+              <div className="form-error-panel" role="alert">
+                <strong>提交失败</strong>
+                <p className="form-error">{appError}</p>
+              </div>
+            ) : null}
+
+            <button className="primary-button auth-submit" disabled={authPending} type="submit">
+              <span>{authPending ? "提交中" : authMode === "register" ? "验证并注册" : "进入工作区"}</span>
+              <ArrowRight size={16} />
+            </button>
+
+            <div className="auth-helper-row">
+              <div className="auth-helper-item">
+                <ShieldCheck size={15} />
+                每个账号的笔记和附件彼此隔离
+              </div>
+              <div className="auth-helper-item">
+                <UploadCloud size={15} />
+                图片、音频、视频和文件都支持直接上传
+              </div>
+            </div>
+          </form>
+        </section>
       </main>
     );
   }
@@ -455,7 +819,7 @@ function App() {
           <div className="brand-mark">MN</div>
           <div>
             <strong>Mini Notes</strong>
-            <span>{sessionUser?.username ?? "当前账号"} · {notes.length} 页</span>
+            <span>{sessionUser?.username ?? "当前账号"} · {notes.length} 篇</span>
           </div>
         </div>
 
@@ -468,7 +832,7 @@ function App() {
           />
         </label>
 
-        <button className="new-page-button" onClick={createNewNote} type="button">
+        <button className="new-page-button" onClick={() => void createNewNote()} type="button">
           <Plus size={16} />
           新页面
         </button>
@@ -484,7 +848,10 @@ function App() {
               <span className="note-icon">{normalizePageIcon(note.icon)}</span>
               <span className="note-row-text">
                 <strong>{note.title}</strong>
-                <small>{formatRelative(note.updatedAt)}</small>
+                <span className="note-row-subline">
+                  <small>{formatRelative(note.updatedAt)}</small>
+                  {note.shareToken ? <em className="mini-share-badge">已共享</em> : null}
+                </span>
               </span>
             </button>
           ))}
@@ -497,11 +864,119 @@ function App() {
             <FileText size={17} />
             <span>{draft?.title ?? "未命名"}</span>
           </div>
+
           <div className="topbar-actions">
+            {draft?.shareToken ? (
+              <span className="share-state">
+                <Globe2 size={15} />
+                共享中
+              </span>
+            ) : null}
+
             <span className={clsx("save-state", saveStatus)}>
               {saveStatus === "saving" ? <Clock3 size={15} /> : <Check size={15} />}
               {saveLabel(saveStatus)}
             </span>
+
+            <div className="topbar-stack">
+              <button
+                aria-label="共享当前页面"
+                className={clsx("toolbar-button", shareOpen && "active")}
+                disabled={!draft}
+                onClick={openSharePanel}
+                title="共享当前页面"
+                type="button"
+              >
+                {draft?.shareToken ? <Globe2 size={16} /> : <Link2 size={16} />}
+                共享
+              </button>
+
+              {shareOpen && draft ? (
+                <div className="share-panel">
+                  <div className="share-panel-head">
+                    <div>
+                      <strong>页面分享</strong>
+                      <p>由你主动开启，关闭后旧链接会立刻失效。</p>
+                    </div>
+                    {draft.shareToken ? (
+                      <span className="share-panel-badge">
+                        <Globe2 size={14} />
+                        已开启
+                      </span>
+                    ) : (
+                      <span className="share-panel-badge muted">未开启</span>
+                    )}
+                  </div>
+
+                  {draft.shareToken ? (
+                    <>
+                      <label className="share-panel-field">
+                        <span>分享链接</span>
+                        <div className="share-input-row">
+                          <input
+                            className="share-link-input"
+                            readOnly
+                            type="text"
+                            value={shareUrl}
+                          />
+                          <button
+                            className="toolbar-button compact"
+                            onClick={() => void copyShareLink()}
+                            type="button"
+                          >
+                            <Copy size={15} />
+                            {shareCopied ? "已复制" : "复制"}
+                          </button>
+                        </div>
+                      </label>
+
+                      <div className="share-status-row">
+                        <span>开启时间：{draft.sharedAt ? formatDateTime(draft.sharedAt) : "刚刚"}</span>
+                        <span>任何拿到链接的人都能免登录查看此页</span>
+                      </div>
+
+                      <div className="share-panel-actions">
+                        <a
+                          className="toolbar-button"
+                          href={shareUrl}
+                          rel="noreferrer"
+                          target="_blank"
+                        >
+                          <ExternalLink size={15} />
+                          打开链接
+                        </a>
+                        <button
+                          className="toolbar-button danger"
+                          disabled={sharePending}
+                          onClick={() => void disableCurrentShare()}
+                          type="button"
+                        >
+                          关闭分享
+                        </button>
+                      </div>
+                    </>
+                  ) : (
+                    <>
+                      <p className="share-panel-copy">
+                        开启后会生成一个只读分享链接，别人打开时不会被登录页拦截。
+                      </p>
+                      <div className="share-panel-actions">
+                        <button
+                          className="primary-button share-primary"
+                          disabled={sharePending}
+                          onClick={() => void enableCurrentShare()}
+                          type="button"
+                        >
+                          <Globe2 size={16} />
+                          {sharePending ? "开启中" : "开启公开分享"}
+                        </button>
+                      </div>
+                    </>
+                  )}
+                </div>
+              ) : null}
+            </div>
+
             <button
               aria-label="归档页面"
               className="icon-button"
@@ -553,12 +1028,14 @@ function App() {
                 ))}
               </div>
             </div>
+
             <input
               className="title-input"
               onChange={(event) => editDraft({ title: event.target.value })}
               placeholder="未命名"
               value={draft.title}
             />
+
             <NotebookEditor
               key={draft.id}
               note={draft}
@@ -653,6 +1130,21 @@ function formatRelative(value: string): string {
     month: "short",
     day: "numeric"
   }).format(timestamp);
+}
+
+function formatDateTime(value: string): string {
+  return new Intl.DateTimeFormat("zh-CN", {
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit"
+  }).format(new Date(value));
+}
+
+function getShareTokenFromPath(pathname: string): string | null {
+  const match = /^\/share\/([^/]+)\/?$/.exec(pathname);
+  return match ? decodeURIComponent(match[1]) : null;
 }
 
 export default App;

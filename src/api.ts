@@ -50,6 +50,10 @@ export async function getNote(id: string): Promise<Note> {
   return apiRequest(`/api/notes/${encodeURIComponent(id)}`);
 }
 
+export async function getPublicNote(shareToken: string): Promise<Note> {
+  return apiRequest(`/api/public/notes/${encodeURIComponent(shareToken)}`);
+}
+
 export async function createNote(input: NoteCreateInput): Promise<Note> {
   return apiRequest("/api/notes", {
     method: "POST",
@@ -69,6 +73,18 @@ export async function updateNote(
 
 export async function deleteNote(id: string): Promise<{ ok: true }> {
   return apiRequest(`/api/notes/${encodeURIComponent(id)}`, {
+    method: "DELETE"
+  });
+}
+
+export async function enableShare(id: string): Promise<Note> {
+  return apiRequest(`/api/notes/${encodeURIComponent(id)}/share`, {
+    method: "POST"
+  });
+}
+
+export async function disableShare(id: string): Promise<Note> {
+  return apiRequest(`/api/notes/${encodeURIComponent(id)}/share`, {
     method: "DELETE"
   });
 }
@@ -96,14 +112,10 @@ async function apiRequest<T>(path: string, init: RequestInit = {}): Promise<T> {
   });
   const text = await response.text();
   const data = tryParseJson(text);
+  const contentType = response.headers.get("Content-Type") ?? "";
 
   if (!response.ok) {
-    const message =
-      (data && typeof data === "object" && "error" in data && typeof data.error === "string"
-        ? data.error
-        : null) ??
-      text.trim() ??
-      response.statusText;
+    const message = summarizeApiError(data, text, contentType, response.statusText);
     throw new ApiError(message || "请求失败。", response.status);
   }
 
@@ -124,4 +136,27 @@ function tryParseJson(value: string): unknown {
   } catch {
     return null;
   }
+}
+
+function summarizeApiError(
+  data: unknown,
+  text: string,
+  contentType: string,
+  statusText: string
+): string {
+  if (data && typeof data === "object" && "error" in data && typeof data.error === "string") {
+    return data.error;
+  }
+
+  if (contentType.toLowerCase().includes("text/html") || /<!doctype html|<html/i.test(text)) {
+    const code =
+      /error code[:\s>]+(\d{3,5})/i.exec(text)?.[1] ??
+      /cf-error-code[^>]*>(\d{3,5})</i.exec(text)?.[1];
+
+    return code
+      ? `服务暂时异常，请稍后重试。错误代码 ${code}。`
+      : "服务暂时异常，请稍后重试。";
+  }
+
+  return text.trim() || statusText || "请求失败。";
 }

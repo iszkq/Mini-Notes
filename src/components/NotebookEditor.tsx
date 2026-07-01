@@ -10,10 +10,11 @@ import type { Note, NoteBlock } from "../shared";
 
 type NotebookEditorProps = {
   note: Note;
+  readOnly?: boolean;
   onChange: (blocks: NoteBlock[]) => void;
 };
 
-export function NotebookEditor({ note, onChange }: NotebookEditorProps) {
+export function NotebookEditor({ note, onChange, readOnly = false }: NotebookEditorProps) {
   const initialContent = useMemo(() => {
     return note.content.length > 0
       ? (note.content as PartialBlock[])
@@ -60,8 +61,13 @@ export function NotebookEditor({ note, onChange }: NotebookEditorProps) {
   return (
     <BlockNoteView
       className="note-editor"
+      editable={!readOnly}
       editor={editor}
-      onChange={() => onChange(editor.document as NoteBlock[])}
+      onChange={() => {
+        if (!readOnly) {
+          onChange(editor.document as NoteBlock[]);
+        }
+      }}
       theme="light"
     />
   );
