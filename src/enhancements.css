@@ -175,6 +175,24 @@
   font-size: 0.78rem;
 }
 
+.sidebar-show-more {
+  width: calc(100% - 22px);
+  min-height: 32px;
+  margin-left: 22px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: #6b665d;
+  font-size: 0.8rem;
+  font-weight: 700;
+  text-align: left;
+}
+
+.sidebar-show-more:hover {
+  background: #e5dfd3;
+  color: #24231f;
+}
+
 .note-row.dragging {
   opacity: 0.28;
 }

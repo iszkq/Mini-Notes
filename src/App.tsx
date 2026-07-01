@@ -88,6 +88,11 @@ type NoteDropTarget = {
   beforeId: string | null;
 };
 
+const SIDEBAR_GROUP_PAGE_SIZE = 80;
+const SIDEBAR_GROUP_PAGE_STEP = 80;
+const SIDEBAR_SEARCH_PAGE_SIZE = 120;
+const UNCATEGORIZED_GROUP_KEY = "__uncategorized__";
+
 /*
 const PAGE_PRESETS: PagePreset[] = [
   { value: "📝", label: "笔记" },
@@ -174,6 +179,8 @@ function App() {
   const [pageIconPickerTargetId, setPageIconPickerTargetId] = useState<string | null>(null);
   const [draggedNoteId, setDraggedNoteId] = useState<string | null>(null);
   const [dropTarget, setDropTarget] = useState<NoteDropTarget | null>(null);
+  const [sidebarGroupLimits, setSidebarGroupLimits] = useState<Record<string, number>>({});
+  const [sidebarSearchLimit, setSidebarSearchLimit] = useState(SIDEBAR_SEARCH_PAGE_SIZE);
   const isAdminView = workspaceView === "admin" && Boolean(sessionUser?.isAdmin);
 
   useEffect(() => {
@@ -469,6 +476,67 @@ function App() {
         matchedParentIds.has(category.id) || category.title.toLowerCase().includes(term)
     );
   }, [categories, query, visibleNotes]);
+
+  const getSidebarGroupKey = useCallback(
+    (parentId: string | null) => parentId ?? UNCATEGORIZED_GROUP_KEY,
+    []
+  );
+
+  const getSidebarGroupLimit = useCallback(
+    (parentId: string | null) =>
+      sidebarGroupLimits[getSidebarGroupKey(parentId)] ?? SIDEBAR_GROUP_PAGE_SIZE,
+    [getSidebarGroupKey, sidebarGroupLimits]
+  );
+
+  const showMoreInSidebarGroup = useCallback(
+    (parentId: string | null, total: number) => {
+      const groupKey = getSidebarGroupKey(parentId);
+      setSidebarGroupLimits((current) => ({
+        ...current,
+        [groupKey]: Math.min(
+          total,
+          (current[groupKey] ?? SIDEBAR_GROUP_PAGE_SIZE) + SIDEBAR_GROUP_PAGE_STEP
+        )
+      }));
+    },
+    [getSidebarGroupKey]
+  );
+
+  useEffect(() => {
+    setSidebarSearchLimit(SIDEBAR_SEARCH_PAGE_SIZE);
+  }, [query]);
+
+  useEffect(() => {
+    if (!selectedId || query.trim()) {
+      return;
+    }
+
+    const selectedNote = sortedNotes.find((note) => note.id === selectedId);
+    if (!selectedNote) {
+      return;
+    }
+
+    const parentId = selectedNote.parentId ?? null;
+    const groupNotes = pagesByCategory.get(parentId) ?? [];
+    const selectedIndex = groupNotes.findIndex((note) => note.id === selectedId);
+    if (selectedIndex < 0) {
+      return;
+    }
+
+    const minimumLimit =
+      Math.ceil((selectedIndex + 1) / SIDEBAR_GROUP_PAGE_STEP) * SIDEBAR_GROUP_PAGE_STEP;
+    const groupKey = getSidebarGroupKey(parentId);
+    setSidebarGroupLimits((current) => {
+      if ((current[groupKey] ?? SIDEBAR_GROUP_PAGE_SIZE) >= minimumLimit) {
+        return current;
+      }
+
+      return {
+        ...current,
+        [groupKey]: minimumLimit
+      };
+    });
+  }, [getSidebarGroupKey, pagesByCategory, query, selectedId, sortedNotes]);
 
   const shareUrl = useMemo(() => {
     if (!draft?.shareToken || typeof window === "undefined") {
@@ -1932,7 +2000,9 @@ function App() {
         ) : null}
 
         <nav aria-label="页面列表" className="note-list">
-          {query.trim() ? visibleNotes.map((note) => (
+          {query.trim() ? (
+            <>
+              {visibleNotes.slice(0, sidebarSearchLimit).map((note) => (
             <button
               className={clsx("note-row", note.id === selectedId && "active")}
               key={note.id}
@@ -1949,7 +2019,22 @@ function App() {
                 </span>
               </span>
             </button>
-          )) : (
+              ))}
+              {visibleNotes.length > sidebarSearchLimit ? (
+                <button
+                  className="sidebar-show-more"
+                  onClick={() =>
+                    setSidebarSearchLimit((current) =>
+                      Math.min(visibleNotes.length, current + SIDEBAR_SEARCH_PAGE_SIZE)
+                    )
+                  }
+                  type="button"
+                >
+                  显示更多（{visibleNotes.length - sidebarSearchLimit}）
+                </button>
+              ) : null}
+            </>
+          ) : (
             <>
               {uncategorizedNotes.length > 0 || draggedNoteId ? (
                 <div
@@ -1961,7 +2046,9 @@ function App() {
                   onDrop={(event) => handleGroupDrop(event, null)}
                 >
                   <div className="note-group-title">未分类</div>
-                  {uncategorizedNotes.length > 0 ? uncategorizedNotes.map((note) => (
+                  {uncategorizedNotes.length > 0 ? uncategorizedNotes
+                    .slice(0, getSidebarGroupLimit(null))
+                    .map((note) => (
                     <Fragment key={note.id}>
                     {renderDropPlaceholder(null, note.id)}
                     <button
@@ -1992,12 +2079,23 @@ function App() {
                   )) : (
                     <div className="category-empty">拖到这里移出分类</div>
                   )}
+                  {uncategorizedNotes.length > getSidebarGroupLimit(null) ? (
+                    <button
+                      className="sidebar-show-more"
+                      onClick={() => showMoreInSidebarGroup(null, uncategorizedNotes.length)}
+                      type="button"
+                    >
+                      显示更多（{uncategorizedNotes.length - getSidebarGroupLimit(null)}）
+                    </button>
+                  ) : null}
                   {renderDropPlaceholder(null, null)}
                 </div>
               ) : null}
 
               {visibleCategories.map((category) => {
                 const categoryNotes = pagesByCategory.get(category.id) ?? [];
+                const categoryLimit = getSidebarGroupLimit(category.id);
+                const visibleCategoryNotes = categoryNotes.slice(0, categoryLimit);
                 const isCollapsed = collapsedCategoryIds.includes(category.id);
                 const isEditing = editingCategoryId === category.id;
 
@@ -2072,7 +2170,7 @@ function App() {
                         onDrop={(event) => handleGroupDrop(event, category.id)}
                       >
                         {categoryNotes.length > 0 ? (
-                          categoryNotes.map((note) => (
+                          visibleCategoryNotes.map((note) => (
                             <Fragment key={note.id}>
                             {renderDropPlaceholder(category.id, note.id, true)}
                             <button
@@ -2104,6 +2202,15 @@ function App() {
                         ) : (
                           <div className="category-empty">这个分类下还没有页面</div>
                         )}
+                        {categoryNotes.length > categoryLimit ? (
+                          <button
+                            className="sidebar-show-more"
+                            onClick={() => showMoreInSidebarGroup(category.id, categoryNotes.length)}
+                            type="button"
+                          >
+                            显示更多（{categoryNotes.length - categoryLimit}）
+                          </button>
+                        ) : null}
                         {renderDropPlaceholder(category.id, null, true)}
                       </div>
                     ) : null}
