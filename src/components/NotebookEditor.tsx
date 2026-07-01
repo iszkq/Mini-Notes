@@ -11,7 +11,7 @@ import {
   useCreateBlockNote
 } from "@blocknote/react";
 import { BookOpen } from "lucide-react";
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { uploadAsset } from "../api";
 import { serializeBibleVerses, type BibleVerse } from "../bible";
 import { noteSchema } from "../editorSchema";
@@ -131,7 +131,8 @@ export function NotebookEditor({ note, onChange, readOnly = false }: NotebookEdi
           type: "bibleVerseCard",
           props: {
             count: verses.length,
-            payload: serializeBibleVerses(verses)
+            payload: serializeBibleVerses(verses),
+            title: `经文摘录 · ${verses.length} 节`
           }
         },
         {
@@ -161,6 +162,35 @@ export function NotebookEditor({ note, onChange, readOnly = false }: NotebookEdi
     [bibleInsertTarget, editor]
   );
 
+  useEffect(() => {
+    if (readOnly || typeof window === "undefined") {
+      return;
+    }
+
+    const handleKeydown = (event: KeyboardEvent) => {
+      const activeElement = document.activeElement;
+      const editorHasFocus =
+        activeElement instanceof HTMLElement && Boolean(activeElement.closest(".note-editor"));
+
+      if (
+        !editorHasFocus ||
+        !event.ctrlKey ||
+        !event.altKey ||
+        event.metaKey ||
+        event.shiftKey ||
+        event.key.toLowerCase() !== "b"
+      ) {
+        return;
+      }
+
+      event.preventDefault();
+      openBibleInsertModal();
+    };
+
+    window.addEventListener("keydown", handleKeydown);
+    return () => window.removeEventListener("keydown", handleKeydown);
+  }, [openBibleInsertModal, readOnly]);
+
   const getSlashMenuItems = useCallback(
     async (query: string): Promise<DefaultReactSuggestionItem[]> => {
       const defaultItems = getDefaultReactSlashMenuItems(editor);
@@ -170,7 +200,8 @@ export function NotebookEditor({ note, onChange, readOnly = false }: NotebookEdi
         title: "圣经",
         subtext: "插入经文",
         aliases: ["经文", "圣经", "bible", "scripture"],
-        group: heading3Index >= 0 ? defaultItems[heading3Index]?.group : defaultItems[0]?.group,
+        badge: "CTRL-ALT-B",
+        group: "圣经",
         icon: <BookOpen size={18} />,
         onItemClick: openBibleInsertModal
       };

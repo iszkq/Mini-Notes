@@ -25,7 +25,16 @@ import {
   UploadCloud,
   WifiOff
 } from "lucide-react";
-import { type CSSProperties, FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  type CSSProperties,
+  type FormEvent,
+  type MouseEvent as ReactMouseEvent,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState
+} from "react";
 import { createPortal } from "react-dom";
 import {
   ApiError,
@@ -55,6 +64,12 @@ type WorkspaceView = "notes" | "admin";
 type PagePreset = {
   value: string;
   label: string;
+};
+
+type CategoryActionMenu = {
+  categoryId: string;
+  left: number;
+  top: number;
 };
 
 /*
@@ -136,6 +151,7 @@ function App() {
   const shareButtonRef = useRef<HTMLButtonElement | null>(null);
   const [sharePanelStyle, setSharePanelStyle] = useState<CSSProperties>({});
   const [categoryMenuOpen, setCategoryMenuOpen] = useState(false);
+  const [categoryActionMenu, setCategoryActionMenu] = useState<CategoryActionMenu | null>(null);
   const isAdminView = workspaceView === "admin" && Boolean(sessionUser?.isAdmin);
 
   useEffect(() => {
@@ -161,6 +177,7 @@ function App() {
     setCollapsedCategoryIds([]);
     setEditingCategoryId(null);
     setEditingCategoryTitle("");
+    setCategoryActionMenu(null);
   }, []);
 
   const loadNote = useCallback(
@@ -296,11 +313,13 @@ function App() {
     if (workspaceView === "admin") {
       setExportOpen(false);
       setCategoryMenuOpen(false);
+      setCategoryActionMenu(null);
     }
   }, [workspaceView]);
 
   useEffect(() => {
     setCategoryMenuOpen(false);
+    setCategoryActionMenu(null);
   }, [draft?.id, isAdminView]);
 
   useEffect(() => {
@@ -361,6 +380,11 @@ function App() {
   const selectedCategory = useMemo(
     () => categories.find((category) => category.id === draft?.parentId) ?? null,
     [categories, draft?.parentId]
+  );
+
+  const contextCategory = useMemo(
+    () => categories.find((category) => category.id === categoryActionMenu?.categoryId) ?? null,
+    [categories, categoryActionMenu?.categoryId]
   );
 
   const visibleNotes = useMemo(() => {
@@ -500,6 +524,7 @@ function App() {
 
   const createNewNote = useCallback(async (parentId: string | null = null) => {
     setWorkspaceView("notes");
+    setCategoryActionMenu(null);
     if (draft && dirty) {
       await saveDraft(draft, revisionRef.current);
     }
@@ -528,6 +553,7 @@ function App() {
 
   const createCategory = useCallback(async () => {
     setWorkspaceView("notes");
+    setCategoryActionMenu(null);
     if (draft && dirty) {
       await saveDraft(draft, revisionRef.current);
     }
@@ -681,7 +707,29 @@ function App() {
     );
   };
 
+  const openCategoryActionMenu = (
+    event: ReactMouseEvent<HTMLDivElement>,
+    category: NoteSummary
+  ) => {
+    event.preventDefault();
+    event.stopPropagation();
+
+    const menuWidth = 178;
+    const menuHeight = 142;
+    const viewportWidth = typeof window === "undefined" ? 0 : window.innerWidth;
+    const viewportHeight = typeof window === "undefined" ? 0 : window.innerHeight;
+    const left = viewportWidth
+      ? Math.max(12, Math.min(event.clientX, Math.max(12, viewportWidth - menuWidth - 12)))
+      : event.clientX;
+    const top = viewportHeight
+      ? Math.max(12, Math.min(event.clientY, Math.max(12, viewportHeight - menuHeight - 12)))
+      : event.clientY;
+
+    setCategoryActionMenu({ categoryId: category.id, left, top });
+  };
+
   const startCategoryEdit = (category: NoteSummary) => {
+    setCategoryActionMenu(null);
     setEditingCategoryId(category.id);
     setEditingCategoryTitle(category.title);
   };
@@ -720,6 +768,7 @@ function App() {
   const openSharePanel = () => {
     setExportOpen(false);
     setCategoryMenuOpen(false);
+    setCategoryActionMenu(null);
     setShareOpen((current) => !current);
     setShareCopied(false);
   };
@@ -728,6 +777,7 @@ function App() {
     setShareOpen(false);
     setShareCopied(false);
     setCategoryMenuOpen(false);
+    setCategoryActionMenu(null);
     setExportOpen(true);
     setExportSelection((current) => {
       if (current.length > 0) {
@@ -970,6 +1020,62 @@ function App() {
                   </div>
                 </>
               )}
+            </div>
+          </>,
+          document.body
+        )
+      : null;
+
+  const categoryActionPanel =
+    categoryActionMenu && contextCategory && typeof document !== "undefined"
+      ? createPortal(
+          <>
+            <button
+              aria-label="关闭分类操作菜单"
+              className="category-context-backdrop"
+              onClick={() => setCategoryActionMenu(null)}
+              onContextMenu={(event) => {
+                event.preventDefault();
+                setCategoryActionMenu(null);
+              }}
+              type="button"
+            />
+            <div
+              aria-label={`${contextCategory.title} 分类操作`}
+              className="category-context-menu"
+              role="menu"
+              style={{
+                left: `${categoryActionMenu.left}px`,
+                top: `${categoryActionMenu.top}px`
+              }}
+            >
+              <button
+                className="category-context-menu__item"
+                onClick={() => void createNewNote(contextCategory.id)}
+                role="menuitem"
+                type="button"
+              >
+                <Plus size={15} />
+                新建页面
+              </button>
+              <button
+                className="category-context-menu__item"
+                onClick={() => startCategoryEdit(contextCategory)}
+                role="menuitem"
+                type="button"
+              >
+                <Pencil size={15} />
+                重命名分类
+              </button>
+              <button
+                className="category-context-menu__item danger"
+                onClick={() => void archiveCategory(contextCategory)}
+                role="menuitem"
+                type="button"
+              >
+                <Trash2 size={15} />
+                删除分类
+              </button>
             </div>
           </>,
           document.body
@@ -1364,7 +1470,10 @@ function App() {
 
                 return (
                   <div className="note-group" key={category.id}>
-                    <div className="category-row">
+                    <div
+                      className="category-row"
+                      onContextMenu={(event) => openCategoryActionMenu(event, category)}
+                    >
                       <button
                         className="category-toggle"
                         onClick={() => toggleCategoryCollapse(category.id)}
@@ -1407,33 +1516,6 @@ function App() {
                           {category.title}
                         </button>
                       )}
-
-                      <div className="category-row-actions">
-                        <button
-                          className="category-action"
-                          onClick={() => void createNewNote(category.id)}
-                          title="在这个分类下新建页面"
-                          type="button"
-                        >
-                          <Plus size={14} />
-                        </button>
-                        <button
-                          className="category-action"
-                          onClick={() => startCategoryEdit(category)}
-                          title="重命名分类"
-                          type="button"
-                        >
-                          <Pencil size={14} />
-                        </button>
-                        <button
-                          className="category-action danger"
-                          onClick={() => void archiveCategory(category)}
-                          title="删除分类"
-                          type="button"
-                        >
-                          <Trash2 size={14} />
-                        </button>
-                      </div>
                     </div>
 
                     {!isCollapsed ? (
@@ -1512,6 +1594,7 @@ function App() {
                         setExportOpen(false);
                         setShareOpen(false);
                         setShareCopied(false);
+                        setCategoryActionMenu(null);
                         setCategoryMenuOpen((current) => !current);
                       }}
                       title="选择所在分类"
@@ -1689,6 +1772,7 @@ function App() {
           </section>
         )}
       </section>
+      {categoryActionPanel}
       {exportPanel}
     </main>
   );
