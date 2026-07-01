@@ -40,7 +40,9 @@ export type LoginInput = {
   password: string;
 };
 
-export type RegisterInput = LoginInput;
+export type RegisterInput = LoginInput & {
+  inviteCode: string;
+};
 
 export type SessionStatus = {
   ok: true;

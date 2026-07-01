@@ -95,15 +95,33 @@ async function apiRequest<T>(path: string, init: RequestInit = {}): Promise<T> {
     headers
   });
   const text = await response.text();
-  const data = text ? JSON.parse(text) : null;
+  const data = tryParseJson(text);
 
   if (!response.ok) {
-    throw new ApiError(data?.error ?? response.statusText, response.status);
+    const message =
+      (data && typeof data === "object" && "error" in data && typeof data.error === "string"
+        ? data.error
+        : null) ??
+      text.trim() ??
+      response.statusText;
+    throw new ApiError(message || "请求失败。", response.status);
   }
 
-  return data as T;
+  return (data ?? null) as T;
 }
 
 function shouldSetJsonContentType(body: RequestInit["body"]): body is string {
   return typeof body === "string";
+}
+
+function tryParseJson(value: string): unknown {
+  if (!value.trim()) {
+    return null;
+  }
+
+  try {
+    return JSON.parse(value);
+  } catch {
+    return null;
+  }
 }

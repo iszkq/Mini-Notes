@@ -71,6 +71,7 @@ function App() {
   const [sessionUser, setSessionUser] = useState<AuthUser | null>(null);
   const [authUsername, setAuthUsername] = useState("");
   const [authPassword, setAuthPassword] = useState("");
+  const [authInviteCode, setAuthInviteCode] = useState("");
   const [hasUsers, setHasUsers] = useState(false);
   const [authPending, setAuthPending] = useState(false);
   const [isLocked, setIsLocked] = useState(false);
@@ -93,8 +94,9 @@ function App() {
   const handleLoggedOut = useCallback((nextHasUsers = true) => {
     setSessionUser(null);
     setHasUsers(nextHasUsers);
-    setAuthMode(nextHasUsers ? "login" : "register");
+    setAuthMode("login");
     setAuthPassword("");
+    setAuthInviteCode("");
     setIsLocked(true);
     setNotes([]);
     setDraft(null);
@@ -138,7 +140,7 @@ function App() {
       setSessionUser(status.user);
 
       if (!status.authenticated) {
-        setAuthMode(status.hasUsers ? "login" : "register");
+        setAuthMode("login");
         setIsLocked(true);
         setIsBooting(false);
         return;
@@ -330,13 +332,18 @@ function App() {
         username: authUsername.trim(),
         password: authPassword
       };
-
       const status =
-        authMode === "register" ? await register(payload) : await login(payload);
+        authMode === "register"
+          ? await register({
+              ...payload,
+              inviteCode: authInviteCode.trim()
+            })
+          : await login(payload);
 
       setSessionUser(status.user);
       setHasUsers(true);
       setAuthPassword("");
+      setAuthInviteCode("");
       setIsLocked(false);
       await bootstrap();
     } catch (error) {
@@ -369,8 +376,6 @@ function App() {
   }
 
   if (isLocked) {
-    const registerOnly = !hasUsers;
-
     return (
       <main className="lock-screen">
         <form className="lock-panel" onSubmit={submitAuth}>
@@ -380,33 +385,38 @@ function App() {
           <h1>{authMode === "register" ? "创建账号" : "登录账号"}</h1>
           <p className="lock-copy">
             {authMode === "register"
-              ? "每个账号的笔记都会独立保存。"
-              : "登录后只会看到你自己的笔记。"}
+              ? "注册时需要先填写注册码，账号数据会独立保存。"
+              : "先登录；如果还没有账号，可以切换到注册。"}
           </p>
 
-          {!registerOnly ? (
-            <div className="auth-tabs" role="tablist" aria-label="登录方式">
-              <button
-                className={clsx("auth-tab", authMode === "login" && "active")}
-                onClick={() => setAuthMode("login")}
-                type="button"
-              >
-                登录
-              </button>
-              <button
-                className={clsx("auth-tab", authMode === "register" && "active")}
-                onClick={() => setAuthMode("register")}
-                type="button"
-              >
-                注册
-              </button>
-            </div>
-          ) : null}
+          <div className="auth-tabs" role="tablist" aria-label="登录方式">
+            <button
+              className={clsx("auth-tab", authMode === "login" && "active")}
+              onClick={() => {
+                setAuthMode("login");
+                setAppError(null);
+              }}
+              type="button"
+            >
+              登录
+            </button>
+            <button
+              className={clsx("auth-tab", authMode === "register" && "active")}
+              onClick={() => {
+                setAuthMode("register");
+                setAppError(null);
+              }}
+              type="button"
+            >
+              注册
+            </button>
+          </div>
 
           <input
             autoFocus
             className="token-input"
             onChange={(event) => setAuthUsername(event.target.value)}
+            autoComplete="username"
             placeholder="用户名"
             type="text"
             value={authUsername}
@@ -414,14 +424,24 @@ function App() {
           <input
             className="token-input"
             onChange={(event) => setAuthPassword(event.target.value)}
+            autoComplete={authMode === "register" ? "new-password" : "current-password"}
             placeholder="密码（至少 6 位）"
             type="password"
             value={authPassword}
           />
+          {authMode === "register" ? (
+            <input
+              className="token-input"
+              onChange={(event) => setAuthInviteCode(event.target.value)}
+              placeholder="注册码"
+              type="password"
+              value={authInviteCode}
+            />
+          ) : null}
           {appError ? <p className="form-error">{appError}</p> : null}
           <button className="primary-button" disabled={authPending} type="submit">
             <Lock size={16} />
-            {authPending ? "提交中" : authMode === "register" ? "创建并进入" : "进入工作区"}
+            {authPending ? "提交中" : authMode === "register" ? "验证并注册" : "进入工作区"}
           </button>
         </form>
       </main>

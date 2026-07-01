@@ -66,6 +66,7 @@ const NOTE_COLUMNS =
 const SESSION_COOKIE_NAME = "cloud_notes_session";
 const SESSION_TTL_SECONDS = 60 * 60 * 24 * 30;
 const PBKDF2_ITERATIONS = 210000;
+const REGISTRATION_INVITE_CODE = "221819";
 const DEFAULT_FILE_NAME = "未命名文件";
 const DEFAULT_FILE_MIME_TYPE = "application/octet-stream";
 const MIME_TYPE_BY_EXTENSION: Record<string, string> = {
@@ -215,6 +216,7 @@ async function registerUser(request: Request, env: Env): Promise<Response> {
   const body = await readJson<RegisterInput>(request);
   const username = cleanUsername(body.username);
   const password = cleanPassword(body.password);
+  const inviteCode = cleanInviteCode(body.inviteCode);
 
   if (!username) {
     return error("请输入 2 到 32 位用户名。", 400);
@@ -222,6 +224,10 @@ async function registerUser(request: Request, env: Env): Promise<Response> {
 
   if (!password) {
     return error("请输入至少 6 位密码。", 400);
+  }
+
+  if (inviteCode !== REGISTRATION_INVITE_CODE) {
+    return error("注册码不正确。", 403);
   }
 
   const existingUser = await env.DB.prepare(
@@ -777,6 +783,14 @@ function cleanPassword(value: unknown): string {
 
   const password = value.trim();
   return password.length >= 6 ? password.slice(0, 72) : "";
+}
+
+function cleanInviteCode(value: unknown): string {
+  if (typeof value !== "string") {
+    return "";
+  }
+
+  return value.trim().slice(0, 32);
 }
 
 async function hashPassword(password: string, salt: string): Promise<string> {
