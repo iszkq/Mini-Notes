@@ -1,0 +1,39 @@
+{
+  "name": "mini-notes",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite --host 127.0.0.1",
+    "build": "tsc -b && vite build",
+    "check": "pnpm build",
+    "preview": "vite preview --host 127.0.0.1",
+    "cf:dev": "pnpm db:migrate:local && pnpm build && wrangler dev",
+    "cf:deploy": "pnpm build && wrangler deploy",
+    "cf:release": "pnpm db:migrate && wrangler deploy",
+    "db:create": "wrangler d1 create mini_notes",
+    "db:migrate": "wrangler d1 migrations apply DB",
+    "db:migrate:local": "wrangler d1 migrations apply DB --local"
+  },
+  "dependencies": {
+    "@blocknote/core": "^0.51.4",
+    "@blocknote/mantine": "^0.51.4",
+    "@blocknote/react": "^0.51.4",
+    "@mantine/core": "^9.4.1",
+    "@mantine/hooks": "^9.4.1",
+    "@mantine/utils": "^6.0.22",
+    "clsx": "^2.1.1",
+    "lucide-react": "^1.22.0",
+    "react": "^19.2.7",
+    "react-dom": "^19.2.7"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^4.20260629.1",
+    "@types/react": "^19.2.17",
+    "@types/react-dom": "^19.2.3",
+    "@vitejs/plugin-react": "^6.0.3",
+    "typescript": "^6.0.3",
+    "vite": "^8.1.0",
+    "wrangler": "^4.105.0"
+  }
+}

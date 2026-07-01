@@ -1,0 +1,8 @@
+node_modules
+dist
+.wrangler
+.dev.vars
+*.local
+*.tsbuildinfo
+.dev-server*.log
+.dev-server.pid
