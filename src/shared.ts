@@ -3,6 +3,7 @@ export type NoteBlock = Record<string, unknown>;
 export type AuthUser = {
   id: string;
   username: string;
+  isAdmin: boolean;
 };
 
 export type NoteSummary = {
@@ -60,4 +61,40 @@ export type UploadResult = {
   name: string;
   mimeType: string;
   size: number;
+};
+
+export type AdminUser = {
+  id: string;
+  username: string;
+  isAdmin: boolean;
+  createdAt: string;
+  noteCount: number;
+  uploadCount: number;
+};
+
+export type AdminUserCreateInput = {
+  username: string;
+  password: string;
+  isAdmin?: boolean;
+};
+
+export type AdminUserUpdateInput = {
+  username?: string;
+  password?: string;
+  isAdmin?: boolean;
+};
+
+export type AdminUpload = {
+  id: string;
+  userId: string;
+  username: string;
+  name: string;
+  mimeType: string;
+  size: number;
+  createdAt: string;
+  url: string;
+};
+
+export type AdminUploadUpdateInput = {
+  name: string;
 };

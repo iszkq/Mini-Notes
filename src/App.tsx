@@ -34,11 +34,13 @@ import {
   register,
   updateNote
 } from "./api";
+import { AdminPanel } from "./components/AdminPanel";
 import { NotebookEditor } from "./components/NotebookEditor";
 import type { AuthUser, Note, NoteBlock, NoteSummary } from "./shared";
 
 type SaveStatus = "idle" | "saving" | "saved" | "error";
 type AuthMode = "login" | "register";
+type WorkspaceView = "notes" | "admin";
 
 type PagePreset = {
   value: string;
@@ -91,8 +93,10 @@ function App() {
   const [publicNote, setPublicNote] = useState<Note | null>(null);
   const [publicPending, setPublicPending] = useState(isPublicView);
   const [publicError, setPublicError] = useState<string | null>(null);
+  const [workspaceView, setWorkspaceView] = useState<WorkspaceView>("notes");
   const revisionRef = useRef(0);
   const selectedIdRef = useRef<string | null>(null);
+  const isAdminView = workspaceView === "admin" && Boolean(sessionUser?.isAdmin);
 
   useEffect(() => {
     selectedIdRef.current = selectedId;
@@ -110,6 +114,7 @@ function App() {
     setSelectedId(null);
     setShareOpen(false);
     setShareCopied(false);
+    setWorkspaceView("notes");
   }, []);
 
   const loadNote = useCallback(
@@ -234,6 +239,12 @@ function App() {
     };
   }, [initialShareToken]);
 
+  useEffect(() => {
+    if (workspaceView === "admin" && !sessionUser?.isAdmin) {
+      setWorkspaceView("notes");
+    }
+  }, [sessionUser?.isAdmin, workspaceView]);
+
   const visibleNotes = useMemo(() => {
     const term = query.trim().toLowerCase();
     const sorted = [...notes].sort(
@@ -323,6 +334,7 @@ function App() {
 
   const selectNote = useCallback(
     async (id: string) => {
+      setWorkspaceView("notes");
       if (id === selectedId) {
         return;
       }
@@ -337,6 +349,7 @@ function App() {
   );
 
   const createNewNote = useCallback(async () => {
+    setWorkspaceView("notes");
     if (draft && dirty) {
       await saveDraft(draft, revisionRef.current);
     }
@@ -806,6 +819,27 @@ function App() {
           新页面
         </button>
 
+        {sessionUser?.isAdmin ? (
+          <div className="sidebar-view-toggle">
+            <button
+              className={clsx("toolbar-button sidebar-view-button", workspaceView === "notes" && "active")}
+              onClick={() => setWorkspaceView("notes")}
+              type="button"
+            >
+              <FileText size={15} />
+              笔记
+            </button>
+            <button
+              className={clsx("toolbar-button sidebar-view-button", workspaceView === "admin" && "active")}
+              onClick={() => setWorkspaceView("admin")}
+              type="button"
+            >
+              <ShieldCheck size={15} />
+              管理台
+            </button>
+          </div>
+        ) : null}
+
         <nav aria-label="页面列表" className="note-list">
           {visibleNotes.map((note) => (
             <button
@@ -830,12 +864,27 @@ function App() {
       <section className="workspace">
         <header className="topbar">
           <div className="topbar-left">
-            <FileText size={17} />
-            <span>{draft?.title ?? (notes.length > 0 ? "选择页面" : "还没有页面")}</span>
+            {isAdminView ? <ShieldCheck size={17} /> : <FileText size={17} />}
+            <span>
+              {isAdminView
+                ? "管理员后台"
+                : draft?.title ?? (notes.length > 0 ? "选择页面" : "还没有页面")}
+            </span>
           </div>
 
           <div className="topbar-actions">
-            {draft ? (
+            {isAdminView ? (
+              <>
+                <button
+                  className="toolbar-button"
+                  onClick={() => setWorkspaceView("notes")}
+                  type="button"
+                >
+                  <FileText size={16} />
+                  返回笔记
+                </button>
+              </>
+            ) : draft ? (
               <>
                 {draft.shareToken ? (
                   <span className="share-state">
@@ -971,14 +1020,16 @@ function App() {
           </div>
         </header>
 
-        {appError ? (
+        {appError && !isAdminView ? (
           <div className="error-strip">
             <WifiOff size={16} />
             <span>{appError}</span>
           </div>
         ) : null}
 
-        {draft && !isLoadingNote ? (
+        {isAdminView && sessionUser ? (
+          <AdminPanel currentUser={sessionUser} onSessionRefresh={bootstrap} />
+        ) : draft && !isLoadingNote ? (
           <article className="page">
             <div className="page-meta">
               <span className="page-meta-label">页面类型</span>

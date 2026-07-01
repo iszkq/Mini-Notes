@@ -1,4 +1,9 @@
 import type {
+  AdminUpload,
+  AdminUploadUpdateInput,
+  AdminUser,
+  AdminUserCreateInput,
+  AdminUserUpdateInput,
   AuthUser,
   LoginInput,
   Note,
@@ -36,6 +41,7 @@ type DbNoteRow = {
 type DbUserRow = {
   id: string;
   username: string;
+  isAdmin: number;
   passwordSalt: string;
   passwordHash: string;
   createdAt: string;
@@ -45,6 +51,7 @@ type DbSessionRow = {
   id: string;
   userId: string;
   username: string;
+  isAdmin: number;
   expiresAt: string;
 };
 
@@ -56,6 +63,16 @@ type DbUploadRow = {
   mimeType: string;
   size: number | string;
   createdAt: string;
+  username?: string;
+};
+
+type DbAdminUserRow = {
+  id: string;
+  username: string;
+  isAdmin: number;
+  createdAt: string;
+  noteCount: number | string;
+  uploadCount: number | string;
 };
 
 type UploadedFormFile = Blob & {
@@ -170,6 +187,10 @@ async function handleApi(
       return error("请先登录。", 401);
     }
 
+    if (segments[0] === "admin") {
+      return handleAdminApi(request, env, user, segments);
+    }
+
     if (segments[0] === "notes" && request.method === "GET" && !segments[1]) {
       return listNotes(env, user.id);
     }
@@ -217,11 +238,11 @@ async function handleApi(
     }
 
     if (segments[0] === "files" && segments[1] && request.method === "GET") {
-      return getStoredFile(request, env, user.id, segments[1]);
+      return getStoredFile(request, env, user, segments[1]);
     }
 
     if (segments[0] === "files" && segments[1] && request.method === "HEAD") {
-      return headStoredFile(env, user.id, segments[1]);
+      return headStoredFile(env, user, segments[1]);
     }
 
     if (segments[0] === "search" && request.method === "GET") {
@@ -246,10 +267,67 @@ async function getStatus(request: Request, env: Env): Promise<Response> {
     authRequired: true,
     authenticated: Boolean(user),
     hasUsers,
-    user: user ? { id: user.id, username: user.username } : null
+    user: user
+      ? { id: user.id, username: user.username, isAdmin: user.isAdmin }
+      : null
   };
 
   return json(status);
+}
+
+async function handleAdminApi(
+  request: Request,
+  env: Env,
+  user: AuthUser,
+  segments: string[]
+): Promise<Response> {
+  if (!user.isAdmin) {
+    return error("仅管理员可访问。", 403);
+  }
+
+  if (segments[1] === "users" && request.method === "GET" && !segments[2]) {
+    return listAdminUsers(env);
+  }
+
+  if (segments[1] === "users" && request.method === "POST" && !segments[2]) {
+    return createAdminUser(request, env);
+  }
+
+  if (
+    segments[1] === "users" &&
+    segments[2] &&
+    segments[3] === "uploads" &&
+    request.method === "GET"
+  ) {
+    return listAdminUploads(env, segments[2]);
+  }
+
+  if (
+    segments[1] === "users" &&
+    segments[2] &&
+    segments[3] === "uploads" &&
+    request.method === "POST"
+  ) {
+    return createAdminUpload(request, env, segments[2]);
+  }
+
+  if (segments[1] === "users" && segments[2] && request.method === "PATCH") {
+    return updateAdminUser(request, env, user, segments[2]);
+  }
+
+  if (segments[1] === "users" && segments[2] && request.method === "DELETE") {
+    return deleteAdminUser(env, user, segments[2]);
+  }
+
+  if (segments[1] === "uploads" && segments[2] && request.method === "PATCH") {
+    return updateAdminUpload(request, env, segments[2]);
+  }
+
+  if (segments[1] === "uploads" && segments[2] && request.method === "DELETE") {
+    return deleteAdminUpload(env, segments[2]);
+  }
+
+  return error("未找到接口。", 404);
 }
 
 async function registerUser(request: Request, env: Env): Promise<Response> {
@@ -293,14 +371,15 @@ async function registerUser(request: Request, env: Env): Promise<Response> {
 
   const now = new Date().toISOString();
   const userId = crypto.randomUUID();
+  const isAdmin = userCount === 0;
   const passwordSalt = generateRandomToken(16);
   const passwordHash = await hashPassword(password, passwordSalt);
 
   await env.DB.prepare(
-    `INSERT INTO users (id, username, password_salt, password_hash, created_at)
-     VALUES (?, ?, ?, ?, ?)`
+    `INSERT INTO users (id, username, is_admin, password_salt, password_hash, created_at)
+     VALUES (?, ?, ?, ?, ?, ?)`
   )
-    .bind(userId, username, passwordSalt, passwordHash, now)
+    .bind(userId, username, isAdmin ? 1 : 0, passwordSalt, passwordHash, now)
     .run();
 
   if (userCount === 0) {
@@ -313,7 +392,8 @@ async function registerUser(request: Request, env: Env): Promise<Response> {
 
   return createSessionResponse(request, env, {
     id: userId,
-    username
+    username,
+    isAdmin
   });
 }
 
@@ -329,6 +409,7 @@ async function loginUser(request: Request, env: Env): Promise<Response> {
   const user = await env.DB.prepare(
     `SELECT id,
             username,
+            is_admin AS isAdmin,
             password_salt AS passwordSalt,
             password_hash AS passwordHash,
             created_at AS createdAt
@@ -357,7 +438,8 @@ async function loginUser(request: Request, env: Env): Promise<Response> {
 
   return createSessionResponse(request, env, {
     id: user.id,
-    username: user.username
+    username: user.username,
+    isAdmin: Boolean(user.isAdmin)
   });
 }
 
@@ -657,44 +739,19 @@ async function uploadFile(
     return error("请选择要上传的文件。", 400);
   }
 
-  const fileName = cleanFileName(entry.name);
-  const mimeType = detectMimeType(entry.type, fileName);
-  const uploadId = crypto.randomUUID();
-  const now = new Date().toISOString();
-  const objectKey = `${userId}/${uploadId}${getFileExtension(fileName)}`;
-
-  await env.FILES.put(objectKey, entry, {
-    httpMetadata: {
-      contentType: mimeType
-    }
-  });
-
-  await env.DB.prepare(
-    `INSERT INTO uploads
-       (id, user_id, object_key, file_name, mime_type, size, created_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?)`
-  )
-    .bind(uploadId, userId, objectKey, fileName, mimeType, entry.size, now)
-    .run();
-
-  const result: UploadResult = {
-    id: uploadId,
-    url: `/api/files/${encodeURIComponent(uploadId)}`,
-    name: fileName,
-    mimeType,
-    size: entry.size
-  };
-
+  const result = await persistUpload(env, userId, entry);
   return json(result, 201);
 }
 
 async function getStoredFile(
   request: Request,
   env: Env,
-  userId: string,
+  user: AuthUser,
   uploadId: string
 ): Promise<Response> {
-  const upload = await findUpload(env, userId, uploadId);
+  const upload = user.isAdmin
+    ? await findUploadById(env, uploadId)
+    : await findUpload(env, user.id, uploadId);
   if (!upload) {
     return error("文件不存在。", 404);
   }
@@ -778,10 +835,12 @@ async function getPublicStoredFile(
 
 async function headStoredFile(
   env: Env,
-  userId: string,
+  user: AuthUser,
   uploadId: string
 ): Promise<Response> {
-  const upload = await findUpload(env, userId, uploadId);
+  const upload = user.isAdmin
+    ? await findUploadById(env, uploadId)
+    : await findUpload(env, user.id, uploadId);
   if (!upload) {
     return error("文件不存在。", 404);
   }
@@ -800,6 +859,273 @@ async function headStoredFile(
       Number(upload.size)
     )
   });
+}
+
+async function listAdminUsers(env: Env): Promise<Response> {
+  const { results } = await env.DB.prepare(
+    `SELECT users.id,
+            users.username,
+            users.is_admin AS isAdmin,
+            users.created_at AS createdAt,
+            (
+              SELECT COUNT(*)
+              FROM notes
+              WHERE notes.user_id = users.id AND notes.is_archived = 0
+            ) AS noteCount,
+            (
+              SELECT COUNT(*)
+              FROM uploads
+              WHERE uploads.user_id = users.id
+            ) AS uploadCount
+     FROM users
+     ORDER BY users.is_admin DESC, users.created_at ASC`
+  ).all<DbAdminUserRow>();
+
+  return json(results.map(rowToAdminUser));
+}
+
+async function createAdminUser(request: Request, env: Env): Promise<Response> {
+  const body = await readJson<AdminUserCreateInput>(request);
+  const username = cleanUsername(body.username);
+  const password = cleanPassword(body.password);
+  const isAdmin = Boolean(body.isAdmin);
+
+  if (!username) {
+    return error("请输入 2 到 32 位用户名。", 400);
+  }
+
+  if (!password) {
+    return error("请输入至少 6 位密码。", 400);
+  }
+
+  if (await usernameExists(env, username)) {
+    return error("这个用户名已经被使用。", 409);
+  }
+
+  const userId = crypto.randomUUID();
+  const now = new Date().toISOString();
+  const passwordSalt = generateRandomToken(16);
+  const passwordHash = await hashPassword(password, passwordSalt);
+
+  await env.DB.prepare(
+    `INSERT INTO users (id, username, is_admin, password_salt, password_hash, created_at)
+     VALUES (?, ?, ?, ?, ?, ?)`
+  )
+    .bind(userId, username, isAdmin ? 1 : 0, passwordSalt, passwordHash, now)
+    .run();
+
+  const created = await getAdminUserById(env, userId);
+  if (!created) {
+    return error("用户创建失败。", 500);
+  }
+
+  return json(created, 201);
+}
+
+async function updateAdminUser(
+  request: Request,
+  env: Env,
+  actingUser: AuthUser,
+  targetUserId: string
+): Promise<Response> {
+  const current = await getDbUserById(env, targetUserId);
+  if (!current) {
+    return error("用户不存在。", 404);
+  }
+
+  const body = await readJson<AdminUserUpdateInput>(request);
+  const nextUsername =
+    body.username === undefined ? current.username : cleanUsername(body.username);
+  const nextIsAdmin =
+    body.isAdmin === undefined ? Boolean(current.isAdmin) : Boolean(body.isAdmin);
+  const nextPassword =
+    body.password === undefined ? null : cleanPassword(body.password);
+
+  if (!nextUsername) {
+    return error("请输入 2 到 32 位用户名。", 400);
+  }
+
+  if (body.password !== undefined && !nextPassword) {
+    return error("请输入至少 6 位密码。", 400);
+  }
+
+  if (nextUsername !== current.username && (await usernameExists(env, nextUsername, targetUserId))) {
+    return error("这个用户名已经被使用。", 409);
+  }
+
+  if (actingUser.id === targetUserId && body.isAdmin === false) {
+    return error("不能取消当前登录管理员权限。", 400);
+  }
+
+  if (current.isAdmin && !nextIsAdmin) {
+    const adminCount = await countAdmins(env);
+    if (adminCount <= 1) {
+      return error("至少需要保留一个管理员。", 400);
+    }
+  }
+
+  let nextPasswordSalt = current.passwordSalt;
+  let nextPasswordHash = current.passwordHash;
+  if (nextPassword) {
+    nextPasswordSalt = generateRandomToken(16);
+    nextPasswordHash = await hashPassword(nextPassword, nextPasswordSalt);
+  }
+
+  await env.DB.prepare(
+    `UPDATE users
+     SET username = ?,
+         is_admin = ?,
+         password_salt = ?,
+         password_hash = ?
+     WHERE id = ?`
+  )
+    .bind(
+      nextUsername,
+      nextIsAdmin ? 1 : 0,
+      nextPasswordSalt,
+      nextPasswordHash,
+      targetUserId
+    )
+    .run();
+
+  const updated = await getAdminUserById(env, targetUserId);
+  if (!updated) {
+    return error("用户更新失败。", 500);
+  }
+
+  return json(updated);
+}
+
+async function deleteAdminUser(
+  env: Env,
+  actingUser: AuthUser,
+  targetUserId: string
+): Promise<Response> {
+  if (actingUser.id === targetUserId) {
+    return error("不能删除当前登录账号。", 400);
+  }
+
+  const current = await getDbUserById(env, targetUserId);
+  if (!current) {
+    return error("用户不存在。", 404);
+  }
+
+  if (current.isAdmin) {
+    const adminCount = await countAdmins(env);
+    if (adminCount <= 1) {
+      return error("至少需要保留一个管理员。", 400);
+    }
+  }
+
+  await deleteAllUserResources(env, targetUserId);
+  await env.DB.prepare("DELETE FROM users WHERE id = ?")
+    .bind(targetUserId)
+    .run();
+
+  return json({ ok: true });
+}
+
+async function listAdminUploads(env: Env, userId: string): Promise<Response> {
+  const user = await getDbUserById(env, userId);
+  if (!user) {
+    return error("用户不存在。", 404);
+  }
+
+  const { results } = await env.DB.prepare(
+    `SELECT uploads.id,
+            uploads.user_id AS userId,
+            uploads.object_key AS objectKey,
+            uploads.file_name AS fileName,
+            uploads.mime_type AS mimeType,
+            uploads.size,
+            uploads.created_at AS createdAt,
+            users.username AS username
+     FROM uploads
+     JOIN users ON users.id = uploads.user_id
+     WHERE uploads.user_id = ?
+     ORDER BY uploads.created_at DESC`
+  )
+    .bind(userId)
+    .all<DbUploadRow>();
+
+  return json(results.map(rowToAdminUpload));
+}
+
+async function createAdminUpload(
+  request: Request,
+  env: Env,
+  userId: string
+): Promise<Response> {
+  const user = await getDbUserById(env, userId);
+  if (!user) {
+    return error("用户不存在。", 404);
+  }
+
+  const formData = await request.formData();
+  const entry = formData.get("file");
+
+  if (!isUploadedFile(entry)) {
+    return error("请选择要上传的文件。", 400);
+  }
+
+  const uploaded = await persistUpload(env, userId, entry);
+  const row = await findUploadById(env, uploaded.id);
+  if (!row) {
+    return error("文件上传失败。", 500);
+  }
+
+  return json(
+    rowToAdminUpload({
+      ...row,
+      username: user.username
+    }),
+    201
+  );
+}
+
+async function updateAdminUpload(
+  request: Request,
+  env: Env,
+  uploadId: string
+): Promise<Response> {
+  const upload = await findUploadById(env, uploadId);
+  if (!upload) {
+    return error("文件不存在。", 404);
+  }
+
+  const body = await readJson<AdminUploadUpdateInput>(request);
+  const nextName = typeof body.name === "string" ? cleanFileName(body.name) : "";
+  if (!nextName) {
+    return error("请输入文件名。", 400);
+  }
+
+  await env.DB.prepare(
+    "UPDATE uploads SET file_name = ? WHERE id = ?"
+  )
+    .bind(nextName, uploadId)
+    .run();
+
+  const updated = await getAdminUploadById(env, uploadId);
+  if (!updated) {
+    return error("文件更新失败。", 500);
+  }
+
+  return json(updated);
+}
+
+async function deleteAdminUpload(env: Env, uploadId: string): Promise<Response> {
+  const upload = await findUploadById(env, uploadId);
+  if (!upload) {
+    return error("文件不存在。", 404);
+  }
+
+  await detachUploadFromUserNotes(env, upload.userId, upload.id);
+  await env.FILES.delete(upload.objectKey);
+  await env.DB.prepare("DELETE FROM uploads WHERE id = ?")
+    .bind(uploadId)
+    .run();
+
+  return json({ ok: true });
 }
 
 async function createSessionResponse(
@@ -853,6 +1179,7 @@ async function requireUser(
     `SELECT sessions.id,
             sessions.user_id AS userId,
             users.username AS username,
+            users.is_admin AS isAdmin,
             sessions.expires_at AS expiresAt
      FROM sessions
      JOIN users ON users.id = sessions.user_id
@@ -874,7 +1201,8 @@ async function requireUser(
 
   return {
     id: session.userId,
-    username: session.username
+    username: session.username,
+    isAdmin: Boolean(session.isAdmin)
   };
 }
 
@@ -912,6 +1240,30 @@ function rowToPublicNote(row: DbNoteRow, shareToken: string): Note {
   return {
     ...rowToNote(row),
     content: rewriteBlocksForPublicShare(parseBlocks(row.content), shareToken)
+  };
+}
+
+function rowToAdminUser(row: DbAdminUserRow): AdminUser {
+  return {
+    id: row.id,
+    username: row.username,
+    isAdmin: Boolean(row.isAdmin),
+    createdAt: row.createdAt,
+    noteCount: Number(row.noteCount ?? 0),
+    uploadCount: Number(row.uploadCount ?? 0)
+  };
+}
+
+function rowToAdminUpload(row: DbUploadRow): AdminUpload {
+  return {
+    id: row.id,
+    userId: row.userId,
+    username: row.username ?? "",
+    name: row.fileName,
+    mimeType: row.mimeType,
+    size: Number(row.size ?? 0),
+    createdAt: row.createdAt,
+    url: `/api/files/${encodeURIComponent(row.id)}`
   };
 }
 
@@ -1072,8 +1424,146 @@ async function findUpload(
      FROM uploads
      WHERE id = ? AND user_id = ?`
   )
-    .bind(uploadId, userId)
+      .bind(uploadId, userId)
     .first<DbUploadRow>();
+}
+
+async function findUploadById(env: Env, uploadId: string): Promise<DbUploadRow | null> {
+  return env.DB.prepare(
+    `SELECT id,
+            user_id AS userId,
+            object_key AS objectKey,
+            file_name AS fileName,
+            mime_type AS mimeType,
+            size,
+            created_at AS createdAt
+     FROM uploads
+     WHERE id = ?`
+  )
+    .bind(uploadId)
+    .first<DbUploadRow>();
+}
+
+async function getAdminUploadById(env: Env, uploadId: string): Promise<AdminUpload | null> {
+  const row = await env.DB.prepare(
+    `SELECT uploads.id,
+            uploads.user_id AS userId,
+            uploads.object_key AS objectKey,
+            uploads.file_name AS fileName,
+            uploads.mime_type AS mimeType,
+            uploads.size,
+            uploads.created_at AS createdAt,
+            users.username AS username
+     FROM uploads
+     JOIN users ON users.id = uploads.user_id
+     WHERE uploads.id = ?`
+  )
+    .bind(uploadId)
+    .first<DbUploadRow>();
+
+  return row ? rowToAdminUpload(row) : null;
+}
+
+async function getDbUserById(env: Env, userId: string): Promise<DbUserRow | null> {
+  return env.DB.prepare(
+    `SELECT id,
+            username,
+            is_admin AS isAdmin,
+            password_salt AS passwordSalt,
+            password_hash AS passwordHash,
+            created_at AS createdAt
+     FROM users
+     WHERE id = ?`
+  )
+    .bind(userId)
+    .first<DbUserRow>();
+}
+
+async function getAdminUserById(env: Env, userId: string): Promise<AdminUser | null> {
+  const row = await env.DB.prepare(
+    `SELECT users.id,
+            users.username,
+            users.is_admin AS isAdmin,
+            users.created_at AS createdAt,
+            (
+              SELECT COUNT(*)
+              FROM notes
+              WHERE notes.user_id = users.id AND notes.is_archived = 0
+            ) AS noteCount,
+            (
+              SELECT COUNT(*)
+              FROM uploads
+              WHERE uploads.user_id = users.id
+            ) AS uploadCount
+     FROM users
+     WHERE users.id = ?`
+  )
+    .bind(userId)
+    .first<DbAdminUserRow>();
+
+  return row ? rowToAdminUser(row) : null;
+}
+
+async function usernameExists(
+  env: Env,
+  username: string,
+  excludeUserId?: string
+): Promise<boolean> {
+  const row = excludeUserId
+    ? await env.DB.prepare(
+        "SELECT id FROM users WHERE username = ? AND id != ?"
+      )
+        .bind(username, excludeUserId)
+        .first<{ id: string }>()
+    : await env.DB.prepare(
+        "SELECT id FROM users WHERE username = ?"
+      )
+        .bind(username)
+        .first<{ id: string }>();
+
+  return Boolean(row);
+}
+
+async function countAdmins(env: Env): Promise<number> {
+  const row = await env.DB.prepare(
+    "SELECT COUNT(*) AS count FROM users WHERE is_admin = 1"
+  ).first<{ count: number | string }>();
+
+  return Number(row?.count ?? 0);
+}
+
+async function persistUpload(
+  env: Env,
+  userId: string,
+  entry: UploadedFormFile
+): Promise<UploadResult> {
+  const fileName = cleanFileName(entry.name);
+  const mimeType = detectMimeType(entry.type, fileName);
+  const uploadId = crypto.randomUUID();
+  const now = new Date().toISOString();
+  const objectKey = `${userId}/${uploadId}${getFileExtension(fileName)}`;
+
+  await env.FILES.put(objectKey, entry, {
+    httpMetadata: {
+      contentType: mimeType
+    }
+  });
+
+  await env.DB.prepare(
+    `INSERT INTO uploads
+       (id, user_id, object_key, file_name, mime_type, size, created_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?)`
+  )
+    .bind(uploadId, userId, objectKey, fileName, mimeType, entry.size, now)
+    .run();
+
+  return {
+    id: uploadId,
+    url: `/api/files/${encodeURIComponent(uploadId)}`,
+    name: fileName,
+    mimeType,
+    size: entry.size
+  };
 }
 
 async function findSharedNoteByToken(
@@ -1130,6 +1620,60 @@ async function cleanupRemovedUploadsForUser(
           cause
         });
       }
+    })
+  );
+}
+
+async function deleteAllUserResources(env: Env, userId: string): Promise<void> {
+  const { results } = await env.DB.prepare(
+    `SELECT id,
+            user_id AS userId,
+            object_key AS objectKey,
+            file_name AS fileName,
+            mime_type AS mimeType,
+            size,
+            created_at AS createdAt
+     FROM uploads
+     WHERE user_id = ?`
+  )
+    .bind(userId)
+    .all<DbUploadRow>();
+
+  await Promise.all(results.map((upload) => env.FILES.delete(upload.objectKey)));
+  await env.DB.prepare("DELETE FROM notes WHERE user_id = ?")
+    .bind(userId)
+    .run();
+}
+
+async function detachUploadFromUserNotes(
+  env: Env,
+  userId: string,
+  uploadId: string
+): Promise<void> {
+  const pattern = `%/api/files/${uploadId}%`;
+  const { results } = await env.DB.prepare(
+    `SELECT id, content
+     FROM notes
+     WHERE user_id = ?
+       AND is_archived = 0
+       AND content LIKE ?`
+  )
+    .bind(userId, pattern)
+    .all<{ id: string; content: string }>();
+
+  if (results.length === 0) {
+    return;
+  }
+
+  const now = new Date().toISOString();
+  await Promise.all(
+    results.map(async (note) => {
+      const nextBlocks = stripUploadReferencesFromBlocks(parseBlocks(note.content), uploadId);
+      await env.DB.prepare(
+        "UPDATE notes SET content = ?, updated_at = ? WHERE id = ?"
+      )
+        .bind(JSON.stringify(nextBlocks), now, note.id)
+        .run();
     })
   );
 }
@@ -1229,6 +1773,35 @@ function rewriteValueForPublicShare(value: unknown, shareToken: string): unknown
   return value;
 }
 
+function stripUploadReferencesFromBlocks(blocks: NoteBlock[], uploadId: string): NoteBlock[] {
+  return rewriteValueWithoutUpload(blocks, uploadId) as NoteBlock[];
+}
+
+function rewriteValueWithoutUpload(value: unknown, uploadId: string): unknown {
+  if (typeof value === "string") {
+    const escapedUploadId = escapeRegExp(uploadId);
+    return value.replace(
+      new RegExp(`/api/(?:public/)?files/${escapedUploadId}(?:\\?share=[^\\s"'<>]+)?`, "g"),
+      ""
+    );
+  }
+
+  if (Array.isArray(value)) {
+    return value.map((item) => rewriteValueWithoutUpload(item, uploadId));
+  }
+
+  if (value && typeof value === "object") {
+    return Object.fromEntries(
+      Object.entries(value as Record<string, unknown>).map(([key, nestedValue]) => [
+        key,
+        rewriteValueWithoutUpload(nestedValue, uploadId)
+      ])
+    );
+  }
+
+  return value;
+}
+
 function cleanFileName(value: string): string {
   const fileName = value
     .trim()
@@ -1268,6 +1841,10 @@ function getFileExtension(fileName: string): string {
   }
 
   return fileName.slice(lastDot).toLowerCase();
+}
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
 function buildStoredFileHeaders(

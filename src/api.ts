@@ -1,4 +1,9 @@
 import type {
+  AdminUpload,
+  AdminUploadUpdateInput,
+  AdminUser,
+  AdminUserCreateInput,
+  AdminUserUpdateInput,
   LoginInput,
   Note,
   NoteCreateInput,
@@ -96,6 +101,63 @@ export async function uploadAsset(file: File): Promise<UploadResult> {
   return apiRequest("/api/uploads", {
     method: "POST",
     body: formData
+  });
+}
+
+export async function listAdminUsers(): Promise<AdminUser[]> {
+  return apiRequest("/api/admin/users");
+}
+
+export async function createAdminUser(input: AdminUserCreateInput): Promise<AdminUser> {
+  return apiRequest("/api/admin/users", {
+    method: "POST",
+    body: JSON.stringify(input)
+  });
+}
+
+export async function updateAdminUser(
+  id: string,
+  input: AdminUserUpdateInput
+): Promise<AdminUser> {
+  return apiRequest(`/api/admin/users/${encodeURIComponent(id)}`, {
+    method: "PATCH",
+    body: JSON.stringify(input)
+  });
+}
+
+export async function deleteAdminUser(id: string): Promise<{ ok: true }> {
+  return apiRequest(`/api/admin/users/${encodeURIComponent(id)}`, {
+    method: "DELETE"
+  });
+}
+
+export async function listAdminUploads(userId: string): Promise<AdminUpload[]> {
+  return apiRequest(`/api/admin/users/${encodeURIComponent(userId)}/uploads`);
+}
+
+export async function createAdminUpload(userId: string, file: File): Promise<AdminUpload> {
+  const formData = new FormData();
+  formData.append("file", file);
+
+  return apiRequest(`/api/admin/users/${encodeURIComponent(userId)}/uploads`, {
+    method: "POST",
+    body: formData
+  });
+}
+
+export async function updateAdminUpload(
+  id: string,
+  input: AdminUploadUpdateInput
+): Promise<AdminUpload> {
+  return apiRequest(`/api/admin/uploads/${encodeURIComponent(id)}`, {
+    method: "PATCH",
+    body: JSON.stringify(input)
+  });
+}
+
+export async function deleteAdminUpload(id: string): Promise<{ ok: true }> {
+  return apiRequest(`/api/admin/uploads/${encodeURIComponent(id)}`, {
+    method: "DELETE"
   });
 }
 
