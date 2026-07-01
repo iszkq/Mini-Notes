@@ -5,6 +5,7 @@ import { zh } from "@blocknote/core/locales";
 import { BlockNoteView } from "@blocknote/mantine";
 import "@blocknote/mantine/style.css";
 import {
+  FormattingToolbarController,
   getDefaultReactSlashMenuItems,
   SuggestionMenuController,
   type DefaultReactSuggestionItem,
@@ -24,6 +25,7 @@ import type { Note, NoteBlock } from "../shared";
 import { BibleInsertModal } from "./BibleInsertModal";
 import { EmojiPackPicker } from "./EmojiPackPicker";
 import type { EmojiItem } from "../emojiPacks";
+import { NotebookFormattingToolbar } from "./NotebookFormattingToolbar";
 
 type NotebookEditorProps = {
   note: Note;
@@ -82,6 +84,9 @@ export function NotebookEditor({ note, onChange, readOnly = false }: NotebookEdi
       dictionary,
       initialContent,
       schema: noteSchema,
+      tables: {
+        splitCells: true
+      },
       uploadFile: handleUpload
     },
     [dictionary, handleUpload, note.id]
@@ -286,11 +291,15 @@ export function NotebookEditor({ note, onChange, readOnly = false }: NotebookEdi
             onChange(editor.document as NoteBlock[]);
           }
         }}
+        formattingToolbar={false}
         slashMenu={false}
         theme="light"
       >
         {!readOnly ? (
-          <SuggestionMenuController getItems={getSlashMenuItems} triggerCharacter="/" />
+          <>
+            <FormattingToolbarController formattingToolbar={NotebookFormattingToolbar} />
+            <SuggestionMenuController getItems={getSlashMenuItems} triggerCharacter="/" />
+          </>
         ) : null}
       </BlockNoteView>
 
