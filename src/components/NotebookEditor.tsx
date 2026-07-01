@@ -132,7 +132,8 @@ export function NotebookEditor({ note, onChange, readOnly = false }: NotebookEdi
           props: {
             count: verses.length,
             payload: serializeBibleVerses(verses),
-            title: `经文摘录 · ${verses.length} 节`
+            title: `经文摘录 · ${verses.length} 节`,
+            titleEdited: true
           }
         },
         {

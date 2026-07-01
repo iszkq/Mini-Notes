@@ -31,6 +31,7 @@ export type NoteCreateInput = {
   icon?: string;
   kind?: NoteKind;
   parentId?: string | null;
+  sortOrder?: number;
   content?: NoteBlock[];
 };
 
@@ -38,6 +39,7 @@ export type NoteUpdateInput = {
   title?: string;
   icon?: string;
   parentId?: string | null;
+  sortOrder?: number;
   content?: NoteBlock[];
   isArchived?: boolean;
 };

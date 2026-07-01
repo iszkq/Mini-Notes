@@ -16,6 +16,12 @@
   SessionStatus,
   UploadResult
 } from "./shared";
+import {
+  parseBibleCsv,
+  searchBibleVerses,
+  sortBibleVerses,
+  type BibleData
+} from "./bible";
 
 type Env = {
   DB: D1Database;
@@ -85,6 +91,8 @@ type UploadedFormFile = Blob & {
 
 const NOTE_COLUMNS =
   "id, title, icon, kind, parent_id AS parentId, is_archived AS isArchived, share_token AS shareToken, shared_at AS sharedAt, sort_order AS sortOrder, created_at AS createdAt, updated_at AS updatedAt";
+
+let bibleDataPromise: Promise<BibleData> | null = null;
 
 const SESSION_COOKIE_NAME = "cloud_notes_session";
 const SESSION_TTL_SECONDS = 60 * 60 * 24 * 30;
@@ -191,6 +199,18 @@ async function handleApi(
 
     if (segments[0] === "admin") {
       return handleAdminApi(request, env, user, segments);
+    }
+
+    if (segments[0] === "bible" && request.method === "GET" && !segments[1]) {
+      return getBibleIndex(request, env);
+    }
+
+    if (segments[0] === "bible" && segments[1] === "chapter" && request.method === "GET") {
+      return getBibleChapter(request, env, url);
+    }
+
+    if (segments[0] === "bible" && segments[1] === "search" && request.method === "GET") {
+      return searchBible(request, env, url);
     }
 
     if (segments[0] === "notes" && request.method === "GET" && !segments[1]) {
@@ -330,6 +350,97 @@ async function handleAdminApi(
   }
 
   return error("未找到接口。", 404);
+}
+
+async function getBibleIndex(request: Request, env: Env): Promise<Response> {
+  const data = await getBibleData(request, env);
+  return json(
+    {
+      booksByCovenant: data.booksByCovenant,
+      chaptersByBook: data.chaptersByBook
+    },
+    200,
+    bibleCacheHeaders()
+  );
+}
+
+async function getBibleChapter(
+  request: Request,
+  env: Env,
+  url: URL
+): Promise<Response> {
+  const bookName = cleanBibleBookName(url.searchParams.get("book") ?? "");
+  const chapterNumber = Number(url.searchParams.get("chapter") ?? 0);
+
+  if (!bookName || !Number.isInteger(chapterNumber) || chapterNumber <= 0) {
+    return error("请选择有效的卷名和章节。", 400);
+  }
+
+  const data = await getBibleData(request, env);
+  const verses = data.verses.filter(
+    (verse) => verse.bookName === bookName && verse.chapterNumber === chapterNumber
+  );
+
+  return json({ verses }, 200, bibleCacheHeaders());
+}
+
+async function searchBible(
+  request: Request,
+  env: Env,
+  url: URL
+): Promise<Response> {
+  const keyword = cleanBibleKeyword(url.searchParams.get("q") ?? "");
+
+  if (!keyword) {
+    return json({ verses: [] }, 200, bibleCacheHeaders());
+  }
+
+  const data = await getBibleData(request, env);
+  return json(
+    {
+      verses: sortBibleVerses(searchBibleVerses(data.verses, keyword))
+    },
+    200,
+    bibleCacheHeaders()
+  );
+}
+
+async function getBibleData(request: Request, env: Env): Promise<BibleData> {
+  if (!bibleDataPromise) {
+    bibleDataPromise = fetchBibleCsv(request, env)
+      .then(parseBibleCsv)
+      .catch((cause) => {
+        bibleDataPromise = null;
+        throw cause;
+      });
+  }
+
+  return bibleDataPromise;
+}
+
+async function fetchBibleCsv(request: Request, env: Env): Promise<string> {
+  const bibleUrl = new URL("/bible.csv", request.url);
+  const response = await env.ASSETS.fetch(new Request(bibleUrl, { method: "GET" }));
+
+  if (!response.ok) {
+    throw new Error(`Bible CSV asset failed to load: ${response.status}`);
+  }
+
+  return response.text();
+}
+
+function cleanBibleBookName(value: string): string {
+  return value.trim().slice(0, 32);
+}
+
+function cleanBibleKeyword(value: string): string {
+  return value.trim().slice(0, 80);
+}
+
+function bibleCacheHeaders(): HeadersInit {
+  return {
+    "Cache-Control": "public, max-age=3600"
+  };
 }
 
 async function registerUser(request: Request, env: Env): Promise<Response> {
@@ -553,7 +664,7 @@ async function createNote(
     isArchived: false,
     shareToken: null,
     sharedAt: null,
-    sortOrder: Date.now(),
+    sortOrder: cleanSortOrder(body.sortOrder, Date.now()),
     createdAt: now,
     updatedAt: now,
     content: kind === "category" ? [] : normalizeBlocks(body.content)
@@ -621,6 +732,10 @@ async function updateNote(
             body.parentId,
             current.id
           ),
+    sortOrder:
+      body.sortOrder === undefined
+        ? current.sortOrder
+        : cleanSortOrder(body.sortOrder, current.sortOrder),
     isArchived:
       body.isArchived === undefined ? Boolean(current.isArchived) : body.isArchived,
     content:
@@ -639,6 +754,7 @@ async function updateNote(
          parent_id = ?,
          content = ?,
          is_archived = ?,
+         sort_order = ?,
          updated_at = ?
      WHERE id = ? AND user_id = ?`
   )
@@ -648,6 +764,7 @@ async function updateNote(
       next.parentId,
       JSON.stringify(next.content),
       next.isArchived ? 1 : 0,
+      next.sortOrder,
       next.updatedAt,
       id,
       userId
@@ -1278,7 +1395,7 @@ function rowToSummary(row: DbNoteRow): NoteSummary {
     isArchived: Boolean(row.isArchived),
     shareToken: row.shareToken ?? null,
     sharedAt: row.sharedAt ?? null,
-    sortOrder: row.sortOrder,
+    sortOrder: Number(row.sortOrder),
     createdAt: row.createdAt,
     updatedAt: row.updatedAt
   };
@@ -1370,6 +1487,11 @@ function cleanParentId(value: unknown): string | null {
 
   const parentId = value.trim();
   return parentId ? parentId.slice(0, 80) : null;
+}
+
+function cleanSortOrder(value: unknown, fallback: number): number {
+  const sortOrder = typeof value === "number" ? value : Number(value);
+  return Number.isFinite(sortOrder) ? sortOrder : fallback;
 }
 
 async function resolveParentIdForUser(

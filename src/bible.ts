@@ -16,19 +16,13 @@ export type BibleData = {
 };
 
 let bibleDataPromise: Promise<BibleData> | null = null;
+const bibleChapterPromises = new Map<string, Promise<BibleVerse[]>>();
+const bibleSearchPromises = new Map<string, Promise<BibleVerse[]>>();
 
 export async function loadBibleData(): Promise<BibleData> {
   if (!bibleDataPromise) {
-    bibleDataPromise = fetch("/bible.csv", {
-      credentials: "same-origin"
-    })
-      .then(async (response) => {
-        if (!response.ok) {
-          throw new Error(`经文数据加载失败（${response.status}）`);
-        }
-
-        return parseBibleCsv(await response.text());
-      })
+    bibleDataPromise = requestBibleJson<Omit<BibleData, "verses">>("/api/bible")
+      .then((data) => ({ ...data, verses: [] }))
       .catch((error) => {
         bibleDataPromise = null;
         throw error;
@@ -36,6 +30,47 @@ export async function loadBibleData(): Promise<BibleData> {
   }
 
   return bibleDataPromise;
+}
+
+export async function loadBibleChapter(bookName: string, chapterNumber: number): Promise<BibleVerse[]> {
+  const key = `${bookName}:${chapterNumber}`;
+
+  if (!bibleChapterPromises.has(key)) {
+    const params = new URLSearchParams({
+      book: bookName,
+      chapter: String(chapterNumber)
+    });
+    const promise = requestBibleJson<{ verses: BibleVerse[] }>(`/api/bible/chapter?${params}`)
+      .then((data) => data.verses)
+      .catch((error) => {
+        bibleChapterPromises.delete(key);
+        throw error;
+      });
+    bibleChapterPromises.set(key, promise);
+  }
+
+  return bibleChapterPromises.get(key)!;
+}
+
+export async function searchBibleRemote(keyword: string): Promise<BibleVerse[]> {
+  const query = keyword.trim();
+  if (!query) {
+    return [];
+  }
+
+  const key = query.toLowerCase();
+  if (!bibleSearchPromises.has(key)) {
+    const params = new URLSearchParams({ q: query });
+    const promise = requestBibleJson<{ verses: BibleVerse[] }>(`/api/bible/search?${params}`)
+      .then((data) => data.verses)
+      .catch((error) => {
+        bibleSearchPromises.delete(key);
+        throw error;
+      });
+    bibleSearchPromises.set(key, promise);
+  }
+
+  return bibleSearchPromises.get(key)!;
 }
 
 export function sortBibleVerses(verses: BibleVerse[]): BibleVerse[] {
@@ -118,7 +153,7 @@ export function parseBibleVersePayload(payload: string): BibleVerse[] {
   }
 }
 
-function parseBibleCsv(input: string): BibleData {
+export function parseBibleCsv(input: string): BibleData {
   const lines = input.replace(/\r\n/g, "\n").split("\n").filter((line) => line.trim());
   const verses: BibleVerse[] = [];
   const booksByCovenant: Record<"old" | "new", string[]> = { old: [], new: [] };
@@ -171,6 +206,26 @@ function parseBibleCsv(input: string): BibleData {
     ),
     verses
   };
+}
+
+async function requestBibleJson<T>(url: string): Promise<T> {
+  const response = await fetch(url);
+
+  if (!response.ok) {
+    const fallback = `经文数据加载失败（${response.status}）`;
+    let message = fallback;
+    try {
+      const payload = (await response.json()) as { error?: unknown };
+      if (typeof payload.error === "string") {
+        message = payload.error;
+      }
+    } catch {
+      // Keep the status-based fallback when the response is not JSON.
+    }
+    throw new Error(message);
+  }
+
+  return (await response.json()) as T;
 }
 
 function splitBibleCsvLine(line: string): string[] {

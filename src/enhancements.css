@@ -18,6 +18,14 @@
 .note-group {
   display: grid;
   gap: 6px;
+  border-radius: 10px;
+}
+
+.note-group.drop-target,
+.category-note-list.drop-target,
+.category-row.drop-target {
+  background: rgba(47, 111, 115, 0.08);
+  box-shadow: inset 0 0 0 1px rgba(47, 111, 115, 0.16);
 }
 
 .note-group-title {
@@ -125,6 +133,8 @@
 .category-note-list {
   display: grid;
   gap: 4px;
+  min-height: 10px;
+  border-radius: 10px;
 }
 
 .note-row.nested {
@@ -136,6 +146,14 @@
   padding: 6px 8px 10px;
   color: #8a8377;
   font-size: 0.78rem;
+}
+
+.note-row.dragging {
+  opacity: 0.42;
+}
+
+.note-row.drop-before {
+  box-shadow: inset 0 3px 0 #2f6f73;
 }
 
 .page-meta {

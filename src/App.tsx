@@ -27,6 +27,7 @@ import {
 } from "lucide-react";
 import {
   type CSSProperties,
+  type DragEvent as ReactDragEvent,
   type FormEvent,
   type MouseEvent as ReactMouseEvent,
   useCallback,
@@ -70,6 +71,11 @@ type CategoryActionMenu = {
   categoryId: string;
   left: number;
   top: number;
+};
+
+type NoteDropTarget = {
+  parentId: string | null;
+  beforeId: string | null;
 };
 
 /*
@@ -152,6 +158,8 @@ function App() {
   const [sharePanelStyle, setSharePanelStyle] = useState<CSSProperties>({});
   const [categoryMenuOpen, setCategoryMenuOpen] = useState(false);
   const [categoryActionMenu, setCategoryActionMenu] = useState<CategoryActionMenu | null>(null);
+  const [draggedNoteId, setDraggedNoteId] = useState<string | null>(null);
+  const [dropTarget, setDropTarget] = useState<NoteDropTarget | null>(null);
   const isAdminView = workspaceView === "admin" && Boolean(sessionUser?.isAdmin);
 
   useEffect(() => {
@@ -178,6 +186,8 @@ function App() {
     setEditingCategoryId(null);
     setEditingCategoryTitle("");
     setCategoryActionMenu(null);
+    setDraggedNoteId(null);
+    setDropTarget(null);
   }, []);
 
   const loadNote = useCallback(
@@ -362,9 +372,7 @@ function App() {
   }, [shareOpen]);
 
   const sortedRecords = useMemo(() => {
-    return [...notes].sort(
-      (a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime()
-    );
+    return [...notes].sort(compareNoteOrder);
   }, [notes]);
 
   const categories = useMemo(
@@ -521,6 +529,180 @@ function App() {
     },
     [dirty, draft, loadNote, saveDraft, selectedId]
   );
+
+  const calculateDropSortOrder = useCallback(
+    (parentId: string | null, beforeId: string | null, draggedId: string): number => {
+      const targetGroup = sortedNotes.filter(
+        (note) => note.id !== draggedId && (note.parentId ?? null) === parentId
+      );
+      const targetIndex = beforeId ? targetGroup.findIndex((note) => note.id === beforeId) : -1;
+      const insertionIndex = beforeId && targetIndex >= 0 ? targetIndex : targetGroup.length;
+      const previousNote = targetGroup[insertionIndex - 1] ?? null;
+      const nextNote = targetGroup[insertionIndex] ?? null;
+
+      if (previousNote && nextNote) {
+        return (previousNote.sortOrder + nextNote.sortOrder) / 2;
+      }
+
+      if (previousNote) {
+        return previousNote.sortOrder - 1000;
+      }
+
+      if (nextNote) {
+        return nextNote.sortOrder + 1000;
+      }
+
+      return Date.now();
+    },
+    [sortedNotes]
+  );
+
+  const moveDraggedNote = useCallback(
+    async (parentId: string | null, beforeId: string | null) => {
+      const draggedId = draggedNoteId;
+      setDraggedNoteId(null);
+      setDropTarget(null);
+
+      if (!draggedId || draggedId === beforeId) {
+        return;
+      }
+
+      const draggedNote = notes.find((note) => note.id === draggedId && note.kind === "page");
+      if (!draggedNote) {
+        return;
+      }
+
+      const nextSortOrder = calculateDropSortOrder(parentId, beforeId, draggedId);
+      const previousSnapshot = notes;
+      const nextTimestamp = new Date().toISOString();
+
+      setNotes((current) =>
+        current.map((note) =>
+          note.id === draggedId
+            ? {
+                ...note,
+                parentId,
+                sortOrder: nextSortOrder,
+                updatedAt: nextTimestamp
+              }
+            : note
+        )
+      );
+
+      if (selectedIdRef.current === draggedId) {
+        setDraft((current) =>
+          current
+            ? {
+                ...current,
+                parentId,
+                sortOrder: nextSortOrder,
+                updatedAt: nextTimestamp
+              }
+            : current
+        );
+      }
+
+      try {
+        await updateNote(draggedId, {
+          parentId,
+          sortOrder: nextSortOrder
+        });
+      } catch (error) {
+        setNotes(previousSnapshot);
+        if (selectedIdRef.current === draggedId) {
+          setDraft((current) =>
+            current
+              ? {
+                  ...current,
+                  parentId: draggedNote.parentId,
+                  sortOrder: draggedNote.sortOrder,
+                  updatedAt: draggedNote.updatedAt
+                }
+              : current
+          );
+        }
+
+        if (error instanceof ApiError && error.status === 401) {
+          handleLoggedOut(hasUsers);
+          setAppError("登录状态已失效，请重新登录。");
+        } else if (error instanceof ApiError) {
+          setAppError(error.message);
+        } else {
+          setAppError("页面排序保存失败。");
+        }
+      }
+    },
+    [calculateDropSortOrder, draggedNoteId, handleLoggedOut, hasUsers, notes]
+  );
+
+  const handleNoteDragStart = (
+    event: ReactDragEvent<HTMLButtonElement>,
+    note: NoteSummary
+  ) => {
+    if (query.trim()) {
+      event.preventDefault();
+      return;
+    }
+
+    setDraggedNoteId(note.id);
+    setDropTarget(null);
+    event.dataTransfer.effectAllowed = "move";
+    event.dataTransfer.setData("text/plain", note.id);
+  };
+
+  const handleDragEnd = () => {
+    setDraggedNoteId(null);
+    setDropTarget(null);
+  };
+
+  const handleNoteDragOver = (
+    event: ReactDragEvent<HTMLElement>,
+    note: NoteSummary
+  ) => {
+    if (!draggedNoteId || draggedNoteId === note.id) {
+      return;
+    }
+
+    event.preventDefault();
+    event.stopPropagation();
+    event.dataTransfer.dropEffect = "move";
+    setDropTarget({ parentId: note.parentId ?? null, beforeId: note.id });
+  };
+
+  const handleNoteDrop = (
+    event: ReactDragEvent<HTMLElement>,
+    note: NoteSummary
+  ) => {
+    event.preventDefault();
+    event.stopPropagation();
+    void moveDraggedNote(note.parentId ?? null, note.id);
+  };
+
+  const handleGroupDragOver = (
+    event: ReactDragEvent<HTMLElement>,
+    parentId: string | null
+  ) => {
+    if (!draggedNoteId) {
+      return;
+    }
+
+    event.preventDefault();
+    event.dataTransfer.dropEffect = "move";
+    setDropTarget({ parentId, beforeId: null });
+  };
+
+  const handleGroupDrop = (
+    event: ReactDragEvent<HTMLElement>,
+    parentId: string | null
+  ) => {
+    if (!draggedNoteId) {
+      return;
+    }
+
+    event.preventDefault();
+    event.stopPropagation();
+    void moveDraggedNote(parentId, null);
+  };
 
   const createNewNote = useCallback(async (parentId: string | null = null) => {
     setWorkspaceView("notes");
@@ -1440,12 +1622,29 @@ function App() {
             </button>
           )) : (
             <>
-              {uncategorizedNotes.length > 0 ? (
-                <div className="note-group">
+              {uncategorizedNotes.length > 0 || draggedNoteId ? (
+                <div
+                  className={clsx(
+                    "note-group",
+                    draggedNoteId && dropTarget?.parentId === null && !dropTarget.beforeId && "drop-target"
+                  )}
+                  onDragOver={(event) => handleGroupDragOver(event, null)}
+                  onDrop={(event) => handleGroupDrop(event, null)}
+                >
                   <div className="note-group-title">未分类</div>
-                  {uncategorizedNotes.map((note) => (
+                  {uncategorizedNotes.length > 0 ? uncategorizedNotes.map((note) => (
                     <button
-                      className={clsx("note-row", note.id === selectedId && "active")}
+                      className={clsx(
+                        "note-row",
+                        note.id === selectedId && "active",
+                        draggedNoteId === note.id && "dragging",
+                        dropTarget?.beforeId === note.id && "drop-before"
+                      )}
+                      draggable={!query.trim()}
+                      onDragEnd={handleDragEnd}
+                      onDragOver={(event) => handleNoteDragOver(event, note)}
+                      onDragStart={(event) => handleNoteDragStart(event, note)}
+                      onDrop={(event) => handleNoteDrop(event, note)}
                       key={note.id}
                       onClick={() => void selectNote(note.id)}
                       type="button"
@@ -1459,7 +1658,9 @@ function App() {
                         </span>
                       </span>
                     </button>
-                  ))}
+                  )) : (
+                    <div className="category-empty">拖到这里移出分类</div>
+                  )}
                 </div>
               ) : null}
 
@@ -1471,7 +1672,15 @@ function App() {
                 return (
                   <div className="note-group" key={category.id}>
                     <div
-                      className="category-row"
+                      className={clsx(
+                        "category-row",
+                        draggedNoteId &&
+                          dropTarget?.parentId === category.id &&
+                          !dropTarget.beforeId &&
+                          "drop-target"
+                      )}
+                      onDragOver={(event) => handleGroupDragOver(event, category.id)}
+                      onDrop={(event) => handleGroupDrop(event, category.id)}
                       onContextMenu={(event) => openCategoryActionMenu(event, category)}
                     >
                       <button
@@ -1519,11 +1728,31 @@ function App() {
                     </div>
 
                     {!isCollapsed ? (
-                      <div className="category-note-list">
+                      <div
+                        className={clsx(
+                          "category-note-list",
+                          draggedNoteId &&
+                            dropTarget?.parentId === category.id &&
+                            !dropTarget.beforeId &&
+                            "drop-target"
+                        )}
+                        onDragOver={(event) => handleGroupDragOver(event, category.id)}
+                        onDrop={(event) => handleGroupDrop(event, category.id)}
+                      >
                         {categoryNotes.length > 0 ? (
                           categoryNotes.map((note) => (
                             <button
-                              className={clsx("note-row nested", note.id === selectedId && "active")}
+                              className={clsx(
+                                "note-row nested",
+                                note.id === selectedId && "active",
+                                draggedNoteId === note.id && "dragging",
+                                dropTarget?.beforeId === note.id && "drop-before"
+                              )}
+                              draggable={!query.trim()}
+                              onDragEnd={handleDragEnd}
+                              onDragOver={(event) => handleNoteDragOver(event, note)}
+                              onDragStart={(event) => handleNoteDragStart(event, note)}
+                              onDrop={(event) => handleNoteDrop(event, note)}
                               key={note.id}
                               onClick={() => void selectNote(note.id)}
                               type="button"
@@ -1823,6 +2052,15 @@ function toSummary(note: Note): NoteSummary {
 
 function updateSummary(notes: NoteSummary[], saved: Note): NoteSummary[] {
   return notes.map((note) => (note.id === saved.id ? normalizeNoteSummary(toSummary(saved)) : note));
+}
+
+function compareNoteOrder(a: NoteSummary, b: NoteSummary): number {
+  const sortDiff = Number(b.sortOrder ?? 0) - Number(a.sortOrder ?? 0);
+  if (sortDiff !== 0) {
+    return sortDiff;
+  }
+
+  return new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime();
 }
 
 function getFirstPageId(notes: NoteSummary[]): string | null {

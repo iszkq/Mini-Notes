@@ -12,6 +12,9 @@ const bibleVerseCard = createReactBlockSpec(
       title: {
         default: ""
       },
+      titleEdited: {
+        default: false
+      },
       count: {
         default: 0
       }
@@ -21,7 +24,12 @@ const bibleVerseCard = createReactBlockSpec(
   {
     render: ({ block, editor }) => {
       const verses = parseBibleVersePayload(block.props.payload);
-      const title = getBibleCardTitle(block.props.title, block.props.count, verses.length);
+      const title = getBibleCardTitle(
+        block.props.title,
+        block.props.titleEdited,
+        block.props.count,
+        verses.length
+      );
 
       return (
         <div className="bible-embed-card">
@@ -34,7 +42,8 @@ const bibleVerseCard = createReactBlockSpec(
 
               editor.updateBlock(block, {
                 props: {
-                  title: event.target.value
+                  title: event.target.value,
+                  titleEdited: true
                 }
               });
             }}
@@ -51,7 +60,9 @@ const bibleVerseCard = createReactBlockSpec(
               }
             }}
             onMouseDown={(event) => event.stopPropagation()}
-            placeholder={getBibleCardDefaultTitle(block.props.count, verses.length)}
+            placeholder={
+              block.props.titleEdited ? "" : getBibleCardDefaultTitle(block.props.count, verses.length)
+            }
             readOnly={!editor.isEditable}
             type="text"
             value={title}
@@ -69,7 +80,12 @@ const bibleVerseCard = createReactBlockSpec(
     },
     toExternalHTML: ({ block }) => {
       const verses = parseBibleVersePayload(block.props.payload);
-      const title = getBibleCardTitle(block.props.title, block.props.count, verses.length);
+      const title = getBibleCardTitle(
+        block.props.title,
+        block.props.titleEdited,
+        block.props.count,
+        verses.length
+      );
 
       return (
         <div className="bible-embed-card">
@@ -92,8 +108,13 @@ function getBibleCardDefaultTitle(count: number, verseCount: number): string {
   return `经文摘录 · ${count || verseCount} 节`;
 }
 
-function getBibleCardTitle(title: string, count: number, verseCount: number): string {
-  return title.trim() || getBibleCardDefaultTitle(count, verseCount);
+function getBibleCardTitle(
+  title: string,
+  titleEdited: boolean,
+  count: number,
+  verseCount: number
+): string {
+  return titleEdited ? title : title.trim() || getBibleCardDefaultTitle(count, verseCount);
 }
 
 export const noteSchema = BlockNoteSchema.create({

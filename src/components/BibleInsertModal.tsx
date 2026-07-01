@@ -7,8 +7,9 @@ import {
   formatBiblePageText,
   formatBiblePlainText,
   formatBibleReference,
+  loadBibleChapter,
   loadBibleData,
-  searchBibleVerses,
+  searchBibleRemote,
   sortBibleVerses
 } from "../bible";
 
@@ -31,9 +32,12 @@ const PAGE_SIZE = 18;
 export function BibleInsertModal({ open, onClose, onConfirm }: BibleInsertModalProps) {
   const [data, setData] = useState<BibleData | null>(null);
   const [loading, setLoading] = useState(false);
+  const [chapterLoading, setChapterLoading] = useState(false);
+  const [searchLoading, setSearchLoading] = useState(false);
   const [error, setError] = useState("");
   const [tab, setTab] = useState<ModalTab>("browse");
   const [keyword, setKeyword] = useState("");
+  const [currentChapterVerses, setCurrentChapterVerses] = useState<BibleVerse[]>([]);
   const [searchResults, setSearchResults] = useState<BibleVerse[]>([]);
   const [searchFilterCovenant, setSearchFilterCovenant] = useState<CovenantFilter>("all");
   const [searchFilterBook, setSearchFilterBook] = useState("");
@@ -49,6 +53,7 @@ export function BibleInsertModal({ open, onClose, onConfirm }: BibleInsertModalP
   const [copyButtonLabel, setCopyButtonLabel] = useState("复制本页");
   const [selectedCopyLabel, setSelectedCopyLabel] = useState("");
   const [copiedVerseId, setCopiedVerseId] = useState("");
+  const [pendingFocusVerseId, setPendingFocusVerseId] = useState("");
   const contentSectionRef = useRef<HTMLElement | null>(null);
   const focusTimerRef = useRef<number | null>(null);
 
@@ -94,10 +99,6 @@ export function BibleInsertModal({ open, onClose, onConfirm }: BibleInsertModalP
   }, [searchFilterBook, searchFilterCovenant, searchResults]);
 
   const filteredVerses = useMemo(() => {
-    if (!data) {
-      return [] as BibleVerse[];
-    }
-
     if (tab === "search") {
       return filteredSearchResults;
     }
@@ -106,10 +107,8 @@ export function BibleInsertModal({ open, onClose, onConfirm }: BibleInsertModalP
       return [];
     }
 
-    return data.verses.filter(
-      (verse) => verse.bookName === selectedBook && verse.chapterNumber === selectedChapter
-    );
-  }, [data, filteredSearchResults, selectedBook, selectedChapter, tab]);
+    return currentChapterVerses;
+  }, [currentChapterVerses, filteredSearchResults, selectedBook, selectedChapter, tab]);
 
   const totalPages = useMemo(
     () => Math.max(1, Math.ceil(filteredVerses.length / PAGE_SIZE)),
@@ -226,6 +225,7 @@ export function BibleInsertModal({ open, onClose, onConfirm }: BibleInsertModalP
     setTab("browse");
     setKeyword("");
     setSearchResults([]);
+    setCurrentChapterVerses([]);
     setSearchFilterBook("");
     setSearchFilterCovenant("all");
     setCurrentPage(1);
@@ -263,6 +263,72 @@ export function BibleInsertModal({ open, onClose, onConfirm }: BibleInsertModalP
       cancelled = true;
     };
   }, [open, selectedCopyDefaultLabel]);
+
+  useEffect(() => {
+    if (!open || tab !== "browse" || !selectedBook || selectedChapter == null) {
+      return;
+    }
+
+    let cancelled = false;
+    setChapterLoading(true);
+    setError("");
+
+    void loadBibleChapter(selectedBook, selectedChapter)
+      .then((verses) => {
+        if (cancelled) {
+          return;
+        }
+
+        setCurrentChapterVerses(verses);
+      })
+      .catch((reason) => {
+        if (!cancelled) {
+          setCurrentChapterVerses([]);
+          setError(reason instanceof Error ? reason.message : "经文加载失败");
+        }
+      })
+      .finally(() => {
+        if (!cancelled) {
+          setChapterLoading(false);
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [open, selectedBook, selectedChapter, tab]);
+
+  useEffect(() => {
+    if (!pendingFocusVerseId || currentChapterVerses.length === 0) {
+      return;
+    }
+
+    const verseIndex = currentChapterVerses.findIndex((verse) => verse.id === pendingFocusVerseId);
+    if (verseIndex >= 0) {
+      setCurrentPage(Math.floor(verseIndex / PAGE_SIZE) + 1);
+    }
+  }, [currentChapterVerses, pendingFocusVerseId]);
+
+  useEffect(() => {
+    if (!pendingFocusVerseId || !pagedVerses.some((verse) => verse.id === pendingFocusVerseId)) {
+      return;
+    }
+
+    setFocusedVerseId(pendingFocusVerseId);
+    window.requestAnimationFrame(() => {
+      const target = contentSectionRef.current?.querySelector(`[data-verse-id="${pendingFocusVerseId}"]`);
+      target?.scrollIntoView({ block: "center", behavior: "smooth" });
+    });
+
+    if (focusTimerRef.current) {
+      window.clearTimeout(focusTimerRef.current);
+    }
+
+    focusTimerRef.current = window.setTimeout(() => {
+      setFocusedVerseId((current) => (current === pendingFocusVerseId ? "" : current));
+    }, 1800);
+    setPendingFocusVerseId("");
+  }, [pagedVerses, pendingFocusVerseId]);
 
   useEffect(() => {
     if (!selectedCopyLabel) {
@@ -357,19 +423,30 @@ export function BibleInsertModal({ open, onClose, onConfirm }: BibleInsertModalP
     return null;
   }
 
-  const handleRunSearch = () => {
+  const handleRunSearch = async () => {
     const nextKeyword = keyword.trim();
-    if (!nextKeyword || !data) {
+    if (!nextKeyword) {
       setSearchResults([]);
       setTab("browse");
       return;
     }
 
-    setSearchResults(searchBibleVerses(data.verses, nextKeyword));
-    setSearchFilterBook("");
-    setSearchFilterCovenant("all");
-    setTab("search");
-    setCurrentPage(1);
+    setSearchLoading(true);
+    setError("");
+
+    try {
+      const verses = await searchBibleRemote(nextKeyword);
+      setSearchResults(verses);
+      setSearchFilterBook("");
+      setSearchFilterCovenant("all");
+      setTab("search");
+      setCurrentPage(1);
+    } catch (reason) {
+      setSearchResults([]);
+      setError(reason instanceof Error ? reason.message : "经文搜索失败");
+    } finally {
+      setSearchLoading(false);
+    }
   };
 
   const goToChapter = (target: ChapterTarget) => {
@@ -377,6 +454,7 @@ export function BibleInsertModal({ open, onClose, onConfirm }: BibleInsertModalP
     setCurrentCovenant(target.covenant);
     setSelectedBook(target.book);
     setSelectedChapter(target.chapter);
+    setCurrentChapterVerses([]);
     setCurrentPage(1);
     setBrowseControlsCollapsed(true);
     setShowJumpInput(false);
@@ -388,7 +466,7 @@ export function BibleInsertModal({ open, onClose, onConfirm }: BibleInsertModalP
       chapter: verse.chapterNumber,
       covenant: verse.covenant
     });
-    focusVerse(verse.id);
+    setPendingFocusVerseId(verse.id);
   };
 
   const toggleVerse = (verse: BibleVerse) => {
@@ -409,22 +487,6 @@ export function BibleInsertModal({ open, onClose, onConfirm }: BibleInsertModalP
     setShowJumpInput(false);
     setJumpPageInput("");
     contentSectionRef.current?.scrollTo({ top: 0, behavior: "smooth" });
-  };
-
-  const focusVerse = (verseId: string) => {
-    setFocusedVerseId(verseId);
-    window.requestAnimationFrame(() => {
-      const target = contentSectionRef.current?.querySelector(`[data-verse-id="${verseId}"]`);
-      target?.scrollIntoView({ block: "center", behavior: "smooth" });
-    });
-
-    if (focusTimerRef.current) {
-      window.clearTimeout(focusTimerRef.current);
-    }
-
-    focusTimerRef.current = window.setTimeout(() => {
-      setFocusedVerseId((current) => (current === verseId ? "" : current));
-    }, 1800);
   };
 
   const handleConfirm = () => {
@@ -491,6 +553,7 @@ export function BibleInsertModal({ open, onClose, onConfirm }: BibleInsertModalP
                         setCurrentCovenant("old");
                         setSelectedBook(nextBook);
                         setSelectedChapter(nextBook ? data?.chaptersByBook[nextBook]?.[0] ?? null : null);
+                        setCurrentChapterVerses([]);
                         setCurrentPage(1);
                         setBrowseControlsCollapsed(false);
                       }}
@@ -505,6 +568,7 @@ export function BibleInsertModal({ open, onClose, onConfirm }: BibleInsertModalP
                         setCurrentCovenant("new");
                         setSelectedBook(nextBook);
                         setSelectedChapter(nextBook ? data?.chaptersByBook[nextBook]?.[0] ?? null : null);
+                        setCurrentChapterVerses([]);
                         setCurrentPage(1);
                         setBrowseControlsCollapsed(false);
                       }}
@@ -536,6 +600,7 @@ export function BibleInsertModal({ open, onClose, onConfirm }: BibleInsertModalP
                             onClick={() => {
                               setSelectedBook(book);
                               setSelectedChapter(data?.chaptersByBook[book]?.[0] ?? null);
+                              setCurrentChapterVerses([]);
                               setCurrentPage(1);
                               setBrowseControlsCollapsed(false);
                             }}
@@ -557,6 +622,7 @@ export function BibleInsertModal({ open, onClose, onConfirm }: BibleInsertModalP
                               key={`${selectedBook}-${chapter}`}
                               onClick={() => {
                                 setSelectedChapter(chapter);
+                                setCurrentChapterVerses([]);
                                 setCurrentPage(1);
                                 setBrowseControlsCollapsed(true);
                               }}
@@ -584,7 +650,7 @@ export function BibleInsertModal({ open, onClose, onConfirm }: BibleInsertModalP
                     onKeyDown={(event) => {
                       if (event.key === "Enter") {
                         event.preventDefault();
-                        handleRunSearch();
+                        void handleRunSearch();
                       }
                     }}
                     placeholder="例如：耶稣 爱"
@@ -592,8 +658,13 @@ export function BibleInsertModal({ open, onClose, onConfirm }: BibleInsertModalP
                     value={keyword}
                   />
                 </label>
-                <button className="bp-button bp-button--primary bp-button--full" onClick={handleRunSearch} type="button">
-                  搜索经文
+                <button
+                  className="bp-button bp-button--primary bp-button--full"
+                  disabled={searchLoading}
+                  onClick={() => void handleRunSearch()}
+                  type="button"
+                >
+                  {searchLoading ? "搜索中" : "搜索经文"}
                 </button>
 
                 {searchResults.length > 0 ? (
@@ -765,9 +836,13 @@ export function BibleInsertModal({ open, onClose, onConfirm }: BibleInsertModalP
               </div>
             </div>
 
-            {loading ? <div className="bp-state-box">正在加载经文数据...</div> : null}
-            {!loading && error ? <div className="bp-state-box is-error">{error}</div> : null}
-            {!loading && !error && filteredVerses.length === 0 ? (
+            {loading ? <div className="bp-state-box">正在加载经文索引...</div> : null}
+            {!loading && chapterLoading ? <div className="bp-state-box">正在加载本章经文...</div> : null}
+            {!loading && searchLoading ? <div className="bp-state-box">正在搜索经文...</div> : null}
+            {!loading && !chapterLoading && !searchLoading && error ? (
+              <div className="bp-state-box is-error">{error}</div>
+            ) : null}
+            {!loading && !chapterLoading && !searchLoading && !error && filteredVerses.length === 0 ? (
               <div className="bp-state-box">
                 {tab === "search"
                   ? "请输入关键词后搜索。"
@@ -777,7 +852,7 @@ export function BibleInsertModal({ open, onClose, onConfirm }: BibleInsertModalP
               </div>
             ) : null}
 
-            {!loading && !error && filteredVerses.length > 0 ? (
+            {!loading && !chapterLoading && !searchLoading && !error && filteredVerses.length > 0 ? (
               <>
                 <div className="bp-insert__verse-list">
                   {pagedVerses.map((verse) => (
