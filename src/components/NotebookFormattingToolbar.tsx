@@ -20,7 +20,15 @@ import {
   useEditorState,
   useExtension
 } from "@blocknote/react";
-import { Copy, MessageSquarePlus, TableCellsMerge, TableCellsSplit, Type } from "lucide-react";
+import {
+  Copy,
+  MessageSquarePlus,
+  Redo2,
+  TableCellsMerge,
+  TableCellsSplit,
+  Type,
+  Undo2
+} from "lucide-react";
 import { useCallback } from "react";
 import {
   getImageBlockById,
@@ -64,6 +72,7 @@ export function NotebookFormattingToolbar(props: NotebookFormattingToolbarProps)
   return (
     <FormattingToolbar>
       <BlockTypeSelect items={props.blockTypeSelectItems} />
+      <HistoryButtons />
       <TableCellToolbarTools />
       <FileCaptionButton />
       <FileReplaceButton />
@@ -86,6 +95,40 @@ export function NotebookFormattingToolbar(props: NotebookFormattingToolbarProps)
       <CreateLinkButton />
       <CommentButton onAddComment={props.onAddComment} />
     </FormattingToolbar>
+  );
+}
+
+function HistoryButtons() {
+  const Components = useComponentsContext();
+  const editor = useBlockNoteEditor<any, any, any>();
+
+  if (!Components) {
+    return null;
+  }
+
+  return (
+    <>
+      <Components.FormattingToolbar.Button
+        className="bn-button"
+        icon={<Undo2 />}
+        label="撤销"
+        mainTooltip="撤销"
+        onClick={() => {
+          editor.undo();
+          editor.focus();
+        }}
+      />
+      <Components.FormattingToolbar.Button
+        className="bn-button"
+        icon={<Redo2 />}
+        label="恢复"
+        mainTooltip="恢复"
+        onClick={() => {
+          editor.redo();
+          editor.focus();
+        }}
+      />
+    </>
   );
 }
 

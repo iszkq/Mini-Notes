@@ -16,6 +16,8 @@ import {
   Link2,
   Lock,
   LogOut,
+  PanelLeftClose,
+  PanelLeftOpen,
   Pencil,
   Plus,
   Search,
@@ -92,6 +94,7 @@ const SIDEBAR_GROUP_PAGE_SIZE = 80;
 const SIDEBAR_GROUP_PAGE_STEP = 80;
 const SIDEBAR_SEARCH_PAGE_SIZE = 120;
 const UNCATEGORIZED_GROUP_KEY = "__uncategorized__";
+const SIDEBAR_COLLAPSED_STORAGE_KEY = "mini-notes-sidebar-collapsed";
 
 /*
 const PAGE_PRESETS: PagePreset[] = [
@@ -166,6 +169,13 @@ function App() {
   const [publicPending, setPublicPending] = useState(isPublicView);
   const [publicError, setPublicError] = useState<string | null>(null);
   const [workspaceView, setWorkspaceView] = useState<WorkspaceView>("notes");
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(() => {
+    if (typeof window === "undefined") {
+      return false;
+    }
+
+    return window.localStorage.getItem(SIDEBAR_COLLAPSED_STORAGE_KEY) === "true";
+  });
   const [collapsedCategoryIds, setCollapsedCategoryIds] = useState<string[]>([]);
   const [editingCategoryId, setEditingCategoryId] = useState<string | null>(null);
   const [editingCategoryTitle, setEditingCategoryTitle] = useState("");
@@ -187,6 +197,14 @@ function App() {
   useEffect(() => {
     selectedIdRef.current = selectedId;
   }, [selectedId]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") {
+      return;
+    }
+
+    window.localStorage.setItem(SIDEBAR_COLLAPSED_STORAGE_KEY, String(sidebarCollapsed));
+  }, [sidebarCollapsed]);
 
   const handleLoggedOut = useCallback((nextHasUsers = true) => {
     setSessionUser(null);
@@ -1950,17 +1968,36 @@ function App() {
   }
 
   return (
-    <main className="app-shell">
-      <aside className="sidebar">
+    <main className={clsx("app-shell", sidebarCollapsed && "sidebar-collapsed")}>
+      <aside className="sidebar" aria-label="页面侧边栏">
         <div className="brand-row">
           <div className="brand-mark">MN</div>
-          <div>
+          <div className="brand-copy">
             <strong>Mini Notes</strong>
             <span>{sessionUser?.username ?? "当前账号"} · {noteCount} 篇</span>
           </div>
         </div>
 
-        <label className="search-box">
+        <button
+          aria-label={sidebarCollapsed ? "展开侧边栏" : "收起侧边栏"}
+          aria-pressed={sidebarCollapsed}
+          className="sidebar-collapse-button"
+          onClick={() => setSidebarCollapsed((current) => !current)}
+          title={sidebarCollapsed ? "展开侧边栏" : "收起侧边栏"}
+          type="button"
+        >
+          {sidebarCollapsed ? <PanelLeftOpen size={17} /> : <PanelLeftClose size={17} />}
+        </button>
+
+        <label
+          className="search-box"
+          onClick={() => {
+            if (sidebarCollapsed) {
+              setSidebarCollapsed(false);
+            }
+          }}
+          title="搜索页面"
+        >
           <Search size={16} />
           <input
             onChange={(event) => setQuery(event.target.value)}
@@ -1969,14 +2006,26 @@ function App() {
           />
         </label>
 
-        <button className="new-page-button" onClick={() => void createNewNote()} type="button">
+        <button
+          aria-label="新页面"
+          className="new-page-button"
+          onClick={() => void createNewNote()}
+          title="新页面"
+          type="button"
+        >
           <Plus size={16} />
-          新页面
+          <span className="sidebar-action-label">新页面</span>
         </button>
 
-        <button className="new-category-button" onClick={() => void createCategory()} type="button">
+        <button
+          aria-label="新建分类"
+          className="new-category-button"
+          onClick={() => void createCategory()}
+          title="新建分类"
+          type="button"
+        >
           <FolderPlus size={16} />
-          新建分类
+          <span className="sidebar-action-label">新建分类</span>
         </button>
 
         {sessionUser?.isAdmin ? (
@@ -1984,6 +2033,7 @@ function App() {
             <button
               className={clsx("toolbar-button sidebar-view-button", workspaceView === "notes" && "active")}
               onClick={() => setWorkspaceView("notes")}
+              title="笔记"
               type="button"
             >
               <FileText size={15} />
@@ -1992,6 +2042,7 @@ function App() {
             <button
               className={clsx("toolbar-button sidebar-view-button", workspaceView === "admin" && "active")}
               onClick={() => setWorkspaceView("admin")}
+              title="管理台"
               type="button"
             >
               <ShieldCheck size={15} />
