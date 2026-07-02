@@ -152,7 +152,7 @@ const collapsibleContent = createReactBlockSpec(
           </div>
           <div
             className="collapsible-content-block__body"
-            onKeyDown={(event) => {
+            onKeyDownCapture={(event) => {
               if (
                 event.key !== "Enter" ||
                 event.altKey ||
@@ -165,6 +165,7 @@ const collapsibleContent = createReactBlockSpec(
 
               event.preventDefault();
               event.stopPropagation();
+              event.nativeEvent.stopImmediatePropagation();
               insertHardBreak(editor);
             }}
           >

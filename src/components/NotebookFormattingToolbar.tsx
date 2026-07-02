@@ -155,7 +155,7 @@ function CopyImageButton({ onCopyImage }: { onCopyImage?: (block: EditorImageBlo
   return (
     <Components.FormattingToolbar.Button
       className="bn-button"
-      icon={<Copy />}
+      icon={<Copy size={18} />}
       label="复制图片"
       mainTooltip="复制图片"
       onClick={() => {
@@ -170,15 +170,29 @@ function CopyImageButton({ onCopyImage }: { onCopyImage?: (block: EditorImageBlo
 
 function CommentButton({ onAddComment }: { onAddComment?: () => void }) {
   const Components = useComponentsContext();
+  const editor = useBlockNoteEditor<any, any, any>();
 
-  if (!Components || !onAddComment) {
+  const canCommentSelection = useEditorState({
+    editor,
+    on: "selection",
+    selector: ({ editor }) => {
+      if (!editor.isEditable || !onAddComment || getSelectedImageBlock(editor)) {
+        return false;
+      }
+
+      const selection = editor.prosemirrorState.selection;
+      return !selection.empty && selection.from !== selection.to;
+    }
+  });
+
+  if (!Components || !onAddComment || !canCommentSelection) {
     return null;
   }
 
   return (
     <Components.FormattingToolbar.Button
       className="bn-button"
-      icon={<MessageSquarePlus />}
+      icon={<MessageSquarePlus size={18} />}
       label="添加批注"
       mainTooltip="添加批注"
       onClick={() => {

@@ -126,29 +126,30 @@ export async function writeCopiedImageToSystemClipboard(
 
   try {
     const imageBlob = getClipboardImageBlob(editor, imageUrl);
-    const htmlBlob = new Blob([createClipboardImageHtml(imageUrl)], {
-      type: "text/html"
-    });
-    const textBlob = new Blob([imageUrl], {
-      type: "text/plain"
-    });
 
     await navigator.clipboard.write([
       new ClipboardItem({
-        "image/png": imageBlob,
-        "text/html": htmlBlob,
-        "text/plain": textBlob
+        "image/png": imageBlob
       })
     ]);
     return true;
   } catch {
     try {
-      await navigator.clipboard.writeText(imageUrl);
+      const imageBlob = await getClipboardImageBlob(editor, imageUrl);
+      const dataUrl = await blobToDataUrl(imageBlob);
+      const htmlBlob = new Blob([createClipboardImageHtml(dataUrl)], {
+        type: "text/html"
+      });
+
+      await navigator.clipboard.write([
+        new ClipboardItem({
+          "text/html": htmlBlob
+        })
+      ]);
+      return true;
     } catch {
       return false;
     }
-
-    return false;
   }
 }
 
@@ -222,6 +223,21 @@ async function convertImageBlobToPng(sourceBlob: Blob): Promise<Blob> {
 function createClipboardImageHtml(imageUrl: string): string {
   const escapedUrl = escapeHtml(imageUrl);
   return `<img src="${escapedUrl}" ${CLIPBOARD_HTML_ATTRIBUTE}="${escapedUrl}" />`;
+}
+
+function blobToDataUrl(blob: Blob): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.addEventListener("load", () => {
+      if (typeof reader.result === "string") {
+        resolve(reader.result);
+      } else {
+        reject(new Error("Unable to prepare image clipboard HTML."));
+      }
+    });
+    reader.addEventListener("error", () => reject(reader.error));
+    reader.readAsDataURL(blob);
+  });
 }
 
 function escapeHtml(value: string): string {
