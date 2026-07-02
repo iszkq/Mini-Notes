@@ -112,6 +112,7 @@ const LEGACY_NOTE_CONTENT_MIGRATION_BATCH_SIZE = 8;
 const DEFAULT_FILE_NAME = "未命名文件";
 const DEFAULT_FILE_MIME_TYPE = "application/octet-stream";
 const EMBEDDED_UPLOAD_MAX_BYTES = 12 * 1024 * 1024;
+const REMOTE_IMAGE_IMPORT_MAX_BYTES = 80 * 1024 * 1024;
 const MIME_TYPE_BY_EXTENSION: Record<string, string> = {
   ".aac": "audio/aac",
   ".avi": "video/x-msvideo",
@@ -269,6 +270,10 @@ async function handleApi(
 
     if (segments[0] === "notes" && segments[1] && request.method === "DELETE") {
       return deleteNoteRecord(env, user.id, segments[1]);
+    }
+
+    if (segments[0] === "uploads" && segments[1] === "import" && request.method === "POST") {
+      return importRemoteImage(request, env, user.id);
     }
 
     if (segments[0] === "uploads" && request.method === "POST" && !segments[1]) {
@@ -1023,6 +1028,56 @@ async function uploadFile(
   }
 
   const result = await persistUpload(env, userId, entry);
+  return json(result, 201);
+}
+
+async function importRemoteImage(
+  request: Request,
+  env: Env,
+  userId: string
+): Promise<Response> {
+  const body = await request.json().catch(() => null);
+  const remoteUrl = parseRemoteImageUrl(body);
+
+  if (!remoteUrl) {
+    return error("请输入有效的图片链接。", 400);
+  }
+
+  const baseFileName = getRemoteImageFileName(remoteUrl, "remote-image");
+  const response = await fetch(remoteUrl.href, {
+    redirect: "follow",
+    headers: {
+      Accept: "image/avif,image/webp,image/apng,image/*,*/*;q=0.8",
+      "User-Agent":
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126 Safari/537.36"
+    }
+  });
+
+  if (!response.ok) {
+    return error("图片外链无法直接展示，服务器也无法下载这张图片。", 422);
+  }
+
+  const declaredSize = Number(response.headers.get("Content-Length") ?? 0);
+  if (declaredSize > REMOTE_IMAGE_IMPORT_MAX_BYTES) {
+    return error("图片太大，无法自动导入到媒体库。", 413);
+  }
+
+  const mimeType = getRemoteImageMimeType(response.headers.get("Content-Type"), baseFileName);
+  if (!mimeType || !isInlinePreviewMimeType(mimeType)) {
+    return error("这个链接不是可直接预览的图片。", 415);
+  }
+
+  const blob = await response.blob();
+  if (blob.size === 0) {
+    return error("远程图片内容为空。", 422);
+  }
+
+  if (blob.size > REMOTE_IMAGE_IMPORT_MAX_BYTES) {
+    return error("图片太大，无法自动导入到媒体库。", 413);
+  }
+
+  const fileName = ensureFileNameExtension(baseFileName, mimeType);
+  const result = await persistUploadBlob(env, userId, blob, fileName, mimeType, blob.size);
   return json(result, 201);
 }
 
@@ -2680,6 +2735,61 @@ function cleanFileName(value: string): string {
     .slice(0, 180);
 
   return fileName || DEFAULT_FILE_NAME;
+}
+
+function parseRemoteImageUrl(value: unknown): URL | null {
+  if (!value || typeof value !== "object") {
+    return null;
+  }
+
+  const urlValue = (value as { url?: unknown }).url;
+  if (typeof urlValue !== "string") {
+    return null;
+  }
+
+  try {
+    const url = new URL(urlValue.trim());
+    return url.protocol === "http:" || url.protocol === "https:" ? url : null;
+  } catch {
+    return null;
+  }
+}
+
+function getRemoteImageFileName(url: URL, fallback: string): string {
+  const pathName = url.pathname.split("/").filter(Boolean).at(-1) ?? "";
+  const decodedName = safeDecodeURIComponent(pathName);
+  return cleanFileName(decodedName || fallback);
+}
+
+function getRemoteImageMimeType(contentType: string | null, fileName: string): string | null {
+  const mimeType = normalizeMimeType(contentType ?? "");
+  if (mimeType.startsWith("image/")) {
+    return mimeType;
+  }
+
+  const inferred = normalizeMimeType(MIME_TYPE_BY_EXTENSION[getFileExtension(fileName)] ?? "");
+  return inferred.startsWith("image/") ? inferred : null;
+}
+
+function normalizeMimeType(value: string): string {
+  return value.split(";")[0]?.trim().toLowerCase() ?? "";
+}
+
+function ensureFileNameExtension(fileName: string, mimeType: string): string {
+  if (getFileExtension(fileName)) {
+    return fileName;
+  }
+
+  const extension = getExtensionForMimeType(mimeType);
+  return extension ? `${fileName}${extension}` : fileName;
+}
+
+function safeDecodeURIComponent(value: string): string {
+  try {
+    return decodeURIComponent(value);
+  } catch {
+    return value;
+  }
 }
 
 function isUploadedFile(value: unknown): value is UploadedFormFile {

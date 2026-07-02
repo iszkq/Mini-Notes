@@ -104,6 +104,13 @@ export async function uploadAsset(file: File): Promise<UploadResult> {
   });
 }
 
+export async function importImageAsset(url: string): Promise<UploadResult> {
+  return apiRequest("/api/uploads/import", {
+    method: "POST",
+    body: JSON.stringify({ url })
+  });
+}
+
 export async function listAdminUsers(): Promise<AdminUser[]> {
   return apiRequest("/api/admin/users");
 }

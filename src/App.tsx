@@ -2685,6 +2685,7 @@ function App() {
               focusRequest={editorFocusRequest}
               key={`${draft.id}:${editorDocumentVersion}`}
               note={draft}
+              onError={setAppError}
               onFindReplaceClose={() => setFindReplaceOpen(false)}
               onChange={(content) => editDraft({ content })}
             />

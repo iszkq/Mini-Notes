@@ -14,7 +14,7 @@ import {
 } from "@blocknote/react";
 import { BookOpen, ChevronDown } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState, type RefObject } from "react";
-import { uploadAsset } from "../api";
+import { importImageAsset, uploadAsset } from "../api";
 import {
   formatBibleReference,
   parseBibleVersePayload,
@@ -43,6 +43,7 @@ import {
 } from "../comments";
 import {
   createCopiedImageBlock,
+  getImageBlockById,
   getSelectedImageBlock,
   insertCopiedImageBlock,
   isFreshCopiedImageBlock,
@@ -59,6 +60,7 @@ type NotebookEditorProps = {
   onFindReplaceClose?: () => void;
   readOnly?: boolean;
   onChange: (blocks: NoteBlock[]) => void;
+  onError?: (message: string) => void;
 };
 
 type BibleInsertTarget = {
@@ -81,12 +83,15 @@ type CommentComposer = {
   selectedText: string;
 };
 
+const IMAGE_URL_EXTENSION_PATTERN = /\.(?:avif|gif|jpe?g|png|svg|webp)(?:$|[?#])/i;
+
 export function NotebookEditor({
   findReplaceAnchorRef,
   findReplaceOpen = false,
   focusRequest = 0,
   note,
   onChange,
+  onError,
   onFindReplaceClose,
   readOnly = false
 }: NotebookEditorProps) {
@@ -100,6 +105,11 @@ export function NotebookEditor({
   const [editingCommentId, setEditingCommentId] = useState<string | null>(null);
   const editorShellRef = useRef<HTMLDivElement | null>(null);
   const copiedImageBlockRef = useRef<CopiedImageBlock | null>(null);
+  const displayableRemoteImagesRef = useRef<Set<string>>(new Set());
+  const failedRemoteImagesRef = useRef<Set<string>>(new Set());
+  const importedRemoteImagesRef = useRef<Map<string, string>>(new Map());
+  const pendingRemoteImageBlocksRef = useRef<Set<string>>(new Set());
+  const pendingRemoteImageUrlsRef = useRef<Map<string, Promise<string | null>>>(new Map());
 
   const initialContent = useMemo(() => {
     return note.content.length > 0 ? hydrateBibleVerseCards(note.content) : undefined;
@@ -145,6 +155,97 @@ export function NotebookEditor({
       uploadFile: handleUpload
     },
     [dictionary, handleUpload, note.id]
+  );
+
+  const resolveRemoteImageUrl = useCallback(
+    async (url: string): Promise<string | null> => {
+      if (displayableRemoteImagesRef.current.has(url)) {
+        return null;
+      }
+
+      const importedUrl = importedRemoteImagesRef.current.get(url);
+      if (importedUrl) {
+        return importedUrl;
+      }
+
+      const pendingImport = pendingRemoteImageUrlsRef.current.get(url);
+      if (pendingImport) {
+        return pendingImport;
+      }
+
+      const importPromise = probeImageDisplay(url)
+        .then(async (canDisplay) => {
+          if (canDisplay) {
+            displayableRemoteImagesRef.current.add(url);
+            return null;
+          }
+
+          const uploaded = await importImageAsset(url);
+          importedRemoteImagesRef.current.set(url, uploaded.url);
+          return uploaded.url;
+        })
+        .catch((error) => {
+          failedRemoteImagesRef.current.add(url);
+          const message =
+            error instanceof Error && error.message
+              ? error.message
+              : "图片外链无法展示，也无法自动导入到媒体库。";
+          onError?.(message);
+          return null;
+        })
+        .finally(() => {
+          pendingRemoteImageUrlsRef.current.delete(url);
+        });
+
+      pendingRemoteImageUrlsRef.current.set(url, importPromise);
+      return importPromise;
+    },
+    [onError]
+  );
+
+  const queueRemoteImageImports = useCallback(
+    (blocks: NoteBlock[]) => {
+      if (readOnly) {
+        return;
+      }
+
+      for (const imageBlock of collectExternalImageBlocks(blocks)) {
+        const jobKey = `${imageBlock.id}:${imageBlock.url}`;
+
+        if (
+          pendingRemoteImageBlocksRef.current.has(jobKey) ||
+          failedRemoteImagesRef.current.has(imageBlock.url) ||
+          displayableRemoteImagesRef.current.has(imageBlock.url)
+        ) {
+          continue;
+        }
+
+        pendingRemoteImageBlocksRef.current.add(jobKey);
+        void resolveRemoteImageUrl(imageBlock.url)
+          .then((importedUrl) => {
+            if (!importedUrl) {
+              return;
+            }
+
+            const currentBlock = getImageBlockById(editor, imageBlock.id);
+            if (!currentBlock || currentBlock.props.url !== imageBlock.url) {
+              return;
+            }
+
+            editor.updateBlock(currentBlock.id, {
+              props: {
+                name: getImageNameFromUrl(importedUrl, currentBlock.props.name),
+                showPreview: true,
+                url: importedUrl
+              }
+            } as PartialBlock);
+          })
+          .finally(() => {
+            pendingRemoteImageBlocksRef.current.delete(jobKey);
+          });
+      }
+    },
+    [editor, readOnly, resolveRemoteImageUrl]
   );
 
   const [comments, setComments] = useState<NoteCommentThread[]>(() =>
@@ -315,6 +416,64 @@ export function NotebookEditor({
     editor.focus();
     return true;
   }, [editor]);
+
+  const insertImageBlock = useCallback(
+    (props: Record<string, unknown> & { url: string }) => {
+      insertImageBlockAtCursor(editor, props);
+      editor.focus();
+      queueRemoteImageImports(editor.document as NoteBlock[]);
+    },
+    [editor, queueRemoteImageImports]
+  );
+
+  const insertClipboardImageFiles = useCallback(
+    async (files: File[]) => {
+      for (const file of files) {
+        try {
+          const normalizedFile = normalizeClipboardImageFile(file);
+          const uploaded = await uploadAsset(normalizedFile);
+          insertImageBlock({
+            name: uploaded.name,
+            showPreview: true,
+            url: uploaded.url
+          });
+        } catch (error) {
+          const message =
+            error instanceof Error && error.message ? error.message : "图片粘贴上传失败。";
+          onError?.(message);
+        }
+      }
+    },
+    [insertImageBlock, onError]
+  );
+
+  const insertClipboardImageSource = useCallback(
+    async (source: string) => {
+      try {
+        if (/^data:/i.test(source)) {
+          const file = await fileFromImageDataUrl(source);
+          if (!file) {
+            onError?.("剪贴板里的图片无法读取，请重新复制后再试。");
+            return;
+          }
+
+          await insertClipboardImageFiles([file]);
+          return;
+        }
+
+        insertImageBlock({
+          name: getImageNameFromUrl(source),
+          showPreview: true,
+          url: normalizePastedImageUrl(source)
+        });
+      } catch (error) {
+        const message =
+          error instanceof Error && error.message ? error.message : "图片粘贴失败。";
+        onError?.(message);
+      }
+    },
+    [insertClipboardImageFiles, insertImageBlock, onError]
+  );
 
   const openBibleInsertModal = useCallback(() => {
     const currentBlock = getCurrentTextBlock();
@@ -494,6 +653,49 @@ export function NotebookEditor({
   }, [openBibleInsertModal, readOnly]);
 
   useEffect(() => {
+    if (readOnly || typeof window === "undefined") {
+      return;
+    }
+
+    const root = editorShellRef.current;
+    if (!root) {
+      return;
+    }
+
+    const handlePaste = (event: ClipboardEvent) => {
+      const target = event.target instanceof Element ? event.target : null;
+      if (!target?.closest(".note-editor")) {
+        return;
+      }
+
+      const clipboardData = event.clipboardData;
+      if (!clipboardData) {
+        return;
+      }
+
+      const imageFiles = getClipboardImageFiles(clipboardData);
+      if (imageFiles.length > 0) {
+        event.preventDefault();
+        event.stopPropagation();
+        void insertClipboardImageFiles(imageFiles);
+        return;
+      }
+
+      const imageSource = getClipboardImageSource(clipboardData);
+      if (!imageSource) {
+        return;
+      }
+
+      event.preventDefault();
+      event.stopPropagation();
+      void insertClipboardImageSource(imageSource);
+    };
+
+    root.addEventListener("paste", handlePaste, true);
+    return () => root.removeEventListener("paste", handlePaste, true);
+  }, [insertClipboardImageFiles, insertClipboardImageSource, readOnly]);
+
+  useEffect(() => {
     if (readOnly || focusRequest <= 0 || typeof window === "undefined") {
       return;
     }
@@ -550,6 +752,10 @@ export function NotebookEditor({
     setEditingCommentId(null);
     setEditingCommentBody("");
   }, [editor, note.id]);
+
+  useEffect(() => {
+    queueRemoteImageImports(editor.document as NoteBlock[]);
+  }, [editor, note.id, queueRemoteImageImports]);
 
   useEffect(() => {
     if (!commentNotice || typeof window === "undefined") {
@@ -684,6 +890,7 @@ export function NotebookEditor({
                 const nextDocument = editor.document as NoteBlock[];
                 setComments(collectNoteComments(nextDocument));
                 onChange(nextDocument);
+                queueRemoteImageImports(nextDocument);
               }
             }}
             formattingToolbar={false}
@@ -980,6 +1187,281 @@ function hydrateBibleVerseCards(blocks: NoteBlock[]): PartialBlock[] {
 
 function hasEditableContent(content: unknown): boolean {
   return Array.isArray(content) ? content.length > 0 : typeof content === "string" && content.length > 0;
+}
+
+type ExternalImageBlock = {
+  id: string;
+  url: string;
+};
+
+function collectExternalImageBlocks(blocks: NoteBlock[]): ExternalImageBlock[] {
+  const imageBlocks: ExternalImageBlock[] = [];
+  collectExternalImageBlocksFromValue(blocks, imageBlocks);
+  return imageBlocks;
+}
+
+function collectExternalImageBlocksFromValue(value: unknown, imageBlocks: ExternalImageBlock[]) {
+  if (Array.isArray(value)) {
+    value.forEach((item) => collectExternalImageBlocksFromValue(item, imageBlocks));
+    return;
+  }
+
+  if (!isRecord(value)) {
+    return;
+  }
+
+  if (value.type === "image" && typeof value.id === "string" && isRecord(value.props)) {
+    const url = value.props.url;
+    if (typeof url === "string" && isRemoteImageUrl(url)) {
+      imageBlocks.push({ id: value.id, url });
+    }
+  }
+
+  Object.values(value).forEach((nestedValue) =>
+    collectExternalImageBlocksFromValue(nestedValue, imageBlocks)
+  );
+}
+
+function insertImageBlockAtCursor(
+  editor: BlockNoteEditor<any, any, any>,
+  props: Record<string, unknown> & { url: string }
+) {
+  const referenceBlock =
+    editor.getSelection?.()?.blocks.at(-1) ?? editor.getTextCursorPosition().block;
+  const blocksToInsert = [
+    {
+      type: "image",
+      props
+    },
+    {
+      type: "paragraph",
+      content: []
+    }
+  ] as unknown as PartialBlock[];
+
+  if (isEmptyParagraph(referenceBlock)) {
+    const result = editor.replaceBlocks([referenceBlock.id], blocksToInsert);
+    const cursorBlock = result.insertedBlocks[1] ?? result.insertedBlocks[0];
+    if (cursorBlock) {
+      editor.setTextCursorPosition(cursorBlock);
+    }
+    return;
+  }
+
+  const insertedBlocks = editor.insertBlocks(blocksToInsert, referenceBlock.id, "after");
+  const cursorBlock = insertedBlocks[1] ?? insertedBlocks[0];
+  if (cursorBlock) {
+    editor.setTextCursorPosition(cursorBlock);
+  }
+}
+
+function isEmptyParagraph(block: { content?: unknown; type?: string }) {
+  return block.type === "paragraph" && Array.isArray(block.content) && block.content.length === 0;
+}
+
+function getClipboardImageFiles(clipboardData: DataTransfer): File[] {
+  const files: File[] = [];
+  const seen = new Set<string>();
+
+  for (const item of Array.from(clipboardData.items ?? [])) {
+    if (item.kind !== "file" || !item.type.startsWith("image/")) {
+      continue;
+    }
+
+    const file = item.getAsFile();
+    if (file) {
+      addUniqueImageFile(files, seen, file);
+    }
+  }
+
+  for (const file of Array.from(clipboardData.files ?? [])) {
+    if (file.type.startsWith("image/")) {
+      addUniqueImageFile(files, seen, file);
+    }
+  }
+
+  return files;
+}
+
+function addUniqueImageFile(files: File[], seen: Set<string>, file: File) {
+  const key = `${file.name}:${file.type}:${file.size}:${file.lastModified}`;
+  if (seen.has(key)) {
+    return;
+  }
+
+  seen.add(key);
+  files.push(file);
+}
+
+function getClipboardImageSource(clipboardData: DataTransfer): string | null {
+  const html = clipboardData.getData("text/html");
+  const htmlImageSource = extractImageSourceFromHtml(html);
+  if (htmlImageSource) {
+    return htmlImageSource;
+  }
+
+  const uriList = getFirstClipboardUri(clipboardData.getData("text/uri-list"));
+  if (uriList && isImageLikeClipboardUrl(uriList, false)) {
+    return uriList;
+  }
+
+  return null;
+}
+
+function extractImageSourceFromHtml(html: string): string | null {
+  if (!html.trim() || typeof DOMParser === "undefined") {
+    return null;
+  }
+
+  const doc = new DOMParser().parseFromString(html, "text/html");
+  const image = doc.querySelector("img");
+  const source =
+    image?.getAttribute("data-mini-notes-image-url") ?? image?.getAttribute("src") ?? "";
+
+  return isImageLikeClipboardUrl(source, true) ? source.trim() : null;
+}
+
+function getFirstClipboardUri(value: string): string | null {
+  return (
+    value
+      .split(/\r?\n/)
+      .map((line) => line.trim())
+      .find((line) => line && !line.startsWith("#")) ?? null
+  );
+}
+
+function normalizeClipboardImageFile(file: File): File {
+  if (file.name) {
+    return file;
+  }
+
+  const type = file.type || "image/png";
+  return new File([file], `pasted-image-${Date.now()}${getImageExtension(type)}`, {
+    lastModified: file.lastModified || Date.now(),
+    type
+  });
+}
+
+async function fileFromImageDataUrl(dataUrl: string): Promise<File | null> {
+  const response = await fetch(dataUrl);
+  const blob = await response.blob();
+
+  if (!blob.type.startsWith("image/")) {
+    return null;
+  }
+
+  return new File([blob], `pasted-image-${Date.now()}${getImageExtension(blob.type)}`, {
+    type: blob.type
+  });
+}
+
+function isImageLikeClipboardUrl(value: string, fromImageTag: boolean): boolean {
+  const trimmed = value.trim();
+  if (!trimmed) {
+    return false;
+  }
+
+  if (trimmed.startsWith("data:image/")) {
+    return true;
+  }
+
+  try {
+    const url = new URL(trimmed, window.location.href);
+    const isSameOriginStoredFile =
+      url.origin === window.location.origin && url.pathname.startsWith("/api/files/");
+
+    return (
+      (url.protocol === "http:" || url.protocol === "https:") &&
+      (fromImageTag || isSameOriginStoredFile || IMAGE_URL_EXTENSION_PATTERN.test(url.pathname))
+    );
+  } catch {
+    return false;
+  }
+}
+
+function normalizePastedImageUrl(value: string): string {
+  const url = new URL(value, window.location.href);
+  if (url.origin === window.location.origin && url.pathname.startsWith("/api/files/")) {
+    return `${url.pathname}${url.search}`;
+  }
+
+  return url.href;
+}
+
+function isRemoteImageUrl(value: string): boolean {
+  try {
+    const url = new URL(value, window.location.href);
+    return (
+      (url.protocol === "http:" || url.protocol === "https:") &&
+      url.origin !== window.location.origin
+    );
+  } catch {
+    return false;
+  }
+}
+
+function probeImageDisplay(url: string): Promise<boolean> {
+  if (typeof window === "undefined") {
+    return Promise.resolve(false);
+  }
+
+  return new Promise((resolve) => {
+    const image = new Image();
+    let settled = false;
+
+    const finish = (canDisplay: boolean) => {
+      if (settled) {
+        return;
+      }
+
+      settled = true;
+      window.clearTimeout(timeout);
+      image.onload = null;
+      image.onerror = null;
+      resolve(canDisplay);
+    };
+
+    const timeout = window.setTimeout(() => finish(true), 20000);
+    image.onload = () => finish(true);
+    image.onerror = () => finish(false);
+    image.src = url;
+  });
+}
+
+function getImageNameFromUrl(url: string, fallback?: unknown): string {
+  if (typeof fallback === "string" && fallback.trim()) {
+    return fallback;
+  }
+
+  try {
+    const parsedUrl = new URL(url, window.location.href);
+    const name = decodeURIComponent(parsedUrl.pathname.split("/").filter(Boolean).at(-1) ?? "");
+    return name || "image";
+  } catch {
+    return "image";
+  }
+}
+
+function getImageExtension(mimeType: string): string {
+  switch (mimeType.toLowerCase()) {
+    case "image/jpeg":
+      return ".jpg";
+    case "image/gif":
+      return ".gif";
+    case "image/webp":
+      return ".webp";
+    case "image/avif":
+      return ".avif";
+    case "image/svg+xml":
+      return ".svg";
+    case "image/png":
+    default:
+      return ".png";
+  }
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null;
 }
 
 function focusEditableBlock(editor: BlockNoteEditor<any, any, any>) {
