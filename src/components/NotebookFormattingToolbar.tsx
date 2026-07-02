@@ -32,6 +32,7 @@ import { useCallback } from "react";
 import {
   getImageBlockById,
   getSelectedImageBlock,
+  isStoredImageBlock,
   type EditorImageBlock
 } from "../imageClipboard";
 
@@ -110,7 +111,8 @@ function CropImageButton({ onCropImage }: { onCropImage?: (block: EditorImageBlo
         return undefined;
       }
 
-      return getSelectedImageBlock(editor)?.id;
+      const imageBlock = getSelectedImageBlock(editor);
+      return imageBlock && isStoredImageBlock(imageBlock) ? imageBlock.id : undefined;
     }
   });
 
@@ -126,7 +128,7 @@ function CropImageButton({ onCropImage }: { onCropImage?: (block: EditorImageBlo
       mainTooltip="裁剪图片"
       onClick={() => {
         const block = getImageBlockById(editor, selectedImageId);
-        if (block) {
+        if (block && isStoredImageBlock(block)) {
           onCropImage?.(block);
         }
       }}

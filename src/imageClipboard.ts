@@ -59,6 +59,10 @@ export function getImageBlockById(
   }
 }
 
+export function isStoredImageBlock(block: EditorImageBlock): boolean {
+  return isStoredFileUrl(block.props.url);
+}
+
 export function createCopiedImageBlock(block: EditorImageBlock): CopiedImageBlock {
   return {
     copiedAt: Date.now(),
@@ -215,6 +219,23 @@ function isEditorImageBlock(value: unknown): value is EditorImageBlock {
 
 function isEmptyTextBlock(block: { content?: unknown; type?: string }) {
   return block.type === "paragraph" && Array.isArray(block.content) && block.content.length === 0;
+}
+
+function isStoredFileUrl(value: string): boolean {
+  if (value.startsWith("/api/files/")) {
+    return true;
+  }
+
+  try {
+    const baseUrl = typeof window === "undefined" ? "https://mini-notes.local" : window.location.href;
+    const url = new URL(value, baseUrl);
+    const isSameOrigin =
+      typeof window === "undefined" || url.origin === new URL(window.location.href).origin;
+
+    return isSameOrigin && url.pathname.startsWith("/api/files/");
+  } catch {
+    return false;
+  }
 }
 
 async function getClipboardImageBlob(

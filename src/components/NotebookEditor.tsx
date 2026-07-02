@@ -55,6 +55,7 @@ import {
   getSelectedImageBlock,
   insertCopiedImageBlock,
   isFreshCopiedImageBlock,
+  isStoredImageBlock,
   writeCopiedImageToSystemClipboard,
   type CopiedImageBlock,
   type EditorImageBlock
@@ -422,7 +423,9 @@ export function NotebookEditor({
   );
 
   const openImageCropper = useCallback((block: EditorImageBlock) => {
-    setImageCropTarget(block);
+    if (isStoredImageBlock(block)) {
+      setImageCropTarget(block);
+    }
   }, []);
 
   const saveCroppedImage = useCallback(
