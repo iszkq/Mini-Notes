@@ -126,10 +126,19 @@ export async function writeCopiedImageToSystemClipboard(
 
   try {
     const imageBlob = getClipboardImageBlob(editor, imageUrl);
+    const htmlBlob = imageBlob
+      .then((blob) => blobToDataUrl(blob))
+      .then(
+        (dataUrl) =>
+          new Blob([createClipboardImageHtml(dataUrl)], {
+            type: "text/html"
+          })
+      );
 
     await navigator.clipboard.write([
       new ClipboardItem({
-        "image/png": imageBlob
+        "image/png": imageBlob,
+        "text/html": htmlBlob
       })
     ]);
     return true;
@@ -148,8 +157,47 @@ export async function writeCopiedImageToSystemClipboard(
       ]);
       return true;
     } catch {
-      return false;
+      return copyImageHtmlWithSelection(imageUrl);
     }
+  }
+}
+
+function copyImageHtmlWithSelection(imageUrl: string): boolean {
+  if (typeof document === "undefined" || typeof window === "undefined") {
+    return false;
+  }
+
+  const container = document.createElement("div");
+  container.contentEditable = "true";
+  container.style.position = "fixed";
+  container.style.left = "-10000px";
+  container.style.top = "0";
+  container.style.width = "1px";
+  container.style.height = "1px";
+  container.style.overflow = "hidden";
+  container.innerHTML = createClipboardImageHtml(imageUrl);
+  document.body.appendChild(container);
+
+  const selection = window.getSelection();
+  const previousRanges: Range[] = [];
+  if (selection) {
+    for (let index = 0; index < selection.rangeCount; index += 1) {
+      previousRanges.push(selection.getRangeAt(index).cloneRange());
+    }
+  }
+
+  try {
+    const range = document.createRange();
+    range.selectNodeContents(container);
+    selection?.removeAllRanges();
+    selection?.addRange(range);
+    return document.execCommand("copy");
+  } catch {
+    return false;
+  } finally {
+    selection?.removeAllRanges();
+    previousRanges.forEach((range) => selection?.addRange(range));
+    container.remove();
   }
 }
 

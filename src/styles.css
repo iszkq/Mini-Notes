@@ -1222,7 +1222,7 @@ button:disabled {
 }
 
 .public-page {
-  width: min(100%, 980px);
+  width: min(100%, 1180px);
   margin: 0 auto;
   padding: 32px 22px 90px;
 }

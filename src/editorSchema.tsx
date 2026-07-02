@@ -1,5 +1,6 @@
 import {
   BlockNoteSchema,
+  createExtension,
   defaultBlockSpecs,
   defaultStyleSpecs,
   type BlockNoteEditor
@@ -314,6 +315,14 @@ const bibleVerseCard = createReactBlockSpec(
   }
 )();
 
+export const collapsibleEnterExtension = createExtension({
+  key: "collapsible-enter-hard-break",
+  keyboardShortcuts: {
+    Enter: ({ editor }) => insertHardBreakInCollapsible(editor),
+    "Shift-Enter": ({ editor }) => insertHardBreakInCollapsible(editor)
+  }
+});
+
 function getBibleCardDefaultTitle(count: number, verseCount: number): string {
   return `经文摘录 · ${count || verseCount} 节`;
 }
@@ -351,16 +360,41 @@ function focusCollapsibleContent(editor: BlockNoteEditor<any, any, any>, blockId
   });
 }
 
-function insertHardBreak(editor: BlockNoteEditor<any, any, any>) {
+function insertHardBreakInCollapsible(editor: BlockNoteEditor<any, any, any>): boolean {
+  if (!editor.isEditable) {
+    return false;
+  }
+
+  try {
+    const selectedBlocks = editor.getSelection?.()?.blocks;
+    const currentBlock =
+      selectedBlocks && selectedBlocks.length > 0
+        ? selectedBlocks.length === 1
+          ? selectedBlocks[0]
+          : null
+        : editor.getTextCursorPosition().block;
+
+    if (currentBlock?.type !== "collapsibleContent") {
+      return false;
+    }
+
+    return insertHardBreak(editor);
+  } catch {
+    return false;
+  }
+}
+
+function insertHardBreak(editor: BlockNoteEditor<any, any, any>): boolean {
   const state = editor.prosemirrorState;
   const hardBreak = state.schema.nodes.hardBreak;
   if (!hardBreak) {
-    return;
+    return false;
   }
 
   editor.prosemirrorView.dispatch(
     state.tr.replaceSelectionWith(hardBreak.create()).scrollIntoView()
   );
+  return true;
 }
 
 function getClassName(...values: Array<string | undefined>): string {

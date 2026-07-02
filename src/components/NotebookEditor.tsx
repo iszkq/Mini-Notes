@@ -24,6 +24,7 @@ import {
 import {
   COLLAPSIBLE_CONTENT_DEFAULT_BODY,
   COLLAPSIBLE_CONTENT_DEFAULT_TITLE,
+  collapsibleEnterExtension,
   noteSchema
 } from "../editorSchema";
 import type { Note, NoteBlock } from "../shared";
@@ -140,6 +141,7 @@ export function NotebookEditor({
       tables: {
         splitCells: true
       },
+      extensions: [collapsibleEnterExtension],
       uploadFile: handleUpload
     },
     [dictionary, handleUpload, note.id]
@@ -667,6 +669,7 @@ export function NotebookEditor({
       <div
         className={getClassName(
           "note-editor-layout",
+          readOnly ? "is-readonly" : undefined,
           comments.length > 0 || commentComposer || commentNotice ? "has-comments" : undefined
         )}
         ref={editorShellRef}
