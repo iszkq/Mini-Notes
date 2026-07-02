@@ -1,4 +1,5 @@
 import {
+  ExternalLink,
   LoaderCircle,
   PencilLine,
   Plus,
@@ -7,7 +8,8 @@ import {
   Trash2,
   Upload,
   UserPlus,
-  Users
+  Users,
+  X
 } from "lucide-react";
 import { ChangeEvent, FormEvent, useEffect, useMemo, useState } from "react";
 import {
@@ -26,6 +28,12 @@ import type { AdminUpload, AdminUser, AuthUser } from "../shared";
 type AdminPanelProps = {
   currentUser: AuthUser;
   onSessionRefresh: () => Promise<void>;
+};
+
+type UploadPreview = {
+  mimeType: string;
+  name: string;
+  url: string;
 };
 
 export function AdminPanel({ currentUser, onSessionRefresh }: AdminPanelProps) {
@@ -50,6 +58,8 @@ export function AdminPanel({ currentUser, onSessionRefresh }: AdminPanelProps) {
   const [deletingUser, setDeletingUser] = useState(false);
 
   const [uploadingAsset, setUploadingAsset] = useState(false);
+  const [viewingUploadId, setViewingUploadId] = useState<string | null>(null);
+  const [uploadPreview, setUploadPreview] = useState<UploadPreview | null>(null);
   const [renamingUploadId, setRenamingUploadId] = useState<string | null>(null);
   const [deletingUploadId, setDeletingUploadId] = useState<string | null>(null);
   const [uploadNames, setUploadNames] = useState<Record<string, string>>({});
@@ -86,6 +96,14 @@ export function AdminPanel({ currentUser, onSessionRefresh }: AdminPanelProps) {
     setEditIsAdmin(selectedUser.isAdmin);
     void refreshUploads(selectedUser.id);
   }, [selectedUser?.id]);
+
+  useEffect(() => {
+    return () => {
+      if (uploadPreview) {
+        URL.revokeObjectURL(uploadPreview.url);
+      }
+    };
+  }, [uploadPreview]);
 
   async function refreshUsers(preferredUserId?: string | null) {
     setLoadingUsers(true);
@@ -222,6 +240,70 @@ export function AdminPanel({ currentUser, onSessionRefresh }: AdminPanelProps) {
       setUploadingAsset(false);
       event.target.value = "";
     }
+  }
+
+  async function handleViewUpload(upload: AdminUpload) {
+    setViewingUploadId(upload.id);
+    setPanelError(null);
+    setPanelMessage(null);
+
+    try {
+      const response = await fetch(upload.url, {
+        cache: "no-store",
+        credentials: "same-origin"
+      });
+
+      if (!response.ok) {
+        throw new Error("媒体文件读取失败，请刷新后重试。");
+      }
+
+      const responseMimeType = response.headers.get("Content-Type")?.split(";")[0]?.trim() ?? "";
+      if (responseMimeType.toLowerCase() === "text/html") {
+        throw new Error("媒体接口返回了页面内容，没有返回真实文件。");
+      }
+
+      const sourceBlob = await response.blob();
+      const mimeType = sourceBlob.type || responseMimeType || upload.mimeType;
+      const blob = sourceBlob.type ? sourceBlob : new Blob([sourceBlob], { type: mimeType });
+      const objectUrl = URL.createObjectURL(blob);
+
+      if (mimeType.startsWith("image/")) {
+        setUploadPreview((current) => {
+          if (current) {
+            URL.revokeObjectURL(current.url);
+          }
+
+          return {
+            mimeType,
+            name: upload.name,
+            url: objectUrl
+          };
+        });
+        return;
+      }
+
+      const previewWindow = window.open(objectUrl, "_blank");
+      if (!previewWindow) {
+        URL.revokeObjectURL(objectUrl);
+        throw new Error("浏览器拦截了新窗口，请允许弹窗后重试。");
+      }
+
+      window.setTimeout(() => URL.revokeObjectURL(objectUrl), 60_000);
+    } catch (error) {
+      setPanelError(error instanceof Error ? error.message : "媒体文件打开失败。");
+    } finally {
+      setViewingUploadId(null);
+    }
+  }
+
+  function closeUploadPreview() {
+    setUploadPreview((current) => {
+      if (current) {
+        URL.revokeObjectURL(current.url);
+      }
+
+      return null;
+    });
   }
 
   async function handleRenameUpload(upload: AdminUpload) {
@@ -489,14 +571,19 @@ export function AdminPanel({ currentUser, onSessionRefresh }: AdminPanelProps) {
                             value={uploadNames[upload.id] ?? upload.name}
                           />
                           <div className="admin-upload-actions">
-                            <a
+                            <button
                               className="toolbar-button"
-                              href={upload.url}
-                              rel="noreferrer"
-                              target="_blank"
+                              disabled={viewingUploadId === upload.id}
+                              onClick={() => void handleViewUpload(upload)}
+                              type="button"
                             >
+                              {viewingUploadId === upload.id ? (
+                                <LoaderCircle className="spin" size={16} />
+                              ) : (
+                                <ExternalLink size={16} />
+                              )}
                               查看
-                            </a>
+                            </button>
                             <button
                               className="toolbar-button"
                               disabled={renamingUploadId === upload.id}
@@ -534,6 +621,38 @@ export function AdminPanel({ currentUser, onSessionRefresh }: AdminPanelProps) {
           )}
         </section>
       </section>
+
+      {uploadPreview ? (
+        <div className="admin-media-preview" role="dialog" aria-modal="true">
+          <div className="admin-media-preview__backdrop" onClick={closeUploadPreview} />
+          <div className="admin-media-preview__panel">
+            <div className="admin-media-preview__head">
+              <div>
+                <strong>{uploadPreview.name}</strong>
+                <small>{uploadPreview.mimeType}</small>
+              </div>
+              <div className="admin-media-preview__actions">
+                <a
+                  className="toolbar-button"
+                  href={uploadPreview.url}
+                  rel="noreferrer"
+                  target="_blank"
+                >
+                  <ExternalLink size={16} />
+                  新标签
+                </a>
+                <button className="toolbar-button" onClick={closeUploadPreview} type="button">
+                  <X size={16} />
+                  关闭
+                </button>
+              </div>
+            </div>
+            <div className="admin-media-preview__body">
+              <img alt={uploadPreview.name} src={uploadPreview.url} />
+            </div>
+          </div>
+        </div>
+      ) : null}
     </section>
   );
 }
