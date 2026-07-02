@@ -1,4 +1,9 @@
-import { BlockNoteSchema, defaultBlockSpecs, defaultStyleSpecs } from "@blocknote/core";
+import {
+  BlockNoteSchema,
+  defaultBlockSpecs,
+  defaultStyleSpecs,
+  type BlockNoteEditor
+} from "@blocknote/core";
 import { createReactBlockSpec, createReactStyleSpec } from "@blocknote/react";
 import { ChevronDown } from "lucide-react";
 import { formatBibleReference, parseBibleVersePayload } from "./bible";
@@ -119,7 +124,21 @@ const collapsibleContent = createReactBlockSpec(
               }}
               onKeyDown={(event) => {
                 event.stopPropagation();
-                if (event.key === "Enter" || event.key === "Escape") {
+                if (event.key === "Enter") {
+                  event.preventDefault();
+                  event.currentTarget.blur();
+                  if (collapsed) {
+                    editor.updateBlock(block, {
+                      props: {
+                        collapsed: false
+                      }
+                    });
+                  }
+                  focusCollapsibleContent(editor, block.id);
+                  return;
+                }
+
+                if (event.key === "Escape") {
                   event.preventDefault();
                   event.currentTarget.blur();
                 }
@@ -131,7 +150,24 @@ const collapsibleContent = createReactBlockSpec(
               value={title}
             />
           </div>
-          <div className="collapsible-content-block__body">
+          <div
+            className="collapsible-content-block__body"
+            onKeyDown={(event) => {
+              if (
+                event.key !== "Enter" ||
+                event.altKey ||
+                event.ctrlKey ||
+                event.metaKey ||
+                event.nativeEvent.isComposing
+              ) {
+                return;
+              }
+
+              event.preventDefault();
+              event.stopPropagation();
+              insertHardBreak(editor);
+            }}
+          >
             <div className="collapsible-content-block__content" ref={contentRef} />
           </div>
         </section>
@@ -305,6 +341,25 @@ export const noteSchema = BlockNoteSchema.create({
 
 function normalizeFontSize(value: string): string {
   return FONT_SIZE_VALUES.has(value) ? value : "16px";
+}
+
+function focusCollapsibleContent(editor: BlockNoteEditor<any, any, any>, blockId: string) {
+  window.setTimeout(() => {
+    editor.focus();
+    editor.setTextCursorPosition(blockId, "end");
+  });
+}
+
+function insertHardBreak(editor: BlockNoteEditor<any, any, any>) {
+  const state = editor.prosemirrorState;
+  const hardBreak = state.schema.nodes.hardBreak;
+  if (!hardBreak) {
+    return;
+  }
+
+  editor.prosemirrorView.dispatch(
+    state.tr.replaceSelectionWith(hardBreak.create()).scrollIntoView()
+  );
 }
 
 function getClassName(...values: Array<string | undefined>): string {

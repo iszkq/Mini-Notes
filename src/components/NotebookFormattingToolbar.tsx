@@ -117,20 +117,8 @@ function CopyImageButton({ onCopyImage }: { onCopyImage?: (block: EditorImageBlo
 
 function CommentButton({ onAddComment }: { onAddComment?: () => void }) {
   const Components = useComponentsContext();
-  const editor = useBlockNoteEditor<any, any, any>();
 
-  const state = useEditorState({
-    editor,
-    selector: ({ editor }) => {
-      if (!editor.isEditable || !onAddComment) {
-        return undefined;
-      }
-
-      return {};
-    }
-  });
-
-  if (!Components || state === undefined) {
+  if (!Components || !onAddComment) {
     return null;
   }
 
