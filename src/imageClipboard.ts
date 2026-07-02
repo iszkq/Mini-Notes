@@ -43,6 +43,22 @@ export function getSelectedImageBlock(
   }
 }
 
+export function getImageBlockById(
+  editor: BlockNoteEditor<any, any, any>,
+  blockId: string | undefined
+): EditorImageBlock | null {
+  if (!blockId) {
+    return null;
+  }
+
+  try {
+    const block = editor.getBlock(blockId);
+    return isEditorImageBlock(block) ? block : null;
+  } catch {
+    return null;
+  }
+}
+
 export function createCopiedImageBlock(block: EditorImageBlock): CopiedImageBlock {
   return {
     copiedAt: Date.now(),

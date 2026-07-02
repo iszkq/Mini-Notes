@@ -161,6 +161,7 @@ function App() {
   const [exportPending, setExportPending] = useState(false);
   const [exportSelection, setExportSelection] = useState<string[]>([]);
   const [findReplaceOpen, setFindReplaceOpen] = useState(false);
+  const [editorFocusRequest, setEditorFocusRequest] = useState(0);
   const [publicNote, setPublicNote] = useState<Note | null>(null);
   const [publicPending, setPublicPending] = useState(isPublicView);
   const [publicError, setPublicError] = useState<string | null>(null);
@@ -2426,6 +2427,14 @@ function App() {
             <input
               className="title-input"
               onChange={(event) => editDraft({ title: event.target.value })}
+              onKeyDown={(event) => {
+                if (event.key !== "Enter" || event.nativeEvent.isComposing) {
+                  return;
+                }
+
+                event.preventDefault();
+                setEditorFocusRequest((current) => current + 1);
+              }}
               placeholder="未命名"
               value={draft.title}
             />
@@ -2433,6 +2442,7 @@ function App() {
             <NotebookEditor
               findReplaceAnchorRef={findReplaceButtonRef}
               findReplaceOpen={findReplaceOpen}
+              focusRequest={editorFocusRequest}
               key={draft.id}
               note={draft}
               onFindReplaceClose={() => setFindReplaceOpen(false)}

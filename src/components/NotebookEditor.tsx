@@ -9,8 +9,8 @@ import {
   getDefaultReactSlashMenuItems,
   SuggestionMenuController,
   type DefaultReactSuggestionItem,
-  useCreateBlockNote,
-  useEditorState
+  type FormattingToolbarProps,
+  useCreateBlockNote
 } from "@blocknote/react";
 import { BookOpen, ChevronDown } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState, type RefObject } from "react";
@@ -53,6 +53,7 @@ import {
 type NotebookEditorProps = {
   findReplaceAnchorRef?: RefObject<HTMLElement | null>;
   findReplaceOpen?: boolean;
+  focusRequest?: number;
   note: Note;
   onFindReplaceClose?: () => void;
   readOnly?: boolean;
@@ -82,6 +83,7 @@ type CommentComposer = {
 export function NotebookEditor({
   findReplaceAnchorRef,
   findReplaceOpen = false,
+  focusRequest = 0,
   note,
   onChange,
   onFindReplaceClose,
@@ -143,14 +145,8 @@ export function NotebookEditor({
     [dictionary, handleUpload, note.id]
   );
 
-  const transactionNumber = useEditorState({
-    editor,
-    selector: ({ transactionNumber }) => transactionNumber
-  });
-
-  const comments = useMemo(
-    () => collectNoteComments(editor.document as NoteBlock[]),
-    [editor, note.id, transactionNumber]
+  const [comments, setComments] = useState<NoteCommentThread[]>(() =>
+    collectNoteComments(note.content)
   );
 
   const getCurrentTextBlock = useCallback(() => {
@@ -228,7 +224,9 @@ export function NotebookEditor({
       }
 
       editor.replaceBlocks(getBlockIdentifiers(currentDocument), result.blocks as PartialBlock[]);
-      onChange(editor.document as NoteBlock[]);
+      const nextDocument = editor.document as NoteBlock[];
+      setComments(collectNoteComments(nextDocument));
+      onChange(nextDocument);
     },
     [editor, onChange]
   );
@@ -494,6 +492,18 @@ export function NotebookEditor({
   }, [openBibleInsertModal, readOnly]);
 
   useEffect(() => {
+    if (readOnly || focusRequest <= 0 || typeof window === "undefined") {
+      return;
+    }
+
+    const handle = window.setTimeout(() => {
+      focusEditableBlock(editor);
+    });
+
+    return () => window.clearTimeout(handle);
+  }, [editor, focusRequest, readOnly]);
+
+  useEffect(() => {
     if (readOnly || typeof window === "undefined") {
       return;
     }
@@ -534,9 +544,10 @@ export function NotebookEditor({
     setActiveCommentId(null);
     setCommentComposer(null);
     setCommentNotice(null);
+    setComments(collectNoteComments(editor.document as NoteBlock[]));
     setEditingCommentId(null);
     setEditingCommentBody("");
-  }, [note.id]);
+  }, [editor, note.id]);
 
   useEffect(() => {
     if (!commentNotice || typeof window === "undefined") {
@@ -591,7 +602,7 @@ export function NotebookEditor({
     root
       .querySelectorAll(getCommentMarkerSelector(activeCommentId))
       .forEach((marker) => marker.classList.add("is-active"));
-  }, [activeCommentId, comments, transactionNumber]);
+  }, [activeCommentId, comments]);
 
   const getSlashMenuItems = useCallback(
     async (query: string): Promise<DefaultReactSuggestionItem[]> => {
@@ -640,6 +651,17 @@ export function NotebookEditor({
     [editor, insertCollapsibleContent, openBibleInsertModal]
   );
 
+  const renderFormattingToolbar = useCallback(
+    (toolbarProps: FormattingToolbarProps) => (
+      <NotebookFormattingToolbar
+        {...toolbarProps}
+        onAddComment={openCommentComposer}
+        onCopyImage={copyImageBlock}
+      />
+    ),
+    [copyImageBlock, openCommentComposer]
+  );
+
   return (
     <>
       <div
@@ -656,7 +678,9 @@ export function NotebookEditor({
             editor={editor}
             onChange={() => {
               if (!readOnly) {
-                onChange(editor.document as NoteBlock[]);
+                const nextDocument = editor.document as NoteBlock[];
+                setComments(collectNoteComments(nextDocument));
+                onChange(nextDocument);
               }
             }}
             formattingToolbar={false}
@@ -665,15 +689,7 @@ export function NotebookEditor({
           >
             {!readOnly ? (
               <>
-                <FormattingToolbarController
-                  formattingToolbar={(toolbarProps) => (
-                    <NotebookFormattingToolbar
-                      {...toolbarProps}
-                      onAddComment={openCommentComposer}
-                      onCopyImage={copyImageBlock}
-                    />
-                  )}
-                />
+                <FormattingToolbarController formattingToolbar={renderFormattingToolbar} />
                 <SuggestionMenuController getItems={getSlashMenuItems} triggerCharacter="/" />
               </>
             ) : null}
@@ -961,6 +977,17 @@ function hydrateBibleVerseCards(blocks: NoteBlock[]): PartialBlock[] {
 
 function hasEditableContent(content: unknown): boolean {
   return Array.isArray(content) ? content.length > 0 : typeof content === "string" && content.length > 0;
+}
+
+function focusEditableBlock(editor: BlockNoteEditor<any, any, any>) {
+  editor.focus();
+  const targetBlock =
+    (editor.document as NoteBlock[]).find((block) => Array.isArray(block.content)) ??
+    editor.document[0];
+
+  if (targetBlock && typeof targetBlock.id === "string") {
+    editor.setTextCursorPosition(targetBlock.id, "start");
+  }
 }
 
 function getBlockIdentifiers(blocks: NoteBlock[]): Array<{ id: string }> {

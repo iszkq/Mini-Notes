@@ -22,7 +22,11 @@ import {
 } from "@blocknote/react";
 import { Copy, MessageSquarePlus, TableCellsMerge, TableCellsSplit, Type } from "lucide-react";
 import { useCallback } from "react";
-import { getSelectedImageBlock, type EditorImageBlock } from "../imageClipboard";
+import {
+  getImageBlockById,
+  getSelectedImageBlock,
+  type EditorImageBlock
+} from "../imageClipboard";
 
 type CellNodeLike = {
   attrs?: {
@@ -89,18 +93,19 @@ function CopyImageButton({ onCopyImage }: { onCopyImage?: (block: EditorImageBlo
   const Components = useComponentsContext();
   const editor = useBlockNoteEditor<any, any, any>();
 
-  const block = useEditorState({
+  const selectedImageId = useEditorState({
     editor,
+    on: "selection",
     selector: ({ editor }) => {
       if (!onCopyImage) {
         return undefined;
       }
 
-      return getSelectedImageBlock(editor) ?? undefined;
+      return getSelectedImageBlock(editor)?.id;
     }
   });
 
-  if (!Components || block === undefined) {
+  if (!Components || selectedImageId === undefined) {
     return null;
   }
 
@@ -110,7 +115,12 @@ function CopyImageButton({ onCopyImage }: { onCopyImage?: (block: EditorImageBlo
       icon={<Copy />}
       label="复制图片"
       mainTooltip="复制图片"
-      onClick={() => onCopyImage?.(block)}
+      onClick={() => {
+        const block = getImageBlockById(editor, selectedImageId);
+        if (block) {
+          onCopyImage?.(block);
+        }
+      }}
     />
   );
 }
@@ -140,8 +150,9 @@ function TableCellToolbarTools() {
   const editor = useBlockNoteEditor<any, any, any>();
   const tableHandles = useExtension(TableHandlesExtension);
 
-  const state = useEditorState({
+  const stateKey = useEditorState({
     editor,
+    on: "selection",
     selector: ({ editor }) => {
       if (!editor.isEditable || !editor.settings.tables.splitCells) {
         return undefined;
@@ -156,29 +167,30 @@ function TableCellToolbarTools() {
       }
 
       const mergeDirection = tableHandles.getMergeDirection(selectedBlocks[0] as never);
+      const canMerge = Boolean(mergeDirection);
+      const canSplit = canSplitCurrentTableCell(
+        editor.prosemirrorState.selection as unknown as SelectionLike
+      );
 
-      return {
-        canMerge: Boolean(mergeDirection),
-        canSplit: canSplitCurrentTableCell(
-          editor.prosemirrorState.selection as unknown as SelectionLike
-        )
-      };
+      return `${canMerge ? "1" : "0"}:${canSplit ? "1" : "0"}`;
     }
   });
+  const canMerge = stateKey?.startsWith("1") ?? false;
+  const canSplit = stateKey?.endsWith(":1") ?? false;
 
   const mergeCells = useCallback(() => {
-    if (state?.canMerge) {
+    if (canMerge) {
       tableHandles.mergeCells();
     }
-  }, [state?.canMerge, tableHandles]);
+  }, [canMerge, tableHandles]);
 
   const splitCell = useCallback(() => {
-    if (state?.canSplit) {
+    if (canSplit) {
       tableHandles.splitCell();
     }
-  }, [state?.canSplit, tableHandles]);
+  }, [canSplit, tableHandles]);
 
-  if (!Components || state === undefined) {
+  if (!Components || stateKey === undefined) {
     return null;
   }
 
@@ -187,7 +199,7 @@ function TableCellToolbarTools() {
       <Components.FormattingToolbar.Button
         className="bn-button"
         icon={<TableCellsMerge />}
-        isDisabled={!state.canMerge}
+        isDisabled={!canMerge}
         label="合并单元格"
         mainTooltip="合并单元格"
         onClick={mergeCells}
@@ -195,7 +207,7 @@ function TableCellToolbarTools() {
       <Components.FormattingToolbar.Button
         className="bn-button"
         icon={<TableCellsSplit />}
-        isDisabled={!state.canSplit}
+        isDisabled={!canSplit}
         label="分离单元格"
         mainTooltip="分离单元格"
         onClick={splitCell}
@@ -220,8 +232,9 @@ function TextSizeSelect() {
   const Components = useComponentsContext();
   const editor = useBlockNoteEditor<any, any, any>();
 
-  const state = useEditorState({
+  const fontSize = useEditorState({
     editor,
+    on: "selection",
     selector: ({ editor }) => {
       if (
         !editor.isEditable ||
@@ -233,13 +246,11 @@ function TextSizeSelect() {
         return undefined;
       }
 
-      return {
-        fontSize: editor.getActiveStyles().fontSize ?? "default"
-      };
+      return editor.getActiveStyles().fontSize ?? "default";
     }
   });
 
-  if (!Components || state === undefined) {
+  if (!Components || fontSize === undefined) {
     return null;
   }
 
@@ -248,7 +259,7 @@ function TextSizeSelect() {
       className="bn-select editor-text-size-select"
       items={TEXT_SIZE_OPTIONS.map((item) => ({
         icon: <Type size={15} />,
-        isSelected: state.fontSize === item.value,
+        isSelected: fontSize === item.value,
         onClick: () => {
           editor.focus();
           if (item.value === "default") {
