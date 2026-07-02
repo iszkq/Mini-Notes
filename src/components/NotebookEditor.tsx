@@ -103,6 +103,7 @@ export function NotebookEditor({
   const [commentNotice, setCommentNotice] = useState<string | null>(null);
   const [editingCommentBody, setEditingCommentBody] = useState("");
   const [editingCommentId, setEditingCommentId] = useState<string | null>(null);
+  const [pastedImageUploadCount, setPastedImageUploadCount] = useState(0);
   const editorShellRef = useRef<HTMLDivElement | null>(null);
   const copiedImageBlockRef = useRef<CopiedImageBlock | null>(null);
   const displayableRemoteImagesRef = useRef<Set<string>>(new Set());
@@ -428,6 +429,12 @@ export function NotebookEditor({
 
   const insertClipboardImageFiles = useCallback(
     async (files: File[]) => {
+      if (files.length === 0) {
+        return;
+      }
+
+      setPastedImageUploadCount((count) => count + files.length);
+
       for (const file of files) {
         try {
           const normalizedFile = normalizeClipboardImageFile(file);
@@ -441,6 +448,8 @@ export function NotebookEditor({
           const message =
             error instanceof Error && error.message ? error.message : "图片粘贴上传失败。";
           onError?.(message);
+        } finally {
+          setPastedImageUploadCount((count) => Math.max(0, count - 1));
         }
       }
     },
@@ -881,6 +890,19 @@ export function NotebookEditor({
         ref={editorShellRef}
       >
         <div className="note-editor-main">
+          {pastedImageUploadCount > 0 ? (
+            <div className="note-paste-upload-status" role="status" aria-live="polite">
+              <span className="note-paste-upload-status__spinner" aria-hidden="true" />
+              <span>
+                {pastedImageUploadCount > 1
+                  ? `${pastedImageUploadCount} 张图片正在上传`
+                  : "图片正在上传"}
+              </span>
+              <span className="note-paste-upload-status__bar" aria-hidden="true">
+                <span />
+              </span>
+            </div>
+          ) : null}
           <BlockNoteView
             className="note-editor"
             editable={!readOnly}
