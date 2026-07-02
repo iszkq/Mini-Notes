@@ -20,10 +20,12 @@ import {
   PanelLeftOpen,
   Pencil,
   Plus,
+  Redo2,
   Search,
   ShieldCheck,
   Sparkles,
   Trash2,
+  Undo2,
   UploadCloud,
   WifiOff
 } from "lucide-react";
@@ -90,11 +92,20 @@ type NoteDropTarget = {
   beforeId: string | null;
 };
 
+type PageSnapshot = Pick<Note, "title" | "icon" | "parentId" | "content">;
+
+type PageHistoryState = {
+  noteId: string | null;
+  past: PageSnapshot[];
+  future: PageSnapshot[];
+};
+
 const SIDEBAR_GROUP_PAGE_SIZE = 80;
 const SIDEBAR_GROUP_PAGE_STEP = 80;
 const SIDEBAR_SEARCH_PAGE_SIZE = 120;
 const UNCATEGORIZED_GROUP_KEY = "__uncategorized__";
 const SIDEBAR_COLLAPSED_STORAGE_KEY = "mini-notes-sidebar-collapsed";
+const PAGE_HISTORY_LIMIT = 80;
 
 /*
 const PAGE_PRESETS: PagePreset[] = [
@@ -153,6 +164,9 @@ function App() {
   const [notes, setNotes] = useState<NoteSummary[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [draft, setDraft] = useState<Note | null>(null);
+  const [pageHistory, setPageHistory] = useState<PageHistoryState>(() =>
+    createEmptyPageHistory(null)
+  );
   const [query, setQuery] = useState("");
   const [dirty, setDirty] = useState(false);
   const [saveStatus, setSaveStatus] = useState<SaveStatus>("idle");
@@ -181,6 +195,8 @@ function App() {
   const [editingCategoryTitle, setEditingCategoryTitle] = useState("");
   const revisionRef = useRef(0);
   const selectedIdRef = useRef<string | null>(null);
+  const draftRef = useRef<Note | null>(null);
+  const pageHistoryRef = useRef<PageHistoryState>(createEmptyPageHistory(null));
   const shareButtonRef = useRef<HTMLButtonElement | null>(null);
   const findReplaceButtonRef = useRef<HTMLButtonElement | null>(null);
   const [sharePanelStyle, setSharePanelStyle] = useState<CSSProperties>({});
@@ -199,6 +215,47 @@ function App() {
   }, [selectedId]);
 
   useEffect(() => {
+    draftRef.current = draft;
+  }, [draft]);
+
+  useEffect(() => {
+    pageHistoryRef.current = pageHistory;
+  }, [pageHistory]);
+
+  const replacePageHistory = useCallback((nextHistory: PageHistoryState) => {
+    pageHistoryRef.current = nextHistory;
+    setPageHistory(nextHistory);
+  }, []);
+
+  const resetPageHistory = useCallback(
+    (noteId: string | null) => {
+      replacePageHistory(createEmptyPageHistory(noteId));
+    },
+    [replacePageHistory]
+  );
+
+  const pushPageHistorySnapshot = useCallback(
+    (snapshot: Note) => {
+      const currentHistory = pageHistoryRef.current;
+      const currentPast =
+        currentHistory.noteId === snapshot.id ? currentHistory.past : [];
+      const nextSnapshot = clonePageSnapshot(snapshot);
+      const previousSnapshot = currentPast.at(-1);
+
+      if (previousSnapshot && arePageSnapshotsEqual(previousSnapshot, nextSnapshot)) {
+        return;
+      }
+
+      replacePageHistory({
+        noteId: snapshot.id,
+        past: [...currentPast, nextSnapshot].slice(-PAGE_HISTORY_LIMIT),
+        future: []
+      });
+    },
+    [replacePageHistory]
+  );
+
+  useEffect(() => {
     if (typeof window === "undefined") {
       return;
     }
@@ -214,8 +271,10 @@ function App() {
     setAuthInviteCode("");
     setIsLocked(true);
     setNotes([]);
+    draftRef.current = null;
     setDraft(null);
     setSelectedId(null);
+    resetPageHistory(null);
     setShareOpen(false);
     setShareCopied(false);
     setPageActionMenu(null);
@@ -231,7 +290,7 @@ function App() {
     setPageIconPickerTargetId(null);
     setDraggedNoteId(null);
     setDropTarget(null);
-  }, []);
+  }, [resetPageHistory]);
 
   const loadNote = useCallback(
     async (id: string) => {
@@ -245,9 +304,11 @@ function App() {
       try {
         const note = normalizeNote(await getNote(id));
         if (selectedIdRef.current === id) {
+          draftRef.current = note;
           setDraft(note);
           setDirty(false);
           setSaveStatus("idle");
+          resetPageHistory(note.id);
         }
       } catch (error) {
         if (error instanceof ApiError && error.status === 401) {
@@ -262,7 +323,7 @@ function App() {
         }
       }
     },
-    [handleLoggedOut, hasUsers]
+    [handleLoggedOut, hasUsers, resetPageHistory]
   );
 
   const bootstrap = useCallback(async () => {
@@ -295,9 +356,11 @@ function App() {
         await loadNote(nextSelected);
       } else {
         setSelectedId(null);
+        draftRef.current = null;
         setDraft(null);
         setDirty(false);
         setSaveStatus("idle");
+        resetPageHistory(null);
       }
     } catch (error) {
       if (error instanceof ApiError && error.status === 401) {
@@ -308,7 +371,7 @@ function App() {
     } finally {
       setIsBooting(false);
     }
-  }, [handleLoggedOut, hasUsers, loadNote]);
+  }, [handleLoggedOut, hasUsers, loadNote, resetPageHistory]);
 
   useEffect(() => {
     if (isPublicView) {
@@ -580,6 +643,7 @@ function App() {
 
         setNotes((current) => updateSummary(current, saved));
         if (selectedIdRef.current === snapshot.id && revisionRef.current === revision) {
+          draftRef.current = saved;
           setDraft(saved);
           setDirty(false);
           setSaveStatus("saved");
@@ -634,27 +698,102 @@ function App() {
     return () => window.removeEventListener("keydown", handleKeydown);
   }, [dirty, draft, isAdminView, isLocked, isPublicView, saveDraft]);
 
-  const editDraft = useCallback((patch: Partial<Note>) => {
+  const editDraft = useCallback(
+    (patch: Partial<Note>) => {
+      const currentDraft = draftRef.current;
+      if (!currentDraft) {
+        return;
+      }
+
+      const nextDraft = { ...currentDraft, ...patch };
+      if (arePageSnapshotsEqual(clonePageSnapshot(currentDraft), clonePageSnapshot(nextDraft))) {
+        return;
+      }
+
+      pushPageHistorySnapshot(currentDraft);
+      revisionRef.current += 1;
+      draftRef.current = nextDraft;
+      setDirty(true);
+      setSaveStatus("saving");
+      setDraft(nextDraft);
+
+      if (patch.title !== undefined || patch.icon !== undefined || patch.parentId !== undefined) {
+        setNotes((current) =>
+          current.map((note) =>
+            note.id === selectedIdRef.current
+              ? {
+                  ...note,
+                  title: patch.title ?? note.title,
+                  icon: patch.icon ?? note.icon,
+                  parentId: patch.parentId === undefined ? note.parentId : patch.parentId
+                }
+              : note
+          )
+        );
+      }
+    },
+    [pushPageHistorySnapshot]
+  );
+
+  const applyPageSnapshot = useCallback((snapshot: PageSnapshot) => {
+    const currentDraft = draftRef.current;
+    if (!currentDraft) {
+      return;
+    }
+
+    const nextDraft = applyPageSnapshotToNote(currentDraft, snapshot);
     revisionRef.current += 1;
+    draftRef.current = nextDraft;
     setDirty(true);
     setSaveStatus("saving");
-    setDraft((current) => (current ? { ...current, ...patch } : current));
-
-    if (patch.title !== undefined || patch.icon !== undefined || patch.parentId !== undefined) {
-      setNotes((current) =>
-        current.map((note) =>
-          note.id === selectedIdRef.current
-            ? {
-                ...note,
-                title: patch.title ?? note.title,
-                icon: patch.icon ?? note.icon,
-                parentId: patch.parentId === undefined ? note.parentId : patch.parentId
-              }
-            : note
-        )
-      );
-    }
+    setShareCopied(false);
+    setDraft(nextDraft);
+    setNotes((current) => updateSummary(current, nextDraft));
   }, []);
+
+  const undoPageChange = useCallback(() => {
+    const currentDraft = draftRef.current;
+    const currentHistory = pageHistoryRef.current;
+
+    if (!currentDraft || currentHistory.noteId !== currentDraft.id || currentHistory.past.length === 0) {
+      return;
+    }
+
+    const previousSnapshot = currentHistory.past[currentHistory.past.length - 1];
+    const nextPast = currentHistory.past.slice(0, -1);
+    const currentSnapshot = clonePageSnapshot(currentDraft);
+
+    replacePageHistory({
+      noteId: currentDraft.id,
+      past: nextPast,
+      future: [currentSnapshot, ...currentHistory.future].slice(0, PAGE_HISTORY_LIMIT)
+    });
+    applyPageSnapshot(previousSnapshot);
+  }, [applyPageSnapshot, replacePageHistory]);
+
+  const redoPageChange = useCallback(() => {
+    const currentDraft = draftRef.current;
+    const currentHistory = pageHistoryRef.current;
+
+    if (!currentDraft || currentHistory.noteId !== currentDraft.id || currentHistory.future.length === 0) {
+      return;
+    }
+
+    const nextSnapshot = currentHistory.future[0];
+    const currentSnapshot = clonePageSnapshot(currentDraft);
+
+    replacePageHistory({
+      noteId: currentDraft.id,
+      past: [...currentHistory.past, currentSnapshot].slice(-PAGE_HISTORY_LIMIT),
+      future: currentHistory.future.slice(1)
+    });
+    applyPageSnapshot(nextSnapshot);
+  }, [applyPageSnapshot, replacePageHistory]);
+
+  const canUndoPageChange =
+    Boolean(draft) && pageHistory.noteId === draft?.id && pageHistory.past.length > 0;
+  const canRedoPageChange =
+    Boolean(draft) && pageHistory.noteId === draft?.id && pageHistory.future.length > 0;
 
   const selectNote = useCallback(
     async (id: string) => {
@@ -2300,6 +2439,31 @@ function App() {
             ) : (
               <>
                 {draft ? (
+                  <div className="topbar-history" aria-label="页面历史">
+                    <button
+                      aria-label="撤销页面上一步操作"
+                      className="icon-button page-history-button"
+                      disabled={!canUndoPageChange}
+                      onClick={undoPageChange}
+                      title="撤销页面上一步操作"
+                      type="button"
+                    >
+                      <Undo2 size={17} />
+                    </button>
+                    <button
+                      aria-label="恢复页面下一步操作"
+                      className="icon-button page-history-button"
+                      disabled={!canRedoPageChange}
+                      onClick={redoPageChange}
+                      title="恢复页面下一步操作"
+                      type="button"
+                    >
+                      <Redo2 size={17} />
+                    </button>
+                  </div>
+                ) : null}
+
+                {draft ? (
                   <button
                     aria-label="查找替换"
                     className={clsx("toolbar-button", findReplaceOpen && "active")}
@@ -2534,6 +2698,46 @@ function normalizePageIcon(icon: string | null | undefined): string {
   }
 
   return LEGACY_ICON_MAP[icon] ?? icon;
+}
+
+function createEmptyPageHistory(noteId: string | null): PageHistoryState {
+  return {
+    noteId,
+    past: [],
+    future: []
+  };
+}
+
+function clonePageSnapshot(note: Pick<Note, "title" | "icon" | "parentId" | "content">): PageSnapshot {
+  return {
+    title: note.title,
+    icon: note.icon,
+    parentId: note.parentId,
+    content: cloneNoteBlocks(note.content)
+  };
+}
+
+function applyPageSnapshotToNote(note: Note, snapshot: PageSnapshot): Note {
+  return {
+    ...note,
+    title: snapshot.title,
+    icon: snapshot.icon,
+    parentId: snapshot.parentId,
+    content: cloneNoteBlocks(snapshot.content)
+  };
+}
+
+function cloneNoteBlocks(blocks: NoteBlock[]): NoteBlock[] {
+  return JSON.parse(JSON.stringify(blocks)) as NoteBlock[];
+}
+
+function arePageSnapshotsEqual(first: PageSnapshot, second: PageSnapshot): boolean {
+  return (
+    first.title === second.title &&
+    first.icon === second.icon &&
+    first.parentId === second.parentId &&
+    JSON.stringify(first.content) === JSON.stringify(second.content)
+  );
 }
 
 function normalizeLegacyTitle(title: string): string {

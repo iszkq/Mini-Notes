@@ -378,6 +378,12 @@ button:disabled {
   gap: 8px;
 }
 
+.topbar-history {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
 .topbar-stack {
   position: relative;
 }
@@ -431,6 +437,18 @@ button:disabled {
 .toolbar-button:hover {
   border-color: #c9c0b2;
   background: #f4f0e8;
+}
+
+.toolbar-button:disabled,
+.icon-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.42;
+}
+
+.toolbar-button:disabled:hover,
+.icon-button:disabled:hover {
+  border-color: #ddd7ca;
+  background: #ffffff;
 }
 
 .toolbar-button.active {
