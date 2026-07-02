@@ -180,6 +180,7 @@ function App() {
   const [exportSelection, setExportSelection] = useState<string[]>([]);
   const [findReplaceOpen, setFindReplaceOpen] = useState(false);
   const [editorFocusRequest, setEditorFocusRequest] = useState(0);
+  const [editorDocumentVersion, setEditorDocumentVersion] = useState(0);
   const [publicNote, setPublicNote] = useState<Note | null>(null);
   const [publicPending, setPublicPending] = useState(isPublicView);
   const [publicError, setPublicError] = useState<string | null>(null);
@@ -197,6 +198,7 @@ function App() {
   const revisionRef = useRef(0);
   const selectedIdRef = useRef<string | null>(null);
   const draftRef = useRef<Note | null>(null);
+  const lastPageSnapshotRef = useRef<PageSnapshot | null>(null);
   const pageHistoryRef = useRef<PageHistoryState>(createEmptyPageHistory(null));
   const shareButtonRef = useRef<HTMLButtonElement | null>(null);
   const findReplaceButtonRef = useRef<HTMLButtonElement | null>(null);
@@ -236,10 +238,10 @@ function App() {
   );
 
   const pushPageHistorySnapshot = useCallback(
-    (snapshot: Note) => {
+    (noteId: string, snapshot: PageSnapshot) => {
       const currentHistory = pageHistoryRef.current;
       const currentPast =
-        currentHistory.noteId === snapshot.id ? currentHistory.past : [];
+        currentHistory.noteId === noteId ? currentHistory.past : [];
       const nextSnapshot = clonePageSnapshot(snapshot);
       const previousSnapshot = currentPast.at(-1);
 
@@ -248,7 +250,7 @@ function App() {
       }
 
       replacePageHistory({
-        noteId: snapshot.id,
+        noteId,
         past: [...currentPast, nextSnapshot].slice(-PAGE_HISTORY_LIMIT),
         future: []
       });
@@ -273,6 +275,7 @@ function App() {
     setIsLocked(true);
     setNotes([]);
     draftRef.current = null;
+    lastPageSnapshotRef.current = null;
     setDraft(null);
     setSelectedId(null);
     resetPageHistory(null);
@@ -306,6 +309,7 @@ function App() {
         const note = normalizeNote(await getNote(id));
         if (selectedIdRef.current === id) {
           draftRef.current = note;
+          lastPageSnapshotRef.current = clonePageSnapshot(note);
           setDraft(note);
           setDirty(false);
           setSaveStatus("idle");
@@ -358,6 +362,7 @@ function App() {
       } else {
         setSelectedId(null);
         draftRef.current = null;
+        lastPageSnapshotRef.current = null;
         setDraft(null);
         setDirty(false);
         setSaveStatus("idle");
@@ -650,6 +655,7 @@ function App() {
         setNotes((current) => updateSummary(current, saved));
         if (selectedIdRef.current === snapshot.id && revisionRef.current === revision) {
           draftRef.current = saved;
+          lastPageSnapshotRef.current = clonePageSnapshot(saved);
           setDraft(saved);
           setDirty(false);
           setSaveStatus("saved");
@@ -711,14 +717,17 @@ function App() {
         return;
       }
 
-      const nextDraft = { ...currentDraft, ...patch };
-      if (arePageSnapshotsEqual(clonePageSnapshot(currentDraft), clonePageSnapshot(nextDraft))) {
+      const previousSnapshot = lastPageSnapshotRef.current ?? clonePageSnapshot(currentDraft);
+      const nextSnapshot = clonePageSnapshot({ ...currentDraft, ...patch });
+      if (arePageSnapshotsEqual(previousSnapshot, nextSnapshot)) {
         return;
       }
 
-      pushPageHistorySnapshot(currentDraft);
+      pushPageHistorySnapshot(currentDraft.id, previousSnapshot);
+      const nextDraft = applyPageSnapshotToNote(currentDraft, nextSnapshot);
       revisionRef.current += 1;
       draftRef.current = nextDraft;
+      lastPageSnapshotRef.current = nextSnapshot;
       setDirty(true);
       setSaveStatus("saving");
       setDraft(nextDraft);
@@ -729,9 +738,9 @@ function App() {
             note.id === selectedIdRef.current
               ? {
                   ...note,
-                  title: patch.title ?? note.title,
-                  icon: patch.icon ?? note.icon,
-                  parentId: patch.parentId === undefined ? note.parentId : patch.parentId
+                  title: nextDraft.title,
+                  icon: nextDraft.icon,
+                  parentId: nextDraft.parentId
                 }
               : note
           )
@@ -750,9 +759,11 @@ function App() {
     const nextDraft = applyPageSnapshotToNote(currentDraft, snapshot);
     revisionRef.current += 1;
     draftRef.current = nextDraft;
+    lastPageSnapshotRef.current = clonePageSnapshot(nextDraft);
     setDirty(true);
     setSaveStatus("saving");
     setShareCopied(false);
+    setEditorDocumentVersion((current) => current + 1);
     setDraft(nextDraft);
     setNotes((current) => updateSummary(current, nextDraft));
   }, []);
@@ -767,7 +778,7 @@ function App() {
 
     const previousSnapshot = currentHistory.past[currentHistory.past.length - 1];
     const nextPast = currentHistory.past.slice(0, -1);
-    const currentSnapshot = clonePageSnapshot(currentDraft);
+    const currentSnapshot = lastPageSnapshotRef.current ?? clonePageSnapshot(currentDraft);
 
     replacePageHistory({
       noteId: currentDraft.id,
@@ -786,7 +797,7 @@ function App() {
     }
 
     const nextSnapshot = currentHistory.future[0];
-    const currentSnapshot = clonePageSnapshot(currentDraft);
+    const currentSnapshot = lastPageSnapshotRef.current ?? clonePageSnapshot(currentDraft);
 
     replacePageHistory({
       noteId: currentDraft.id,
@@ -1116,6 +1127,8 @@ function App() {
       await deleteNote(draft.id);
       const remaining = notes.filter((note) => note.id !== draft.id);
       setNotes(remaining);
+      draftRef.current = null;
+      lastPageSnapshotRef.current = null;
       setDraft(null);
       setSelectedId(null);
       setShareOpen(false);
@@ -1572,6 +1585,8 @@ function App() {
       setNotes(remaining);
 
       if (selectedIdRef.current === note.id) {
+        draftRef.current = null;
+        lastPageSnapshotRef.current = null;
         setDraft(null);
         setSelectedId(null);
         setShareOpen(false);
@@ -2668,7 +2683,7 @@ function App() {
               findReplaceAnchorRef={findReplaceButtonRef}
               findReplaceOpen={findReplaceOpen}
               focusRequest={editorFocusRequest}
-              key={draft.id}
+              key={`${draft.id}:${editorDocumentVersion}`}
               note={draft}
               onFindReplaceClose={() => setFindReplaceOpen(false)}
               onChange={(content) => editDraft({ content })}

@@ -267,7 +267,25 @@ const bibleVerseCard = createReactBlockSpec(
             type="text"
             value={title}
           />
-          <div className="bible-embed-card__body">
+          <div
+            className="bible-embed-card__body"
+            onKeyDownCapture={(event) => {
+              if (
+                event.key !== "Enter" ||
+                event.altKey ||
+                event.ctrlKey ||
+                event.metaKey ||
+                event.nativeEvent.isComposing
+              ) {
+                return;
+              }
+
+              event.preventDefault();
+              event.stopPropagation();
+              event.nativeEvent.stopImmediatePropagation();
+              insertHardBreak(editor);
+            }}
+          >
             <div className="bible-embed-card__content" ref={contentRef} />
             {!hasEditableContent ? (
               <div className="bible-embed-card__fallback">
@@ -316,10 +334,10 @@ const bibleVerseCard = createReactBlockSpec(
 )();
 
 export const collapsibleEnterExtension = createExtension({
-  key: "collapsible-enter-hard-break",
+  key: "embedded-card-enter-hard-break",
   keyboardShortcuts: {
-    Enter: ({ editor }) => insertHardBreakInCollapsible(editor),
-    "Shift-Enter": ({ editor }) => insertHardBreakInCollapsible(editor)
+    Enter: ({ editor }) => insertHardBreakInEmbeddedCard(editor),
+    "Shift-Enter": ({ editor }) => insertHardBreakInEmbeddedCard(editor)
   }
 });
 
@@ -360,7 +378,7 @@ function focusCollapsibleContent(editor: BlockNoteEditor<any, any, any>, blockId
   });
 }
 
-function insertHardBreakInCollapsible(editor: BlockNoteEditor<any, any, any>): boolean {
+function insertHardBreakInEmbeddedCard(editor: BlockNoteEditor<any, any, any>): boolean {
   if (!editor.isEditable) {
     return false;
   }
@@ -374,7 +392,7 @@ function insertHardBreakInCollapsible(editor: BlockNoteEditor<any, any, any>): b
           : null
         : editor.getTextCursorPosition().block;
 
-    if (currentBlock?.type !== "collapsibleContent") {
+    if (currentBlock?.type !== "collapsibleContent" && currentBlock?.type !== "bibleVerseCard") {
       return false;
     }
 
