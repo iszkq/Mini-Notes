@@ -800,6 +800,24 @@ button:disabled {
   padding: 54px 42px 96px;
 }
 
+.page.has-comments {
+  width: min(1264px, calc(100vw - 48px));
+}
+
+.page-heading-layout {
+  display: grid;
+  align-items: start;
+  gap: 18px;
+}
+
+.page.has-comments .page-heading-layout {
+  grid-template-columns: minmax(0, 1fr) 300px;
+}
+
+.page-heading-main {
+  min-width: 0;
+}
+
 .page-meta {
   display: grid;
   gap: 10px;
@@ -1925,6 +1943,10 @@ button:disabled {
 
   .page {
     padding: 34px 18px 80px;
+  }
+
+  .page.has-comments .page-heading-layout {
+    grid-template-columns: 1fr;
   }
 
   .title-input {

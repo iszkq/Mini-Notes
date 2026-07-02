@@ -612,6 +612,12 @@
   transform: translateX(-50%);
 }
 
+.page.has-comments .note-editor-layout.has-comments:not(.is-readonly) {
+  width: 100%;
+  margin-left: 0;
+  transform: none;
+}
+
 .note-editor-layout.is-readonly.has-comments {
   width: 100%;
   margin-left: 0;

@@ -57,6 +57,7 @@ import {
   register,
   updateNote
 } from "./api";
+import { collectNoteComments } from "./comments";
 import { AdminPanel } from "./components/AdminPanel";
 import { EmojiPackPicker } from "./components/EmojiPackPicker";
 import { ExportPanel } from "./components/ExportPanel";
@@ -498,6 +499,11 @@ function App() {
   const selectedCategory = useMemo(
     () => categories.find((category) => category.id === draft?.parentId) ?? null,
     [categories, draft?.parentId]
+  );
+
+  const draftCommentCount = useMemo(
+    () => (draft ? collectNoteComments(draft.content).length : 0),
+    [draft]
   );
 
   const contextCategory = useMemo(
@@ -2626,33 +2632,37 @@ function App() {
         {isAdminView && sessionUser ? (
           <AdminPanel currentUser={sessionUser} onSessionRefresh={bootstrap} />
         ) : draft && !isLoadingNote ? (
-          <article className="page">
-            <div className="page-meta">
-              <span className="page-meta-label">页面图标</span>
-              <button
-                className="page-icon-picker-button"
-                onClick={() => setPageIconPickerTargetId(draft.id)}
-                type="button"
-              >
-                <NoteIcon className="page-icon-picker-button__icon" icon={normalizePageIcon(draft.icon)} />
-                <span>更换图标</span>
-              </button>
+          <article className={clsx("page", draftCommentCount > 0 && "has-comments")}>
+            <div className="page-heading-layout">
+              <div className="page-heading-main">
+                <div className="page-meta">
+                  <span className="page-meta-label">页面图标</span>
+                  <button
+                    className="page-icon-picker-button"
+                    onClick={() => setPageIconPickerTargetId(draft.id)}
+                    type="button"
+                  >
+                    <NoteIcon className="page-icon-picker-button__icon" icon={normalizePageIcon(draft.icon)} />
+                    <span>更换图标</span>
+                  </button>
+                </div>
+
+                <input
+                  className="title-input"
+                  onChange={(event) => editDraft({ title: event.target.value })}
+                  onKeyDown={(event) => {
+                    if (event.key !== "Enter" || event.nativeEvent.isComposing) {
+                      return;
+                    }
+
+                    event.preventDefault();
+                    setEditorFocusRequest((current) => current + 1);
+                  }}
+                  placeholder="未命名"
+                  value={draft.title}
+                />
+              </div>
             </div>
-
-            <input
-              className="title-input"
-              onChange={(event) => editDraft({ title: event.target.value })}
-              onKeyDown={(event) => {
-                if (event.key !== "Enter" || event.nativeEvent.isComposing) {
-                  return;
-                }
-
-                event.preventDefault();
-                setEditorFocusRequest((current) => current + 1);
-              }}
-              placeholder="未命名"
-              value={draft.title}
-            />
 
             <NotebookEditor
               findReplaceAnchorRef={findReplaceButtonRef}
