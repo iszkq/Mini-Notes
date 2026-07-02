@@ -22,6 +22,7 @@ import {
 } from "@blocknote/react";
 import {
   Copy,
+  Crop,
   MessageSquarePlus,
   TableCellsMerge,
   TableCellsSplit,
@@ -64,6 +65,7 @@ type SelectionLike = {
 type NotebookFormattingToolbarProps = FormattingToolbarProps & {
   onAddComment?: () => void;
   onCopyImage?: (block: EditorImageBlock) => void;
+  onCropImage?: (block: EditorImageBlock) => void;
 };
 
 export function NotebookFormattingToolbar(props: NotebookFormattingToolbarProps) {
@@ -75,6 +77,7 @@ export function NotebookFormattingToolbar(props: NotebookFormattingToolbarProps)
       <FileReplaceButton />
       <FileRenameButton />
       <FileDeleteButton />
+      <CropImageButton onCropImage={props.onCropImage} />
       <CopyImageButton onCopyImage={props.onCopyImage} />
       <FileDownloadButton />
       <FilePreviewButton />
@@ -92,6 +95,42 @@ export function NotebookFormattingToolbar(props: NotebookFormattingToolbarProps)
       <CreateLinkButton />
       <CommentButton onAddComment={props.onAddComment} />
     </FormattingToolbar>
+  );
+}
+
+function CropImageButton({ onCropImage }: { onCropImage?: (block: EditorImageBlock) => void }) {
+  const Components = useComponentsContext();
+  const editor = useBlockNoteEditor<any, any, any>();
+
+  const selectedImageId = useEditorState({
+    editor,
+    on: "selection",
+    selector: ({ editor }) => {
+      if (!onCropImage) {
+        return undefined;
+      }
+
+      return getSelectedImageBlock(editor)?.id;
+    }
+  });
+
+  if (!Components || selectedImageId === undefined) {
+    return null;
+  }
+
+  return (
+    <Components.FormattingToolbar.Button
+      className="bn-button"
+      icon={<Crop size={18} />}
+      label="裁剪图片"
+      mainTooltip="裁剪图片"
+      onClick={() => {
+        const block = getImageBlockById(editor, selectedImageId);
+        if (block) {
+          onCropImage?.(block);
+        }
+      }}
+    />
   );
 }
 

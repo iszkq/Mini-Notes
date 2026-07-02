@@ -947,6 +947,222 @@ button:disabled {
   background: transparent;
 }
 
+.image-crop-dialog {
+  position: fixed;
+  inset: 0;
+  z-index: 120;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+}
+
+.image-crop-dialog__backdrop {
+  position: absolute;
+  inset: 0;
+  background: rgba(17, 24, 39, 0.62);
+}
+
+.image-crop-dialog__panel {
+  position: relative;
+  z-index: 1;
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto auto;
+  width: min(1040px, 100%);
+  max-height: min(92vh, 880px);
+  overflow: hidden;
+  border: 1px solid rgba(226, 232, 240, 0.92);
+  border-radius: 16px;
+  background: #ffffff;
+  box-shadow: 0 28px 78px rgba(15, 23, 42, 0.3);
+}
+
+.image-crop-dialog__head,
+.image-crop-dialog__foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 14px 16px;
+}
+
+.image-crop-dialog__head {
+  border-bottom: 1px solid #e5e7eb;
+}
+
+.image-crop-dialog__head > div {
+  min-width: 0;
+  display: grid;
+  gap: 3px;
+}
+
+.image-crop-dialog__head strong,
+.image-crop-dialog__head small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.image-crop-dialog__head small {
+  color: #64748b;
+}
+
+.image-crop-dialog__icon-button {
+  min-height: 34px;
+  padding: 0 12px;
+  border: 1px solid #e5e7eb;
+  border-radius: 10px;
+  color: #475569;
+  background: #ffffff;
+  font-weight: 800;
+}
+
+.image-crop-dialog__body {
+  min-height: 0;
+  display: grid;
+  place-items: center;
+  padding: 18px;
+  overflow: auto;
+  background: #f8fafc;
+}
+
+.image-crop-dialog__stage {
+  display: grid;
+  place-items: center;
+  min-width: 0;
+  width: 100%;
+}
+
+.image-crop-dialog__frame {
+  position: relative;
+  display: inline-block;
+  max-width: 100%;
+  line-height: 0;
+  user-select: none;
+}
+
+.image-crop-dialog__frame img {
+  display: block;
+  max-width: 100%;
+  max-height: min(62vh, 620px);
+  object-fit: contain;
+}
+
+.image-crop-dialog__shade {
+  position: absolute;
+  background: rgba(15, 23, 42, 0.54);
+  pointer-events: none;
+}
+
+.image-crop-dialog__shade.top {
+  top: 0;
+  right: 0;
+  left: 0;
+}
+
+.image-crop-dialog__shade.right {
+  right: 0;
+}
+
+.image-crop-dialog__shade.bottom {
+  right: 0;
+  bottom: 0;
+  left: 0;
+}
+
+.image-crop-dialog__shade.left {
+  left: 0;
+}
+
+.image-crop-dialog__box {
+  position: absolute;
+  border: 2px solid #ffffff;
+  box-shadow:
+    0 0 0 1px rgba(47, 111, 115, 0.7),
+    0 10px 30px rgba(15, 23, 42, 0.22);
+  cursor: move;
+}
+
+.image-crop-dialog__box::before,
+.image-crop-dialog__box::after {
+  content: "";
+  position: absolute;
+  inset: 33.333% 0 auto;
+  border-top: 1px solid rgba(255, 255, 255, 0.72);
+}
+
+.image-crop-dialog__box::after {
+  inset: 66.666% 0 auto;
+}
+
+.image-crop-dialog__handle {
+  position: absolute;
+  width: 16px;
+  height: 16px;
+  padding: 0;
+  border: 2px solid #ffffff;
+  border-radius: 999px;
+  background: #2f6f73;
+  box-shadow: 0 2px 10px rgba(15, 23, 42, 0.24);
+}
+
+.image-crop-dialog__handle.nw {
+  top: -9px;
+  left: -9px;
+  cursor: nwse-resize;
+}
+
+.image-crop-dialog__handle.ne {
+  top: -9px;
+  right: -9px;
+  cursor: nesw-resize;
+}
+
+.image-crop-dialog__handle.sw {
+  bottom: -9px;
+  left: -9px;
+  cursor: nesw-resize;
+}
+
+.image-crop-dialog__handle.se {
+  right: -9px;
+  bottom: -9px;
+  cursor: nwse-resize;
+}
+
+.image-crop-dialog__loading {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 180px;
+  color: #475569;
+  font-weight: 800;
+}
+
+.image-crop-dialog__spinner {
+  width: 18px;
+  height: 18px;
+  border: 2px solid #d7e8e4;
+  border-top-color: #2f6f73;
+  border-radius: 999px;
+  animation: spin 0.8s linear infinite;
+}
+
+.image-crop-dialog__error {
+  margin: 0 16px;
+  padding: 10px 12px;
+  border: 1px solid #f3c7c7;
+  border-radius: 10px;
+  color: #9a3412;
+  background: #fff7ed;
+  font-size: 0.88rem;
+  font-weight: 700;
+}
+
+.image-crop-dialog__foot {
+  justify-content: flex-end;
+  border-top: 1px solid #e5e7eb;
+}
+
 .workspace-empty {
   display: grid;
   place-items: start center;

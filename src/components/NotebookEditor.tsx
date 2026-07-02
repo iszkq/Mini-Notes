@@ -13,7 +13,15 @@ import {
   useCreateBlockNote
 } from "@blocknote/react";
 import { BookOpen, ChevronDown } from "lucide-react";
-import { useCallback, useEffect, useMemo, useRef, useState, type RefObject } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type PointerEvent as ReactPointerEvent,
+  type RefObject
+} from "react";
 import { importImageAsset, uploadAsset } from "../api";
 import {
   formatBibleReference,
@@ -108,6 +116,7 @@ export function NotebookEditor({
   const [commentNotice, setCommentNotice] = useState<string | null>(null);
   const [editingCommentBody, setEditingCommentBody] = useState("");
   const [editingCommentId, setEditingCommentId] = useState<string | null>(null);
+  const [imageCropTarget, setImageCropTarget] = useState<EditorImageBlock | null>(null);
   const [pasteUploadAnchor, setPasteUploadAnchor] = useState<PasteUploadAnchor | null>(null);
   const [pastedImageUploadCount, setPastedImageUploadCount] = useState(0);
   const editorShellRef = useRef<HTMLDivElement | null>(null);
@@ -408,6 +417,34 @@ export function NotebookEditor({
       const copiedImageBlock = createCopiedImageBlock(block);
       copiedImageBlockRef.current = copiedImageBlock;
       void writeCopiedImageToSystemClipboard(editor, copiedImageBlock);
+    },
+    [editor]
+  );
+
+  const openImageCropper = useCallback((block: EditorImageBlock) => {
+    setImageCropTarget(block);
+  }, []);
+
+  const saveCroppedImage = useCallback(
+    async (blockId: string, blob: Blob) => {
+      const file = new File([blob], `cropped-image-${Date.now()}.png`, {
+        type: "image/png"
+      });
+      const uploaded = await uploadAsset(file);
+      const currentBlock = getImageBlockById(editor, blockId);
+
+      if (!currentBlock) {
+        throw new Error("图片已不存在。");
+      }
+
+      editor.updateBlock(currentBlock.id, {
+        props: {
+          name: uploaded.name,
+          showPreview: true,
+          url: uploaded.url
+        }
+      } as PartialBlock);
+      setImageCropTarget(null);
     },
     [editor]
   );
@@ -776,6 +813,7 @@ export function NotebookEditor({
     setActiveCommentId(null);
     setCommentComposer(null);
     setCommentNotice(null);
+    setImageCropTarget(null);
     setComments(collectNoteComments(editor.document as NoteBlock[]));
     setEditingCommentId(null);
     setEditingCommentBody("");
@@ -893,9 +931,10 @@ export function NotebookEditor({
         {...toolbarProps}
         onAddComment={openCommentComposer}
         onCopyImage={copyImageBlock}
+        onCropImage={openImageCropper}
       />
     ),
-    [copyImageBlock, openCommentComposer]
+    [copyImageBlock, openCommentComposer, openImageCropper]
   );
 
   return (
@@ -1010,6 +1049,15 @@ export function NotebookEditor({
           editor={editor}
           onClose={onFindReplaceClose}
           open={findReplaceOpen}
+        />
+      ) : null}
+
+      {!readOnly && imageCropTarget ? (
+        <ImageCropDialog
+          block={imageCropTarget}
+          editor={editor}
+          onClose={() => setImageCropTarget(null)}
+          onSave={saveCroppedImage}
         />
       ) : null}
     </>
@@ -1183,6 +1231,258 @@ function CommentsSidebar({
   );
 }
 
+type CropRect = {
+  height: number;
+  width: number;
+  x: number;
+  y: number;
+};
+
+type CropDragState = {
+  crop: CropRect;
+  frameHeight: number;
+  frameWidth: number;
+  mode: "move" | "nw" | "ne" | "sw" | "se";
+  pointerX: number;
+  pointerY: number;
+};
+
+type CropImageSource = {
+  blob: Blob;
+  height: number;
+  name: string;
+  objectUrl: string;
+  width: number;
+};
+
+type ImageCropDialogProps = {
+  block: EditorImageBlock;
+  editor: BlockNoteEditor<any, any, any>;
+  onClose: () => void;
+  onSave: (blockId: string, blob: Blob) => Promise<void>;
+};
+
+function ImageCropDialog({ block, editor, onClose, onSave }: ImageCropDialogProps) {
+  const frameRef = useRef<HTMLDivElement | null>(null);
+  const dragStateRef = useRef<CropDragState | null>(null);
+  const [crop, setCrop] = useState<CropRect>({
+    height: 0.8,
+    width: 0.8,
+    x: 0.1,
+    y: 0.1
+  });
+  const [error, setError] = useState<string | null>(null);
+  const [isSaving, setIsSaving] = useState(false);
+  const [source, setSource] = useState<CropImageSource | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    let objectUrl: string | null = null;
+
+    setError(null);
+    setSource(null);
+    setCrop({
+      height: 0.8,
+      width: 0.8,
+      x: 0.1,
+      y: 0.1
+    });
+
+    loadImageCropSource(editor, block)
+      .then((nextSource) => {
+        if (cancelled) {
+          URL.revokeObjectURL(nextSource.objectUrl);
+          return;
+        }
+
+        objectUrl = nextSource.objectUrl;
+        setSource(nextSource);
+      })
+      .catch((cause) => {
+        setError(cause instanceof Error ? cause.message : "图片读取失败。");
+      });
+
+    return () => {
+      cancelled = true;
+      if (objectUrl) {
+        URL.revokeObjectURL(objectUrl);
+      }
+    };
+  }, [block.id, block.props.url, editor]);
+
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        onClose();
+      }
+    };
+
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [onClose]);
+
+  useEffect(() => {
+    const handlePointerMove = (event: PointerEvent) => {
+      const dragState = dragStateRef.current;
+      if (!dragState) {
+        return;
+      }
+
+      event.preventDefault();
+      const dx = (event.clientX - dragState.pointerX) / dragState.frameWidth;
+      const dy = (event.clientY - dragState.pointerY) / dragState.frameHeight;
+      setCrop(updateCropFromDrag(dragState.crop, dragState.mode, dx, dy));
+    };
+
+    const handlePointerUp = () => {
+      dragStateRef.current = null;
+    };
+
+    window.addEventListener("pointermove", handlePointerMove);
+    window.addEventListener("pointerup", handlePointerUp);
+    window.addEventListener("pointercancel", handlePointerUp);
+    return () => {
+      window.removeEventListener("pointermove", handlePointerMove);
+      window.removeEventListener("pointerup", handlePointerUp);
+      window.removeEventListener("pointercancel", handlePointerUp);
+    };
+  }, []);
+
+  const startCropDrag = useCallback(
+    (mode: CropDragState["mode"], event: ReactPointerEvent<HTMLElement>) => {
+      const frame = frameRef.current;
+      if (!frame || !source || isSaving) {
+        return;
+      }
+
+      const rect = frame.getBoundingClientRect();
+      dragStateRef.current = {
+        crop,
+        frameHeight: rect.height,
+        frameWidth: rect.width,
+        mode,
+        pointerX: event.clientX,
+        pointerY: event.clientY
+      };
+      event.preventDefault();
+      event.stopPropagation();
+      event.currentTarget.setPointerCapture?.(event.pointerId);
+    },
+    [crop, isSaving, source]
+  );
+
+  const applyCrop = useCallback(async () => {
+    if (!source || isSaving) {
+      return;
+    }
+
+    setIsSaving(true);
+    setError(null);
+
+    try {
+      const croppedBlob = await cropImageBlob(source.blob, crop);
+      await onSave(block.id, croppedBlob);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "图片裁剪失败。");
+    } finally {
+      setIsSaving(false);
+    }
+  }, [block.id, crop, isSaving, onSave, source]);
+
+  return (
+    <div className="image-crop-dialog" role="dialog" aria-modal="true">
+      <div className="image-crop-dialog__backdrop" onClick={isSaving ? undefined : onClose} />
+      <section className="image-crop-dialog__panel">
+        <header className="image-crop-dialog__head">
+          <div>
+            <strong>裁剪图片</strong>
+            <small>{source ? `${source.name} · ${source.width} × ${source.height}` : "正在读取图片"}</small>
+          </div>
+          <button className="image-crop-dialog__icon-button" disabled={isSaving} onClick={onClose} type="button">
+            关闭
+          </button>
+        </header>
+
+        <div className="image-crop-dialog__body">
+          {source ? (
+            <div className="image-crop-dialog__stage">
+              <div className="image-crop-dialog__frame" ref={frameRef}>
+                <img alt={source.name} draggable={false} src={source.objectUrl} />
+                <div
+                  className="image-crop-dialog__shade top"
+                  style={{ height: `${crop.y * 100}%` }}
+                />
+                <div
+                  className="image-crop-dialog__shade right"
+                  style={{
+                    bottom: `${(1 - crop.y - crop.height) * 100}%`,
+                    left: `${(crop.x + crop.width) * 100}%`,
+                    top: `${crop.y * 100}%`
+                  }}
+                />
+                <div
+                  className="image-crop-dialog__shade bottom"
+                  style={{ top: `${(crop.y + crop.height) * 100}%` }}
+                />
+                <div
+                  className="image-crop-dialog__shade left"
+                  style={{
+                    bottom: `${(1 - crop.y - crop.height) * 100}%`,
+                    right: `${(1 - crop.x) * 100}%`,
+                    top: `${crop.y * 100}%`
+                  }}
+                />
+                <div
+                  className="image-crop-dialog__box"
+                  onPointerDown={(event) => startCropDrag("move", event)}
+                  style={{
+                    height: `${crop.height * 100}%`,
+                    left: `${crop.x * 100}%`,
+                    top: `${crop.y * 100}%`,
+                    width: `${crop.width * 100}%`
+                  }}
+                >
+                  {(["nw", "ne", "sw", "se"] as const).map((mode) => (
+                    <button
+                      aria-label="调整裁剪区域"
+                      className={`image-crop-dialog__handle ${mode}`}
+                      key={mode}
+                      onPointerDown={(event) => startCropDrag(mode, event)}
+                      type="button"
+                    />
+                  ))}
+                </div>
+              </div>
+            </div>
+          ) : (
+            <div className="image-crop-dialog__loading">
+              <span className="image-crop-dialog__spinner" />
+              <span>正在准备图片</span>
+            </div>
+          )}
+        </div>
+
+        {error ? <div className="image-crop-dialog__error">{error}</div> : null}
+
+        <footer className="image-crop-dialog__foot">
+          <button className="toolbar-button" disabled={isSaving} onClick={onClose} type="button">
+            取消
+          </button>
+          <button
+            className="primary-button"
+            disabled={!source || isSaving}
+            onClick={() => void applyCrop()}
+            type="button"
+          >
+            {isSaving ? "正在替换" : "裁剪并替换"}
+          </button>
+        </footer>
+      </section>
+    </div>
+  );
+}
+
 function createBibleVerseCardContent(verses: BibleVerse[]) {
   return verses.flatMap((verse, index) => [
     ...(index > 0
@@ -1208,6 +1508,128 @@ function createBibleVerseCardContent(verses: BibleVerse[]) {
       styles: {}
     }
   ]);
+}
+
+async function loadImageCropSource(
+  editor: BlockNoteEditor<any, any, any>,
+  block: EditorImageBlock
+): Promise<CropImageSource> {
+  const sourceUrl = block.props.url;
+  const resolvedUrl = editor.resolveFileUrl ? await editor.resolveFileUrl(sourceUrl) : sourceUrl;
+  const response = await fetch(new URL(resolvedUrl, window.location.href), {
+    credentials: "include"
+  });
+
+  if (!response.ok) {
+    throw new Error("无法读取这张图片。");
+  }
+
+  const blob = await response.blob();
+  const mimeType = blob.type || response.headers.get("Content-Type")?.split(";")[0]?.trim() || "";
+  if (!mimeType.startsWith("image/")) {
+    throw new Error("当前文件不是可裁剪的图片。");
+  }
+
+  if (mimeType === "image/svg+xml") {
+    throw new Error("SVG 图片暂不支持裁剪。");
+  }
+
+  const objectUrl = URL.createObjectURL(blob);
+  try {
+    const size = await getImageObjectUrlSize(objectUrl);
+    return {
+      blob,
+      height: size.height,
+      name: typeof block.props.name === "string" && block.props.name ? block.props.name : "image",
+      objectUrl,
+      width: size.width
+    };
+  } catch (cause) {
+    URL.revokeObjectURL(objectUrl);
+    throw cause;
+  }
+}
+
+function getImageObjectUrlSize(objectUrl: string): Promise<{ height: number; width: number }> {
+  return new Promise((resolve, reject) => {
+    const image = new Image();
+    image.onload = () => {
+      resolve({
+        height: image.naturalHeight,
+        width: image.naturalWidth
+      });
+    };
+    image.onerror = () => reject(new Error("图片预览加载失败。"));
+    image.src = objectUrl;
+  });
+}
+
+function updateCropFromDrag(
+  start: CropRect,
+  mode: CropDragState["mode"],
+  dx: number,
+  dy: number
+): CropRect {
+  const minSize = 0.06;
+  let next = { ...start };
+
+  if (mode === "move") {
+    next.x = clamp(start.x + dx, 0, 1 - start.width);
+    next.y = clamp(start.y + dy, 0, 1 - start.height);
+    return next;
+  }
+
+  if (mode.includes("w")) {
+    const nextX = clamp(start.x + dx, 0, start.x + start.width - minSize);
+    next.width = start.width + start.x - nextX;
+    next.x = nextX;
+  }
+
+  if (mode.includes("e")) {
+    next.width = clamp(start.width + dx, minSize, 1 - start.x);
+  }
+
+  if (mode.includes("n")) {
+    const nextY = clamp(start.y + dy, 0, start.y + start.height - minSize);
+    next.height = start.height + start.y - nextY;
+    next.y = nextY;
+  }
+
+  if (mode.includes("s")) {
+    next.height = clamp(start.height + dy, minSize, 1 - start.y);
+  }
+
+  return next;
+}
+
+async function cropImageBlob(sourceBlob: Blob, crop: CropRect): Promise<Blob> {
+  const bitmap = await createImageBitmap(sourceBlob);
+  const sx = Math.max(0, Math.floor(crop.x * bitmap.width));
+  const sy = Math.max(0, Math.floor(crop.y * bitmap.height));
+  const sw = Math.max(1, Math.min(bitmap.width - sx, Math.round(crop.width * bitmap.width)));
+  const sh = Math.max(1, Math.min(bitmap.height - sy, Math.round(crop.height * bitmap.height)));
+  const canvas = document.createElement("canvas");
+  canvas.width = sw;
+  canvas.height = sh;
+
+  const context = canvas.getContext("2d");
+  if (!context) {
+    bitmap.close();
+    throw new Error("浏览器无法创建裁剪画布。");
+  }
+
+  context.drawImage(bitmap, sx, sy, sw, sh, 0, 0, sw, sh);
+  bitmap.close();
+
+  return new Promise((resolve, reject) => {
+    canvas.toBlob((blob) => {
+      if (blob) {
+        resolve(blob);
+      } else {
+        reject(new Error("图片裁剪导出失败。"));
+      }
+    }, "image/png");
+  });
 }
 
 function hydrateBibleVerseCards(blocks: NoteBlock[]): PartialBlock[] {
