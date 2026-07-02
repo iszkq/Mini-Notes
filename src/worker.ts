@@ -111,6 +111,7 @@ const NOTE_SEARCH_PATTERN_MAX_BYTES = 50;
 const LEGACY_NOTE_CONTENT_MIGRATION_BATCH_SIZE = 8;
 const DEFAULT_FILE_NAME = "未命名文件";
 const DEFAULT_FILE_MIME_TYPE = "application/octet-stream";
+const EMBEDDED_UPLOAD_MAX_BYTES = 12 * 1024 * 1024;
 const MIME_TYPE_BY_EXTENSION: Record<string, string> = {
   ".aac": "audio/aac",
   ".avi": "video/x-msvideo",
@@ -715,7 +716,10 @@ async function createNote(
   const kind = cleanNoteKind(body.kind);
   const now = new Date().toISOString();
   const id = crypto.randomUUID();
-  const content = kind === "category" ? [] : normalizeBlocks(body.content);
+  const content =
+    kind === "category"
+      ? []
+      : await materializeEmbeddedUploads(env, userId, normalizeBlocks(body.content));
   const storedContent = await persistNoteContent(env, userId, id, content, kind === "page");
   const summary = kind === "page" ? extractNoteSummary(content) : "";
   const note: Note = {
@@ -809,9 +813,11 @@ async function updateNote(
     content:
       cleanNoteKind(current.kind) === "category"
         ? []
-        : body.content === undefined
-          ? currentContent
-          : normalizeBlocks(body.content),
+        : await materializeEmbeddedUploads(
+            env,
+            userId,
+            body.content === undefined ? currentContent : normalizeBlocks(body.content)
+          ),
     updatedAt: new Date().toISOString()
   };
   const storedContent = await persistNoteContent(
@@ -1788,6 +1794,130 @@ function normalizeBlocks(value: unknown): NoteBlock[] {
     : [];
 }
 
+async function materializeEmbeddedUploads(
+  env: Env,
+  userId: string,
+  blocks: NoteBlock[]
+): Promise<NoteBlock[]> {
+  return rewriteEmbeddedUploads(env, userId, blocks) as Promise<NoteBlock[]>;
+}
+
+async function rewriteEmbeddedUploads(
+  env: Env,
+  userId: string,
+  value: unknown,
+  key = ""
+): Promise<unknown> {
+  if (typeof value === "string") {
+    if (!isEmbeddableUrlKey(key)) {
+      return value;
+    }
+
+    const embedded = parseEmbeddedDataUrl(value);
+    if (!embedded) {
+      return value;
+    }
+
+    const uploaded = await persistUploadBlob(
+      env,
+      userId,
+      embedded.blob,
+      embedded.fileName,
+      embedded.mimeType,
+      embedded.size
+    );
+    return uploaded.url;
+  }
+
+  if (Array.isArray(value)) {
+    return Promise.all(value.map((item) => rewriteEmbeddedUploads(env, userId, item, key)));
+  }
+
+  if (value && typeof value === "object") {
+    const entries = await Promise.all(
+      Object.entries(value as Record<string, unknown>).map(async ([nestedKey, nestedValue]) => [
+        nestedKey,
+        await rewriteEmbeddedUploads(env, userId, nestedValue, nestedKey)
+      ])
+    );
+    return Object.fromEntries(entries);
+  }
+
+  return value;
+}
+
+function isEmbeddableUrlKey(key: string): boolean {
+  const normalizedKey = key.toLowerCase();
+  return normalizedKey === "url" || normalizedKey === "src";
+}
+
+function parseEmbeddedDataUrl(
+  value: string
+): { blob: Blob; fileName: string; mimeType: string; size: number } | null {
+  if (!value.startsWith("data:")) {
+    return null;
+  }
+
+  const commaIndex = value.indexOf(",");
+  if (commaIndex < 0) {
+    return null;
+  }
+
+  const metadata = value.slice(5, commaIndex).toLowerCase();
+  const rawMimeType = metadata.split(";")[0]?.trim();
+  const mimeType = rawMimeType || DEFAULT_FILE_MIME_TYPE;
+  if (!isPersistableEmbeddedMimeType(mimeType)) {
+    return null;
+  }
+
+  const isBase64 = metadata.split(";").includes("base64");
+  const payload = value.slice(commaIndex + 1);
+  const bytes = isBase64 ? decodeBase64Bytes(payload) : decodeUrlEncodedBytes(payload);
+
+  if (!bytes || bytes.byteLength === 0 || bytes.byteLength > EMBEDDED_UPLOAD_MAX_BYTES) {
+    return null;
+  }
+
+  const fileName = `embedded-${Date.now()}-${generateRandomToken(6)}${getExtensionForMimeType(mimeType)}`;
+  return {
+    blob: new Blob([bytes], { type: mimeType }),
+    fileName,
+    mimeType,
+    size: bytes.byteLength
+  };
+}
+
+function isPersistableEmbeddedMimeType(mimeType: string): boolean {
+  return (
+    mimeType.startsWith("image/") ||
+    mimeType.startsWith("audio/") ||
+    mimeType.startsWith("video/") ||
+    mimeType === "application/pdf"
+  );
+}
+
+function decodeBase64Bytes(value: string): Uint8Array | null {
+  try {
+    const normalized = value.replace(/\s+/g, "");
+    const binary = atob(normalized);
+    const bytes = new Uint8Array(binary.length);
+    for (let index = 0; index < binary.length; index += 1) {
+      bytes[index] = binary.charCodeAt(index);
+    }
+    return bytes;
+  } catch {
+    return null;
+  }
+}
+
+function decodeUrlEncodedBytes(value: string): Uint8Array | null {
+  try {
+    return new TextEncoder().encode(decodeURIComponent(value));
+  } catch {
+    return null;
+  }
+}
+
 function extractSearchTextFromBlocks(blocks: NoteBlock[]): string {
   const parts: string[] = [];
   collectSearchText(blocks, parts);
@@ -2194,13 +2324,24 @@ async function persistUpload(
   userId: string,
   entry: UploadedFormFile
 ): Promise<UploadResult> {
-  const fileName = cleanFileName(entry.name);
-  const mimeType = detectMimeType(entry.type, fileName);
+  return persistUploadBlob(env, userId, entry, entry.name, entry.type, entry.size);
+}
+
+async function persistUploadBlob(
+  env: Env,
+  userId: string,
+  blob: Blob,
+  name: string,
+  type: string,
+  size: number
+): Promise<UploadResult> {
+  const fileName = cleanFileName(name);
+  const mimeType = detectMimeType(type, fileName);
   const uploadId = crypto.randomUUID();
   const now = new Date().toISOString();
   const objectKey = `${userId}/${uploadId}${getFileExtension(fileName)}`;
 
-  await env.FILES.put(objectKey, entry, {
+  await env.FILES.put(objectKey, blob, {
     httpMetadata: {
       contentType: mimeType
     }
@@ -2211,7 +2352,7 @@ async function persistUpload(
        (id, user_id, object_key, file_name, mime_type, size, created_at)
      VALUES (?, ?, ?, ?, ?, ?, ?)`
   )
-    .bind(uploadId, userId, objectKey, fileName, mimeType, entry.size, now)
+    .bind(uploadId, userId, objectKey, fileName, mimeType, size, now)
     .run();
 
   return {
@@ -2219,7 +2360,7 @@ async function persistUpload(
     url: `/api/files/${encodeURIComponent(uploadId)}`,
     name: fileName,
     mimeType,
-    size: entry.size
+    size
   };
 }
 
@@ -2572,6 +2713,23 @@ function getFileExtension(fileName: string): string {
   return fileName.slice(lastDot).toLowerCase();
 }
 
+function getExtensionForMimeType(mimeType: string): string {
+  const match = Object.entries(MIME_TYPE_BY_EXTENSION).find(
+    ([, value]) => value.split(";")[0] === mimeType
+  );
+
+  if (match) {
+    return match[0];
+  }
+
+  const [family, subtype] = mimeType.split("/");
+  if (!family || !subtype || subtype.includes("+")) {
+    return "";
+  }
+
+  return `.${subtype}`;
+}
+
 function escapeRegExp(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
@@ -2788,4 +2946,3 @@ type ByteRange = {
   end: number;
   length: number;
 };
-
