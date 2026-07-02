@@ -1,4 +1,4 @@
-import type { PartialBlock } from "@blocknote/core";
+import type { BlockNoteEditor, PartialBlock } from "@blocknote/core";
 import "@blocknote/core/fonts/inter.css";
 import { filterSuggestionItems } from "@blocknote/core/extensions";
 import { zh } from "@blocknote/core/locales";
@@ -9,10 +9,11 @@ import {
   getDefaultReactSlashMenuItems,
   SuggestionMenuController,
   type DefaultReactSuggestionItem,
-  useCreateBlockNote
+  useCreateBlockNote,
+  useEditorState
 } from "@blocknote/react";
-import { BookOpen } from "lucide-react";
-import { useCallback, useEffect, useMemo, useState, type RefObject } from "react";
+import { BookOpen, ChevronDown } from "lucide-react";
+import { useCallback, useEffect, useMemo, useRef, useState, type RefObject } from "react";
 import { uploadAsset } from "../api";
 import {
   formatBibleReference,
@@ -20,13 +21,34 @@ import {
   serializeBibleVerses,
   type BibleVerse
 } from "../bible";
-import { noteSchema } from "../editorSchema";
+import {
+  COLLAPSIBLE_CONTENT_DEFAULT_BODY,
+  COLLAPSIBLE_CONTENT_DEFAULT_TITLE,
+  noteSchema
+} from "../editorSchema";
 import type { Note, NoteBlock } from "../shared";
 import { BibleInsertModal } from "./BibleInsertModal";
 import { EmojiPackPicker } from "./EmojiPackPicker";
 import type { EmojiItem } from "../emojiPacks";
 import { EditorFindReplacePanel } from "./EditorFindReplacePanel";
 import { NotebookFormattingToolbar } from "./NotebookFormattingToolbar";
+import {
+  collectNoteComments,
+  createNoteComment,
+  rewriteNoteCommentInBlocks,
+  serializeNoteComment,
+  type NoteComment,
+  type NoteCommentThread
+} from "../comments";
+import {
+  createCopiedImageBlock,
+  getSelectedImageBlock,
+  insertCopiedImageBlock,
+  isFreshCopiedImageBlock,
+  writeCopiedImageToSystemClipboard,
+  type CopiedImageBlock,
+  type EditorImageBlock
+} from "../imageClipboard";
 
 type NotebookEditorProps = {
   findReplaceAnchorRef?: RefObject<HTMLElement | null>;
@@ -46,6 +68,17 @@ type TextBlock = {
   id: string;
 };
 
+type TextSelectionRange = {
+  from: number;
+  to: number;
+};
+
+type CommentComposer = {
+  body: string;
+  range: TextSelectionRange;
+  selectedText: string;
+};
+
 export function NotebookEditor({
   findReplaceAnchorRef,
   findReplaceOpen = false,
@@ -57,6 +90,13 @@ export function NotebookEditor({
   const [bibleModalOpen, setBibleModalOpen] = useState(false);
   const [bibleInsertTarget, setBibleInsertTarget] = useState<BibleInsertTarget | null>(null);
   const [emojiPickerOpen, setEmojiPickerOpen] = useState(false);
+  const [activeCommentId, setActiveCommentId] = useState<string | null>(null);
+  const [commentComposer, setCommentComposer] = useState<CommentComposer | null>(null);
+  const [commentNotice, setCommentNotice] = useState<string | null>(null);
+  const [editingCommentBody, setEditingCommentBody] = useState("");
+  const [editingCommentId, setEditingCommentId] = useState<string | null>(null);
+  const editorShellRef = useRef<HTMLDivElement | null>(null);
+  const copiedImageBlockRef = useRef<CopiedImageBlock | null>(null);
 
   const initialContent = useMemo(() => {
     return note.content.length > 0 ? hydrateBibleVerseCards(note.content) : undefined;
@@ -103,6 +143,16 @@ export function NotebookEditor({
     [dictionary, handleUpload, note.id]
   );
 
+  const transactionNumber = useEditorState({
+    editor,
+    selector: ({ transactionNumber }) => transactionNumber
+  });
+
+  const comments = useMemo(
+    () => collectNoteComments(editor.document as NoteBlock[]),
+    [editor, note.id, transactionNumber]
+  );
+
   const getCurrentTextBlock = useCallback(() => {
     return editor.getTextCursorPosition().block as TextBlock;
   }, [editor]);
@@ -120,6 +170,151 @@ export function NotebookEditor({
 
     return blockElement?.textContent?.trim() ?? "";
   }, []);
+
+  const openCommentComposer = useCallback(() => {
+    if (readOnly) {
+      return;
+    }
+
+    const range = getEditorTextSelectionRange(editor);
+    const selectedText = range ? getEditorTextInRange(editor, range) : "";
+
+    if (!range || !selectedText) {
+      setCommentNotice("请先选中需要批注的文字。");
+      return;
+    }
+
+    setCommentNotice(null);
+    setEditingCommentId(null);
+    setEditingCommentBody("");
+    setCommentComposer({
+      body: "",
+      range,
+      selectedText: truncateCommentExcerpt(selectedText)
+    });
+  }, [editor, readOnly]);
+
+  const saveComposedComment = useCallback(() => {
+    if (!commentComposer || readOnly) {
+      return;
+    }
+
+    const body = commentComposer.body.trim();
+    if (!body) {
+      setCommentNotice("批注内容不能为空。");
+      return;
+    }
+
+    const comment = createNoteComment(body);
+    editor.focus();
+    editor._tiptapEditor.commands.setTextSelection(commentComposer.range);
+    editor.addStyles({
+      noteComment: serializeNoteComment(comment)
+    });
+
+    setActiveCommentId(comment.id);
+    setCommentComposer(null);
+    setCommentNotice(null);
+    window.setTimeout(() => scrollCommentIntoView(editorShellRef.current, comment.id), 60);
+  }, [commentComposer, editor, readOnly]);
+
+  const replaceCommentInDocument = useCallback(
+    (commentId: string, updater: (comment: NoteComment) => NoteComment | null) => {
+      const currentDocument = editor.document as NoteBlock[];
+      const result = rewriteNoteCommentInBlocks(currentDocument, commentId, updater);
+
+      if (!result.changed) {
+        return;
+      }
+
+      editor.replaceBlocks(getBlockIdentifiers(currentDocument), result.blocks as PartialBlock[]);
+      onChange(editor.document as NoteBlock[]);
+    },
+    [editor, onChange]
+  );
+
+  const startEditingComment = useCallback((comment: NoteCommentThread) => {
+    setCommentComposer(null);
+    setCommentNotice(null);
+    setActiveCommentId(comment.id);
+    setEditingCommentId(comment.id);
+    setEditingCommentBody(comment.body);
+    window.setTimeout(() => scrollCommentIntoView(editorShellRef.current, comment.id), 30);
+  }, []);
+
+  const saveEditedComment = useCallback(
+    (commentId: string) => {
+      const body = editingCommentBody.trim();
+      if (!body) {
+        setCommentNotice("批注内容不能为空。");
+        return;
+      }
+
+      replaceCommentInDocument(commentId, (comment) => ({
+        ...comment,
+        body,
+        updatedAt: new Date().toISOString()
+      }));
+      setEditingCommentId(null);
+      setEditingCommentBody("");
+      setCommentNotice(null);
+    },
+    [editingCommentBody, replaceCommentInDocument]
+  );
+
+  const toggleCommentResolved = useCallback(
+    (commentId: string) => {
+      replaceCommentInDocument(commentId, (comment) => ({
+        ...comment,
+        resolved: !comment.resolved,
+        updatedAt: new Date().toISOString()
+      }));
+      setActiveCommentId(commentId);
+    },
+    [replaceCommentInDocument]
+  );
+
+  const deleteComment = useCallback(
+    (commentId: string) => {
+      if (!window.confirm("删除这条批注？正文高亮也会一起移除。")) {
+        return;
+      }
+
+      replaceCommentInDocument(commentId, () => null);
+      setActiveCommentId((current) => (current === commentId ? null : current));
+      if (editingCommentId === commentId) {
+        setEditingCommentId(null);
+        setEditingCommentBody("");
+      }
+    },
+    [editingCommentId, replaceCommentInDocument]
+  );
+
+  const focusComment = useCallback((commentId: string) => {
+    setActiveCommentId(commentId);
+    scrollCommentIntoView(editorShellRef.current, commentId);
+  }, []);
+
+  const copyImageBlock = useCallback(
+    (block: EditorImageBlock) => {
+      const copiedImageBlock = createCopiedImageBlock(block);
+      copiedImageBlockRef.current = copiedImageBlock;
+      void writeCopiedImageToSystemClipboard(editor, copiedImageBlock);
+    },
+    [editor]
+  );
+
+  const pasteCopiedImageBlock = useCallback(() => {
+    const copiedImageBlock = copiedImageBlockRef.current;
+    if (!isFreshCopiedImageBlock(copiedImageBlock)) {
+      copiedImageBlockRef.current = null;
+      return false;
+    }
+
+    insertCopiedImageBlock(editor, copiedImageBlock);
+    editor.focus();
+    return true;
+  }, [editor]);
 
   const openBibleInsertModal = useCallback(() => {
     const currentBlock = getCurrentTextBlock();
@@ -141,6 +336,49 @@ export function NotebookEditor({
 
     setBibleInsertTarget(target);
     setBibleModalOpen(true);
+  }, [editor, getCurrentBlockTextFromDom, getCurrentTextBlock]);
+
+  const insertCollapsibleContent = useCallback(() => {
+    const currentBlock = getCurrentTextBlock();
+    const plainText = getCurrentBlockTextFromDom();
+    const collapsibleBlock = {
+      type: "collapsibleContent",
+      props: {
+        collapsed: false,
+        title: COLLAPSIBLE_CONTENT_DEFAULT_TITLE
+      },
+      content: [
+        {
+          type: "text",
+          text: COLLAPSIBLE_CONTENT_DEFAULT_BODY,
+          styles: {}
+        }
+      ]
+    } as unknown as PartialBlock;
+    const spacerBlock = {
+      type: "paragraph",
+      content: []
+    } as PartialBlock;
+
+    if (!plainText || plainText.startsWith("/")) {
+      const result = editor.replaceBlocks([currentBlock.id], [collapsibleBlock, spacerBlock]);
+      const cursorBlock = result.insertedBlocks[0] ?? result.insertedBlocks[1];
+      if (cursorBlock) {
+        editor.setTextCursorPosition(cursorBlock);
+      }
+    } else {
+      const insertedBlocks = editor.insertBlocks(
+        [collapsibleBlock, spacerBlock],
+        currentBlock.id,
+        "after"
+      );
+      const cursorBlock = insertedBlocks[0] ?? insertedBlocks[1];
+      if (cursorBlock) {
+        editor.setTextCursorPosition(cursorBlock);
+      }
+    }
+
+    editor.focus();
   }, [editor, getCurrentBlockTextFromDom, getCurrentTextBlock]);
 
   const handleInsertBibleVerses = useCallback(
@@ -255,6 +493,106 @@ export function NotebookEditor({
     return () => window.removeEventListener("keydown", handleKeydown);
   }, [openBibleInsertModal, readOnly]);
 
+  useEffect(() => {
+    if (readOnly || typeof window === "undefined") {
+      return;
+    }
+
+    const handleKeydown = (event: KeyboardEvent) => {
+      const activeElement = document.activeElement;
+      const editorHasFocus =
+        activeElement instanceof HTMLElement && Boolean(activeElement.closest(".note-editor"));
+
+      if (!editorHasFocus || !(event.ctrlKey || event.metaKey) || event.altKey) {
+        return;
+      }
+
+      const key = event.key.toLowerCase();
+
+      if (key === "c") {
+        const imageBlock = getSelectedImageBlock(editor);
+        if (!imageBlock) {
+          copiedImageBlockRef.current = null;
+          return;
+        }
+
+        event.preventDefault();
+        copyImageBlock(imageBlock);
+        return;
+      }
+
+      if (key === "v" && pasteCopiedImageBlock()) {
+        event.preventDefault();
+      }
+    };
+
+    window.addEventListener("keydown", handleKeydown, true);
+    return () => window.removeEventListener("keydown", handleKeydown, true);
+  }, [copyImageBlock, editor, pasteCopiedImageBlock, readOnly]);
+
+  useEffect(() => {
+    setActiveCommentId(null);
+    setCommentComposer(null);
+    setCommentNotice(null);
+    setEditingCommentId(null);
+    setEditingCommentBody("");
+  }, [note.id]);
+
+  useEffect(() => {
+    if (!commentNotice || typeof window === "undefined") {
+      return;
+    }
+
+    const handle = window.setTimeout(() => setCommentNotice(null), 3000);
+    return () => window.clearTimeout(handle);
+  }, [commentNotice]);
+
+  useEffect(() => {
+    if (!activeCommentId || comments.some((comment) => comment.id === activeCommentId)) {
+      return;
+    }
+
+    setActiveCommentId(null);
+  }, [activeCommentId, comments]);
+
+  useEffect(() => {
+    const root = editorShellRef.current;
+    if (!root) {
+      return;
+    }
+
+    const handleClick = (event: Event) => {
+      const target = event.target instanceof Element ? event.target : null;
+      const marker = target?.closest<HTMLElement>(".note-comment-mark[data-comment-id]");
+      const commentId = marker?.dataset.commentId;
+      if (commentId) {
+        setActiveCommentId(commentId);
+      }
+    };
+
+    root.addEventListener("click", handleClick);
+    return () => root.removeEventListener("click", handleClick);
+  }, []);
+
+  useEffect(() => {
+    const root = editorShellRef.current;
+    if (!root) {
+      return;
+    }
+
+    root
+      .querySelectorAll(".note-comment-mark.is-active")
+      .forEach((marker) => marker.classList.remove("is-active"));
+
+    if (!activeCommentId) {
+      return;
+    }
+
+    root
+      .querySelectorAll(getCommentMarkerSelector(activeCommentId))
+      .forEach((marker) => marker.classList.add("is-active"));
+  }, [activeCommentId, comments, transactionNumber]);
+
   const getSlashMenuItems = useCallback(
     async (query: string): Promise<DefaultReactSuggestionItem[]> => {
       const defaultItems = getDefaultReactSlashMenuItems(editor).filter(
@@ -265,6 +603,16 @@ export function NotebookEditor({
       );
       const heading3Title = editor.dictionary.slash_menu.heading_3.title;
       const heading3Index = defaultItems.findIndex((item) => item.title === heading3Title);
+      const toggleListTitle = editor.dictionary.slash_menu.toggle_list.title;
+      const toggleListIndex = defaultItems.findIndex((item) => item.title === toggleListTitle);
+      const collapsibleItem: DefaultReactSuggestionItem = {
+        title: "折叠内容",
+        subtext: "可自定义标题和正文的折叠区块",
+        aliases: ["折叠", "折叠内容", "收起", "collapse", "accordion"],
+        group: "基础",
+        icon: <ChevronDown size={18} />,
+        onItemClick: insertCollapsibleContent
+      };
       const bibleItem: DefaultReactSuggestionItem = {
         title: "圣经",
         subtext: "插入经文",
@@ -283,36 +631,82 @@ export function NotebookEditor({
         onItemClick: () => setEmojiPickerOpen(true)
       };
       const items = [...defaultItems];
+      items.splice(toggleListIndex >= 0 ? toggleListIndex + 1 : 0, 0, collapsibleItem);
       items.splice(heading3Index >= 0 ? heading3Index + 1 : 0, 0, bibleItem);
       items.push(emojiItem);
 
       return filterSuggestionItems(items, query);
     },
-    [editor, openBibleInsertModal]
+    [editor, insertCollapsibleContent, openBibleInsertModal]
   );
 
   return (
     <>
-      <BlockNoteView
-        className="note-editor"
-        editable={!readOnly}
-        editor={editor}
-        onChange={() => {
-          if (!readOnly) {
-            onChange(editor.document as NoteBlock[]);
-          }
-        }}
-        formattingToolbar={false}
-        slashMenu={false}
-        theme="light"
+      <div
+        className={getClassName(
+          "note-editor-layout",
+          comments.length > 0 || commentComposer || commentNotice ? "has-comments" : undefined
+        )}
+        ref={editorShellRef}
       >
-        {!readOnly ? (
-          <>
-            <FormattingToolbarController formattingToolbar={NotebookFormattingToolbar} />
-            <SuggestionMenuController getItems={getSlashMenuItems} triggerCharacter="/" />
-          </>
+        <div className="note-editor-main">
+          <BlockNoteView
+            className="note-editor"
+            editable={!readOnly}
+            editor={editor}
+            onChange={() => {
+              if (!readOnly) {
+                onChange(editor.document as NoteBlock[]);
+              }
+            }}
+            formattingToolbar={false}
+            slashMenu={false}
+            theme="light"
+          >
+            {!readOnly ? (
+              <>
+                <FormattingToolbarController
+                  formattingToolbar={(toolbarProps) => (
+                    <NotebookFormattingToolbar
+                      {...toolbarProps}
+                      onAddComment={openCommentComposer}
+                      onCopyImage={copyImageBlock}
+                    />
+                  )}
+                />
+                <SuggestionMenuController getItems={getSlashMenuItems} triggerCharacter="/" />
+              </>
+            ) : null}
+          </BlockNoteView>
+        </div>
+
+        {comments.length > 0 || commentComposer || commentNotice ? (
+          <CommentsSidebar
+            activeCommentId={activeCommentId}
+            commentComposer={commentComposer}
+            commentNotice={commentNotice}
+            comments={comments}
+            editingCommentBody={editingCommentBody}
+            editingCommentId={editingCommentId}
+            onCancelComposer={() => setCommentComposer(null)}
+            onCancelEdit={() => {
+              setEditingCommentId(null);
+              setEditingCommentBody("");
+            }}
+            onChangeComposerBody={(body) =>
+              setCommentComposer((current) => (current ? { ...current, body } : current))
+            }
+            onChangeEditingBody={setEditingCommentBody}
+            onDelete={deleteComment}
+            onFocusComment={focusComment}
+            onSaveComposer={saveComposedComment}
+            onSaveEdit={saveEditedComment}
+            onStartEdit={startEditingComment}
+            onToggleResolved={toggleCommentResolved}
+            readOnly={readOnly}
+          />
         ) : null}
-      </BlockNoteView>
+      </div>
 
       {!readOnly ? (
         <BibleInsertModal
@@ -343,6 +737,173 @@ export function NotebookEditor({
         />
       ) : null}
     </>
+  );
+}
+
+type CommentsSidebarProps = {
+  activeCommentId: string | null;
+  commentComposer: CommentComposer | null;
+  commentNotice: string | null;
+  comments: NoteCommentThread[];
+  editingCommentBody: string;
+  editingCommentId: string | null;
+  onCancelComposer: () => void;
+  onCancelEdit: () => void;
+  onChangeComposerBody: (body: string) => void;
+  onChangeEditingBody: (body: string) => void;
+  onDelete: (commentId: string) => void;
+  onFocusComment: (commentId: string) => void;
+  onSaveComposer: () => void;
+  onSaveEdit: (commentId: string) => void;
+  onStartEdit: (comment: NoteCommentThread) => void;
+  onToggleResolved: (commentId: string) => void;
+  readOnly: boolean;
+};
+
+function CommentsSidebar({
+  activeCommentId,
+  commentComposer,
+  commentNotice,
+  comments,
+  editingCommentBody,
+  editingCommentId,
+  onCancelComposer,
+  onCancelEdit,
+  onChangeComposerBody,
+  onChangeEditingBody,
+  onDelete,
+  onFocusComment,
+  onSaveComposer,
+  onSaveEdit,
+  onStartEdit,
+  onToggleResolved,
+  readOnly
+}: CommentsSidebarProps) {
+  return (
+    <aside className="note-comments-sidebar" aria-label="批注">
+      <div className="note-comments-sidebar__head">
+        <strong>批注</strong>
+        <span>{comments.length}</span>
+      </div>
+
+      {commentNotice ? <div className="note-comment-notice">{commentNotice}</div> : null}
+
+      {commentComposer ? (
+        <form
+          className="note-comment-card is-draft"
+          onSubmit={(event) => {
+            event.preventDefault();
+            onSaveComposer();
+          }}
+        >
+          <div className="note-comment-card__head">
+            <strong>新批注</strong>
+            <button className="note-comment-card__mini-button" onClick={onCancelComposer} type="button">
+              取消
+            </button>
+          </div>
+          <blockquote>{commentComposer.selectedText}</blockquote>
+          <textarea
+            autoFocus
+            className="note-comment-card__textarea"
+            onChange={(event) => onChangeComposerBody(event.target.value)}
+            placeholder="输入批注"
+            value={commentComposer.body}
+          />
+          <div className="note-comment-card__actions">
+            <button className="note-comment-card__button primary" type="submit">
+              保存
+            </button>
+          </div>
+        </form>
+      ) : null}
+
+      <div className="note-comment-list">
+        {comments.map((comment) => {
+          const isActive = activeCommentId === comment.id;
+          const isEditing = editingCommentId === comment.id;
+
+          return (
+            <article
+              className={getClassName(
+                "note-comment-card",
+                isActive ? "is-active" : undefined,
+                comment.resolved ? "is-resolved" : undefined
+              )}
+              key={comment.id}
+            >
+              <div className="note-comment-card__head">
+                <button
+                  className="note-comment-card__focus"
+                  onClick={() => onFocusComment(comment.id)}
+                  type="button"
+                >
+                  <strong>{comment.resolved ? "已解决" : "批注"}</strong>
+                  <small>{formatCommentTime(comment.updatedAt)}</small>
+                </button>
+              </div>
+              <blockquote>{comment.excerpt}</blockquote>
+
+              {isEditing ? (
+                <>
+                  <textarea
+                    autoFocus
+                    className="note-comment-card__textarea"
+                    onChange={(event) => onChangeEditingBody(event.target.value)}
+                    value={editingCommentBody}
+                  />
+                  <div className="note-comment-card__actions">
+                    <button
+                      className="note-comment-card__button primary"
+                      onClick={() => onSaveEdit(comment.id)}
+                      type="button"
+                    >
+                      保存
+                    </button>
+                    <button
+                      className="note-comment-card__button"
+                      onClick={onCancelEdit}
+                      type="button"
+                    >
+                      取消
+                    </button>
+                  </div>
+                </>
+              ) : (
+                <>
+                  <p>{comment.body}</p>
+                  {!readOnly ? (
+                    <div className="note-comment-card__actions">
+                      <button
+                        className="note-comment-card__button"
+                        onClick={() => onStartEdit(comment)}
+                        type="button"
+                      >
+                        编辑
+                      </button>
+                      <button
+                        className="note-comment-card__button"
+                        onClick={() => onToggleResolved(comment.id)}
+                        type="button"
+                      >
+                        {comment.resolved ? "恢复" : "解决"}
+                      </button>
+                      <button
+                        className="note-comment-card__button danger"
+                        onClick={() => onDelete(comment.id)}
+                        type="button"
+                      >
+                        删除
+                      </button>
+                    </div>
+                  ) : null}
+                </>
+              )}
+            </article>
+          );
+        })}
+      </div>
+    </aside>
   );
 }
 
@@ -400,4 +961,66 @@ function hydrateBibleVerseCards(blocks: NoteBlock[]): PartialBlock[] {
 
 function hasEditableContent(content: unknown): boolean {
   return Array.isArray(content) ? content.length > 0 : typeof content === "string" && content.length > 0;
+}
+
+function getBlockIdentifiers(blocks: NoteBlock[]): Array<{ id: string }> {
+  return blocks
+    .map((block) => block.id)
+    .filter((id): id is string => typeof id === "string")
+    .map((id) => ({ id }));
+}
+
+function getEditorTextSelectionRange(
+  editor: BlockNoteEditor<any, any, any>
+): TextSelectionRange | null {
+  const selection = editor._tiptapEditor.state.selection;
+
+  if (selection.empty || selection.from === selection.to) {
+    return null;
+  }
+
+  return {
+    from: selection.from,
+    to: selection.to
+  };
+}
+
+function getEditorTextInRange(
+  editor: BlockNoteEditor<any, any, any>,
+  range: TextSelectionRange
+): string {
+  return editor.prosemirrorState.doc.textBetween(range.from, range.to, " ").replace(/\s+/g, " ").trim();
+}
+
+function scrollCommentIntoView(root: HTMLElement | null, commentId: string) {
+  const marker = root?.querySelector<HTMLElement>(getCommentMarkerSelector(commentId));
+  marker?.scrollIntoView({
+    behavior: "smooth",
+    block: "center"
+  });
+}
+
+function getCommentMarkerSelector(commentId: string): string {
+  return `.note-comment-mark[data-comment-id="${escapeAttributeSelectorValue(commentId)}"]`;
+}
+
+function escapeAttributeSelectorValue(value: string): string {
+  return value.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
+}
+
+function truncateCommentExcerpt(value: string): string {
+  return value.length > 96 ? `${value.slice(0, 95)}…` : value;
+}
+
+function formatCommentTime(value: string): string {
+  return new Intl.DateTimeFormat("zh-CN", {
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit"
+  }).format(new Date(value));
+}
+
+function getClassName(...values: Array<string | undefined | false | null>): string {
+  return values.filter(Boolean).join(" ");
 }

@@ -1,7 +1,5 @@
 import { TableHandlesExtension } from "@blocknote/core/extensions";
 import {
-  AddCommentButton,
-  AddTiptapCommentButton,
   BasicTextStyleButton,
   BlockTypeSelect,
   ColorStyleButton,
@@ -22,8 +20,9 @@ import {
   useEditorState,
   useExtension
 } from "@blocknote/react";
-import { TableCellsMerge, TableCellsSplit, Type } from "lucide-react";
+import { Copy, MessageSquarePlus, TableCellsMerge, TableCellsSplit, Type } from "lucide-react";
 import { useCallback } from "react";
+import { getSelectedImageBlock, type EditorImageBlock } from "../imageClipboard";
 
 type CellNodeLike = {
   attrs?: {
@@ -52,7 +51,12 @@ type SelectionLike = {
   };
 };
 
-export function NotebookFormattingToolbar(props: FormattingToolbarProps) {
+type NotebookFormattingToolbarProps = FormattingToolbarProps & {
+  onAddComment?: () => void;
+  onCopyImage?: (block: EditorImageBlock) => void;
+};
+
+export function NotebookFormattingToolbar(props: NotebookFormattingToolbarProps) {
   return (
     <FormattingToolbar>
       <BlockTypeSelect items={props.blockTypeSelectItems} />
@@ -61,6 +65,7 @@ export function NotebookFormattingToolbar(props: FormattingToolbarProps) {
       <FileReplaceButton />
       <FileRenameButton />
       <FileDeleteButton />
+      <CopyImageButton onCopyImage={props.onCopyImage} />
       <FileDownloadButton />
       <FilePreviewButton />
       <BasicTextStyleButton basicTextStyle="bold" />
@@ -75,9 +80,70 @@ export function NotebookFormattingToolbar(props: FormattingToolbarProps) {
       <NestBlockButton />
       <UnnestBlockButton />
       <CreateLinkButton />
-      <AddCommentButton />
-      <AddTiptapCommentButton />
+      <CommentButton onAddComment={props.onAddComment} />
     </FormattingToolbar>
+  );
+}
+
+function CopyImageButton({ onCopyImage }: { onCopyImage?: (block: EditorImageBlock) => void }) {
+  const Components = useComponentsContext();
+  const editor = useBlockNoteEditor<any, any, any>();
+
+  const block = useEditorState({
+    editor,
+    selector: ({ editor }) => {
+      if (!onCopyImage) {
+        return undefined;
+      }
+
+      return getSelectedImageBlock(editor) ?? undefined;
+    }
+  });
+
+  if (!Components || block === undefined) {
+    return null;
+  }
+
+  return (
+    <Components.FormattingToolbar.Button
+      className="bn-button"
+      icon={<Copy />}
+      label="复制图片"
+      mainTooltip="复制图片"
+      onClick={() => onCopyImage?.(block)}
+    />
+  );
+}
+
+function CommentButton({ onAddComment }: { onAddComment?: () => void }) {
+  const Components = useComponentsContext();
+  const editor = useBlockNoteEditor<any, any, any>();
+
+  const state = useEditorState({
+    editor,
+    selector: ({ editor }) => {
+      if (!editor.isEditable || !onAddComment) {
+        return undefined;
+      }
+
+      return {};
+    }
+  });
+
+  if (!Components || state === undefined) {
+    return null;
+  }
+
+  return (
+    <Components.FormattingToolbar.Button
+      className="bn-button"
+      icon={<MessageSquarePlus />}
+      label="添加批注"
+      mainTooltip="添加批注"
+      onClick={() => {
+        onAddComment?.();
+      }}
+    />
   );
 }
 

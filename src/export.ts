@@ -320,6 +320,67 @@ function buildExportDocument(notes: Array<ExportableNote & { html: string }>): s
         overflow-wrap: anywhere;
       }
 
+      .note-comment-mark {
+        border-bottom: 2px solid rgba(245, 158, 11, 0.72);
+        border-radius: 3px;
+        background: rgba(251, 191, 36, 0.25);
+      }
+
+      .note-comment-mark.is-resolved {
+        background: rgba(148, 163, 184, 0.2);
+        border-bottom-color: rgba(100, 116, 139, 0.58);
+      }
+
+      .collapsible-content-block {
+        margin: 0 0 1em;
+        overflow: hidden;
+        border: 1px solid #e8e2d7;
+        border-radius: 18px;
+        background: #ffffff;
+      }
+
+      .collapsible-content-block__header {
+        display: grid;
+        grid-template-columns: 30px minmax(0, 1fr);
+        align-items: center;
+        gap: 8px;
+        min-height: 56px;
+        padding: 9px 16px;
+        border-bottom: 1px solid #ece7df;
+      }
+
+      .collapsible-content-block__toggle {
+        display: inline-grid;
+        place-items: center;
+        color: #777168;
+      }
+
+      .collapsible-content-block.is-collapsed .collapsible-content-block__toggle svg {
+        transform: rotate(-90deg);
+      }
+
+      .collapsible-content-block__static-title {
+        color: #6d6a64;
+        font-size: 0.95rem;
+        font-weight: 800;
+      }
+
+      .collapsible-content-block__body {
+        padding: 16px 24px 20px;
+      }
+
+      .collapsible-content-block.is-collapsed .collapsible-content-block__body {
+        display: none;
+      }
+
+      .collapsible-content-block__content {
+        min-height: 30px;
+        color: #202123;
+        font-weight: 650;
+        line-height: 1.8;
+        white-space: pre-wrap;
+      }
+
       .note-export-content table {
         width: 100%;
         border-collapse: collapse;
