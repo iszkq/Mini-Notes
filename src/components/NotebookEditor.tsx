@@ -83,6 +83,11 @@ type CommentComposer = {
   selectedText: string;
 };
 
+type PasteUploadAnchor = {
+  left: number;
+  top: number;
+};
+
 const IMAGE_URL_EXTENSION_PATTERN = /\.(?:avif|gif|jpe?g|png|svg|webp)(?:$|[?#])/i;
 
 export function NotebookEditor({
@@ -103,6 +108,7 @@ export function NotebookEditor({
   const [commentNotice, setCommentNotice] = useState<string | null>(null);
   const [editingCommentBody, setEditingCommentBody] = useState("");
   const [editingCommentId, setEditingCommentId] = useState<string | null>(null);
+  const [pasteUploadAnchor, setPasteUploadAnchor] = useState<PasteUploadAnchor | null>(null);
   const [pastedImageUploadCount, setPastedImageUploadCount] = useState(0);
   const editorShellRef = useRef<HTMLDivElement | null>(null);
   const copiedImageBlockRef = useRef<CopiedImageBlock | null>(null);
@@ -686,6 +692,7 @@ export function NotebookEditor({
       if (imageFiles.length > 0) {
         event.preventDefault();
         event.stopPropagation();
+        setPasteUploadAnchor(getPasteUploadAnchor(target, root));
         void insertClipboardImageFiles(imageFiles);
         return;
       }
@@ -697,6 +704,9 @@ export function NotebookEditor({
 
       event.preventDefault();
       event.stopPropagation();
+      if (/^data:/i.test(imageSource)) {
+        setPasteUploadAnchor(getPasteUploadAnchor(target, root));
+      }
       void insertClipboardImageSource(imageSource);
     };
 
@@ -715,6 +725,15 @@ export function NotebookEditor({
 
     return () => window.clearTimeout(handle);
   }, [editor, focusRequest, readOnly]);
+
+  useEffect(() => {
+    if (pastedImageUploadCount > 0 || typeof window === "undefined") {
+      return;
+    }
+
+    const handle = window.setTimeout(() => setPasteUploadAnchor(null), 180);
+    return () => window.clearTimeout(handle);
+  }, [pastedImageUploadCount]);
 
   useEffect(() => {
     if (readOnly || typeof window === "undefined") {
@@ -891,7 +910,16 @@ export function NotebookEditor({
       >
         <div className="note-editor-main">
           {pastedImageUploadCount > 0 ? (
-            <div className="note-paste-upload-status" role="status" aria-live="polite">
+            <div
+              className="note-paste-upload-status"
+              role="status"
+              aria-live="polite"
+              style={
+                pasteUploadAnchor
+                  ? { left: pasteUploadAnchor.left, top: pasteUploadAnchor.top }
+                  : undefined
+              }
+            >
               <span className="note-paste-upload-status__spinner" aria-hidden="true" />
               <span>
                 {pastedImageUploadCount > 1
@@ -1328,6 +1356,55 @@ function getClipboardImageSource(clipboardData: DataTransfer): string | null {
   }
 
   return null;
+}
+
+function getPasteUploadAnchor(target: Element | null, root: HTMLElement): PasteUploadAnchor {
+  const rect =
+    getCurrentSelectionRect() ??
+    target?.closest<HTMLElement>('.bn-block[data-node-type="blockContainer"]')?.getBoundingClientRect() ??
+    target?.closest<HTMLElement>(".bn-block")?.getBoundingClientRect() ??
+    root.getBoundingClientRect();
+  const width = 350;
+  const height = 54;
+  const gap = 10;
+  const left = clamp(rect.left, 16, window.innerWidth - width - 16);
+  const belowTop = rect.bottom + gap;
+  const top =
+    belowTop + height <= window.innerHeight - 16
+      ? belowTop
+      : clamp(rect.top - height - gap, 16, window.innerHeight - height - 16);
+
+  return {
+    left,
+    top
+  };
+}
+
+function getCurrentSelectionRect(): DOMRect | null {
+  const selection = window.getSelection();
+  if (!selection || selection.rangeCount === 0) {
+    return null;
+  }
+
+  const range = selection.getRangeAt(0);
+  const rect = getUsableRect(range.getBoundingClientRect());
+  if (rect) {
+    return rect;
+  }
+
+  return Array.from(range.getClientRects()).map(getUsableRect).find(Boolean) ?? null;
+}
+
+function getUsableRect(rect: DOMRect): DOMRect | null {
+  return rect.width > 0 || rect.height > 0 ? rect : null;
+}
+
+function clamp(value: number, min: number, max: number): number {
+  if (max < min) {
+    return min;
+  }
+
+  return Math.min(Math.max(value, min), max);
 }
 
 function extractImageSourceFromHtml(html: string): string | null {

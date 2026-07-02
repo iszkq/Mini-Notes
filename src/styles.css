@@ -892,9 +892,8 @@ button:disabled {
 }
 
 .note-paste-upload-status {
-  position: sticky;
-  top: 14px;
-  z-index: 12;
+  position: fixed;
+  z-index: 90;
   display: grid;
   grid-template-columns: auto auto minmax(72px, 96px);
   align-items: center;
@@ -902,7 +901,6 @@ button:disabled {
   width: fit-content;
   max-width: min(100%, 360px);
   min-height: 38px;
-  margin: 0 0 10px auto;
   padding: 7px 11px;
   overflow: hidden;
   border: 1px solid rgba(47, 111, 115, 0.22);
@@ -912,7 +910,9 @@ button:disabled {
   box-shadow: 0 12px 32px rgba(35, 43, 54, 0.14);
   font-size: 0.84rem;
   font-weight: 800;
+  pointer-events: none;
   backdrop-filter: blur(10px);
+  animation: upload-status-pop 0.16s ease-out;
 }
 
 .note-paste-upload-status__spinner {
@@ -1923,6 +1923,18 @@ button:disabled {
   55%,
   100% {
     left: 100%;
+  }
+}
+
+@keyframes upload-status-pop {
+  from {
+    opacity: 0;
+    transform: translateY(4px) scale(0.98);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
   }
 }
 
