@@ -12,7 +12,17 @@ import {
   type FormattingToolbarProps,
   useCreateBlockNote
 } from "@blocknote/react";
-import { BookOpen, ChevronDown, FileText } from "lucide-react";
+import {
+  BookOpen,
+  CheckCircle2,
+  ChevronDown,
+  FileText,
+  MessageSquareText,
+  Pencil,
+  RotateCcw,
+  Trash2,
+  X
+} from "lucide-react";
 import {
   useCallback,
   useEffect,
@@ -93,6 +103,8 @@ type CommentComposer = {
   selectedText: string;
 };
 
+type CommentFilter = "open" | "all" | "resolved";
+
 type PasteUploadAnchor = {
   left: number;
   top: number;
@@ -116,6 +128,7 @@ export function NotebookEditor({
   const [emojiPickerOpen, setEmojiPickerOpen] = useState(false);
   const [activeCommentId, setActiveCommentId] = useState<string | null>(null);
   const [commentComposer, setCommentComposer] = useState<CommentComposer | null>(null);
+  const [commentFilter, setCommentFilter] = useState<CommentFilter>("open");
   const [commentNotice, setCommentNotice] = useState<string | null>(null);
   const [editingCommentBody, setEditingCommentBody] = useState("");
   const [editingCommentId, setEditingCommentId] = useState<string | null>(null);
@@ -272,6 +285,19 @@ export function NotebookEditor({
   const [comments, setComments] = useState<NoteCommentThread[]>(() =>
     collectNoteComments(note.content)
   );
+  const commentStats = useMemo(() => {
+    const resolved = comments.filter((comment) => comment.resolved).length;
+
+    return {
+      open: comments.length - resolved,
+      resolved,
+      total: comments.length
+    };
+  }, [comments]);
+  const visibleComments = useMemo(
+    () => getVisibleComments(comments, commentFilter),
+    [commentFilter, comments]
+  );
 
   const getCurrentTextBlock = useCallback(() => {
     return editor.getTextCursorPosition().block as TextBlock;
@@ -307,6 +333,7 @@ export function NotebookEditor({
     setCommentNotice(null);
     setEditingCommentId(null);
     setEditingCommentBody("");
+    setCommentFilter("open");
     setCommentComposer({
       body: "",
       range,
@@ -333,10 +360,31 @@ export function NotebookEditor({
     });
 
     setActiveCommentId(comment.id);
+    setCommentFilter("open");
     setCommentComposer(null);
     setCommentNotice(null);
     window.setTimeout(() => scrollCommentIntoView(editorShellRef.current, comment.id), 60);
   }, [commentComposer, editor, readOnly]);
+
+  const revealCommentInSidebar = useCallback(
+    (commentId: string) => {
+      const comment = comments.find((current) => current.id === commentId);
+      setActiveCommentId(commentId);
+
+      if (!comment) {
+        return;
+      }
+
+      setCommentFilter((currentFilter) => {
+        if (currentFilter === "all" || isCommentVisibleInFilter(comment, currentFilter)) {
+          return currentFilter;
+        }
+
+        return comment.resolved ? "resolved" : "open";
+      });
+    },
+    [comments]
+  );
 
   const replaceCommentInDocument = useCallback(
     (commentId: string, updater: (comment: NoteComment) => NoteComment | null) => {
@@ -358,11 +406,11 @@ export function NotebookEditor({
   const startEditingComment = useCallback((comment: NoteCommentThread) => {
     setCommentComposer(null);
     setCommentNotice(null);
-    setActiveCommentId(comment.id);
+    revealCommentInSidebar(comment.id);
     setEditingCommentId(comment.id);
     setEditingCommentBody(comment.body);
     window.setTimeout(() => scrollCommentIntoView(editorShellRef.current, comment.id), 30);
-  }, []);
+  }, [revealCommentInSidebar]);
 
   const saveEditedComment = useCallback(
     (commentId: string) => {
@@ -386,14 +434,22 @@ export function NotebookEditor({
 
   const toggleCommentResolved = useCallback(
     (commentId: string) => {
+      const targetComment = comments.find((comment) => comment.id === commentId);
+      const nextResolved = !targetComment?.resolved;
+
       replaceCommentInDocument(commentId, (comment) => ({
         ...comment,
         resolved: !comment.resolved,
         updatedAt: new Date().toISOString()
       }));
-      setActiveCommentId(commentId);
+
+      if (!nextResolved) {
+        setCommentFilter("open");
+      }
+
+      setActiveCommentId(nextResolved && commentFilter === "open" ? null : commentId);
     },
-    [replaceCommentInDocument]
+    [commentFilter, comments, replaceCommentInDocument]
   );
 
   const deleteComment = useCallback(
@@ -412,10 +468,13 @@ export function NotebookEditor({
     [editingCommentId, replaceCommentInDocument]
   );
 
-  const focusComment = useCallback((commentId: string) => {
-    setActiveCommentId(commentId);
-    scrollCommentIntoView(editorShellRef.current, commentId);
-  }, []);
+  const focusComment = useCallback(
+    (commentId: string) => {
+      revealCommentInSidebar(commentId);
+      scrollCommentIntoView(editorShellRef.current, commentId);
+    },
+    [revealCommentInSidebar]
+  );
 
   const copyImageBlock = useCallback(
     (block: EditorImageBlock) => {
@@ -882,6 +941,7 @@ export function NotebookEditor({
   useEffect(() => {
     setActiveCommentId(null);
     setCommentComposer(null);
+    setCommentFilter("open");
     setCommentNotice(null);
     setImageCropTarget(null);
     setComments(collectNoteComments(editor.document as NoteBlock[]));
@@ -903,12 +963,16 @@ export function NotebookEditor({
   }, [commentNotice]);
 
   useEffect(() => {
-    if (!activeCommentId || comments.some((comment) => comment.id === activeCommentId)) {
+    if (!activeCommentId) {
       return;
     }
 
-    setActiveCommentId(null);
-  }, [activeCommentId, comments]);
+    const activeComment = comments.find((comment) => comment.id === activeCommentId);
+
+    if (!activeComment || !isCommentVisibleInFilter(activeComment, commentFilter)) {
+      setActiveCommentId(null);
+    }
+  }, [activeCommentId, commentFilter, comments]);
 
   useEffect(() => {
     const root = editorShellRef.current;
@@ -921,13 +985,13 @@ export function NotebookEditor({
       const marker = target?.closest<HTMLElement>(".note-comment-mark[data-comment-id]");
       const commentId = marker?.dataset.commentId;
       if (commentId) {
-        setActiveCommentId(commentId);
+        revealCommentInSidebar(commentId);
       }
     };
 
     root.addEventListener("click", handleClick);
     return () => root.removeEventListener("click", handleClick);
-  }, []);
+  }, [revealCommentInSidebar]);
 
   useEffect(() => {
     const root = editorShellRef.current;
@@ -1078,10 +1142,12 @@ export function NotebookEditor({
           <CommentsSidebar
             activeCommentId={activeCommentId}
             commentComposer={commentComposer}
+            commentFilter={commentFilter}
             commentNotice={commentNotice}
-            comments={comments}
+            comments={visibleComments}
             editingCommentBody={editingCommentBody}
             editingCommentId={editingCommentId}
+            openCount={commentStats.open}
             onCancelComposer={() => setCommentComposer(null)}
             onCancelEdit={() => {
               setEditingCommentId(null);
@@ -1091,6 +1157,7 @@ export function NotebookEditor({
               setCommentComposer((current) => (current ? { ...current, body } : current))
             }
             onChangeEditingBody={setEditingCommentBody}
+            onChangeFilter={setCommentFilter}
             onDelete={deleteComment}
             onFocusComment={focusComment}
             onSaveComposer={saveComposedComment}
@@ -1098,6 +1165,8 @@ export function NotebookEditor({
             onStartEdit={startEditingComment}
             onToggleResolved={toggleCommentResolved}
             readOnly={readOnly}
+            resolvedCount={commentStats.resolved}
+            totalCount={commentStats.total}
           />
         ) : null}
       </div>
@@ -1146,14 +1215,17 @@ export function NotebookEditor({
 type CommentsSidebarProps = {
   activeCommentId: string | null;
   commentComposer: CommentComposer | null;
+  commentFilter: CommentFilter;
   commentNotice: string | null;
   comments: NoteCommentThread[];
   editingCommentBody: string;
   editingCommentId: string | null;
+  openCount: number;
   onCancelComposer: () => void;
   onCancelEdit: () => void;
   onChangeComposerBody: (body: string) => void;
   onChangeEditingBody: (body: string) => void;
+  onChangeFilter: (filter: CommentFilter) => void;
   onDelete: (commentId: string) => void;
   onFocusComment: (commentId: string) => void;
   onSaveComposer: () => void;
@@ -1161,32 +1233,80 @@ type CommentsSidebarProps = {
   onStartEdit: (comment: NoteCommentThread) => void;
   onToggleResolved: (commentId: string) => void;
   readOnly: boolean;
+  resolvedCount: number;
+  totalCount: number;
 };
 
 function CommentsSidebar({
   activeCommentId,
   commentComposer,
+  commentFilter,
   commentNotice,
   comments,
   editingCommentBody,
   editingCommentId,
+  openCount,
   onCancelComposer,
   onCancelEdit,
   onChangeComposerBody,
   onChangeEditingBody,
+  onChangeFilter,
   onDelete,
   onFocusComment,
   onSaveComposer,
   onSaveEdit,
   onStartEdit,
   onToggleResolved,
-  readOnly
+  readOnly,
+  resolvedCount,
+  totalCount
 }: CommentsSidebarProps) {
+  const emptyCopy = getCommentEmptyCopy(commentFilter, totalCount);
+  const filterOptions: Array<{ count: number; label: string; value: CommentFilter }> = [
+    {
+      count: openCount,
+      label: "未解决",
+      value: "open"
+    },
+    {
+      count: totalCount,
+      label: "全部",
+      value: "all"
+    },
+    {
+      count: resolvedCount,
+      label: "已解决",
+      value: "resolved"
+    }
+  ];
+
   return (
     <aside className="note-comments-sidebar" aria-label="批注">
       <div className="note-comments-sidebar__head">
-        <strong>批注</strong>
-        <span>{comments.length}</span>
+        <div className="note-comments-sidebar__summary">
+          <strong>批注</strong>
+          <small>{openCount > 0 ? `${openCount} 条待处理` : "暂无待处理"}</small>
+        </div>
+        <span className="note-comments-sidebar__count">{totalCount}</span>
+      </div>
+
+      <div className="note-comments-sidebar__tabs" role="tablist" aria-label="批注筛选">
+        {filterOptions.map((option) => (
+          <button
+            aria-selected={commentFilter === option.value}
+            className={getClassName(
+              "note-comments-sidebar__tab",
+              commentFilter === option.value ? "is-active" : undefined
+            )}
+            key={option.value}
+            onClick={() => onChangeFilter(option.value)}
+            role="tab"
+            type="button"
+          >
+            <span>{option.label}</span>
+            <b>{option.count}</b>
+          </button>
+        ))}
       </div>
 
       {commentNotice ? <div className="note-comment-notice">{commentNotice}</div> : null}
@@ -1200,31 +1320,68 @@ function CommentsSidebar({
           }}
         >
           <div className="note-comment-card__head">
-            <strong>新批注</strong>
-            <button className="note-comment-card__mini-button" onClick={onCancelComposer} type="button">
-              取消
+            <strong className="note-comment-card__title">
+              <MessageSquareText size={15} />
+              新批注
+            </strong>
+            <button
+              aria-label="取消新批注"
+              className="note-comment-card__icon-button"
+              onClick={onCancelComposer}
+              type="button"
+            >
+              <X size={14} />
             </button>
           </div>
-          <blockquote>{commentComposer.selectedText}</blockquote>
+          <div className="note-comment-card__excerpt">
+            <span>原文</span>
+            <blockquote>{commentComposer.selectedText}</blockquote>
+          </div>
           <textarea
             autoFocus
             className="note-comment-card__textarea"
             onChange={(event) => onChangeComposerBody(event.target.value)}
-            placeholder="输入批注"
+            onKeyDown={(event) => {
+              if ((event.ctrlKey || event.metaKey) && event.key === "Enter") {
+                event.preventDefault();
+                onSaveComposer();
+              }
+            }}
+            placeholder="输入批注，Ctrl+Enter 保存"
             value={commentComposer.body}
           />
           <div className="note-comment-card__actions">
             <button className="note-comment-card__button primary" type="submit">
-              保存
+              保存批注
             </button>
           </div>
         </form>
       ) : null}
 
       <div className="note-comment-list">
+        {comments.length === 0 && !commentComposer ? (
+          <div className="note-comment-empty">
+            <span className="note-comment-empty__icon" aria-hidden="true">
+              <MessageSquareText size={18} />
+            </span>
+            <strong>{emptyCopy.title}</strong>
+            <p>{emptyCopy.description}</p>
+            {emptyCopy.nextFilter ? (
+              <button
+                className="note-comment-card__button"
+                onClick={() => onChangeFilter(emptyCopy.nextFilter!)}
+                type="button"
+              >
+                {emptyCopy.action}
+              </button>
+            ) : null}
+          </div>
+        ) : null}
+
         {comments.map((comment) => {
           const isActive = activeCommentId === comment.id;
           const isEditing = editingCommentId === comment.id;
+          const statusLabel = comment.resolved ? "已解决" : "待处理";
 
           return (
             <article
@@ -1241,11 +1398,25 @@ function CommentsSidebar({
                   onClick={() => onFocusComment(comment.id)}
                   type="button"
                 >
-                  <strong>{comment.resolved ? "已解决" : "批注"}</strong>
+                  <span className="note-comment-card__title">
+                    <MessageSquareText size={15} />
+                    批注
+                  </span>
                   <small>{formatCommentTime(comment.updatedAt)}</small>
                 </button>
+                <span
+                  className={getClassName(
+                    "note-comment-card__status",
+                    comment.resolved ? "is-resolved" : "is-open"
+                  )}
+                >
+                  {statusLabel}
+                </span>
               </div>
-              <blockquote>{comment.excerpt}</blockquote>
+              <div className="note-comment-card__excerpt">
+                <span>原文</span>
+                <blockquote>{comment.excerpt}</blockquote>
+              </div>
 
               {isEditing ? (
                 <>
@@ -1253,6 +1424,12 @@ function CommentsSidebar({
                     autoFocus
                     className="note-comment-card__textarea"
                     onChange={(event) => onChangeEditingBody(event.target.value)}
+                    onKeyDown={(event) => {
+                      if ((event.ctrlKey || event.metaKey) && event.key === "Enter") {
+                        event.preventDefault();
+                        onSaveEdit(comment.id);
+                      }
+                    }}
                     value={editingCommentBody}
                   />
                   <div className="note-comment-card__actions">
@@ -1274,7 +1451,7 @@ function CommentsSidebar({
                 </>
               ) : (
                 <>
-                  <p>{comment.body}</p>
+                  <p className="note-comment-card__body">{comment.body}</p>
                   {!readOnly ? (
                     <div className="note-comment-card__actions">
                       <button
@@ -1282,13 +1459,18 @@ function CommentsSidebar({
                         onClick={() => onStartEdit(comment)}
                         type="button"
                       >
+                        <Pencil size={13} />
                         编辑
                       </button>
                       <button
-                        className="note-comment-card__button"
+                        className={getClassName(
+                          "note-comment-card__button",
+                          comment.resolved ? undefined : "primary"
+                        )}
                         onClick={() => onToggleResolved(comment.id)}
                         type="button"
                       >
+                        {comment.resolved ? <RotateCcw size={13} /> : <CheckCircle2 size={13} />}
                         {comment.resolved ? "恢复" : "解决"}
                       </button>
                       <button
@@ -1296,6 +1478,7 @@ function CommentsSidebar({
                         onClick={() => onDelete(comment.id)}
                         type="button"
                       >
+                        <Trash2 size={13} />
                         删除
                       </button>
                     </div>
@@ -2102,6 +2285,57 @@ function getEditorTextInRange(
   range: TextSelectionRange
 ): string {
   return editor.prosemirrorState.doc.textBetween(range.from, range.to, " ").replace(/\s+/g, " ").trim();
+}
+
+function getVisibleComments(comments: NoteCommentThread[], filter: CommentFilter) {
+  if (filter === "all") {
+    return comments;
+  }
+
+  return comments.filter((comment) => isCommentVisibleInFilter(comment, filter));
+}
+
+function isCommentVisibleInFilter(comment: NoteCommentThread, filter: CommentFilter) {
+  if (filter === "all") {
+    return true;
+  }
+
+  return filter === "resolved" ? comment.resolved : !comment.resolved;
+}
+
+function getCommentEmptyCopy(
+  filter: CommentFilter,
+  totalCount: number
+): { action?: string; description: string; nextFilter?: CommentFilter; title: string } {
+  if (totalCount === 0) {
+    return {
+      description: "选中文字后点击工具栏里的批注，就可以在这里集中处理。",
+      title: "还没有批注"
+    };
+  }
+
+  if (filter === "open") {
+    return {
+      action: "查看已解决",
+      description: "当前没有待处理批注，历史批注可以在已解决里回看或恢复。",
+      nextFilter: "resolved",
+      title: "没有待处理批注"
+    };
+  }
+
+  if (filter === "resolved") {
+    return {
+      action: "查看未解决",
+      description: "还没有归档的批注，解决后的批注会放到这里。",
+      nextFilter: "open",
+      title: "没有已解决批注"
+    };
+  }
+
+  return {
+    description: "当前筛选下没有批注。",
+    title: "没有批注"
+  };
 }
 
 function scrollCommentIntoView(root: HTMLElement | null, commentId: string) {
