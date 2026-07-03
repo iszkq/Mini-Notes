@@ -55,8 +55,9 @@ export async function getNote(id: string): Promise<Note> {
   return apiRequest(`/api/notes/${encodeURIComponent(id)}`);
 }
 
-export async function getPublicNote(shareToken: string): Promise<Note> {
-  return apiRequest(`/api/public/notes/${encodeURIComponent(shareToken)}`);
+export async function getPublicNote(shareToken: string, noteId?: string | null): Promise<Note> {
+  const suffix = noteId ? `/${encodeURIComponent(noteId)}` : "";
+  return apiRequest(`/api/public/notes/${encodeURIComponent(shareToken)}${suffix}`);
 }
 
 export async function createNote(input: NoteCreateInput): Promise<Note> {

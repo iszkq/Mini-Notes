@@ -86,6 +86,18 @@ type DbAdminUserRow = {
   uploadCount: number | string;
 };
 
+type PageLinkNoteRow = {
+  id: string;
+  title: string;
+  icon: string;
+  shareToken: string | null;
+};
+
+type PageLinkHydrationOptions = {
+  publicRootShareToken?: string;
+  publicView?: boolean;
+};
+
 type UploadedFormFile = Blob & {
   name: string;
   size: number;
@@ -203,7 +215,7 @@ async function handleApi(
       segments[2] &&
       request.method === "GET"
     ) {
-      return getPublicSharedNote(env, segments[2]);
+      return getPublicSharedNote(env, segments[2], segments[3]);
     }
 
     if (
@@ -717,13 +729,25 @@ async function getNote(
   return json(await rowToNote(env, row, userId));
 }
 
-async function getPublicSharedNote(env: Env, shareToken: string): Promise<Response> {
-  const note = await findSharedNoteByToken(env, shareToken);
-  if (!note || cleanNoteKind(note.kind) !== "page") {
+async function getPublicSharedNote(
+  env: Env,
+  shareToken: string,
+  linkedNoteId?: string
+): Promise<Response> {
+  const rootNote = await findSharedNoteByToken(env, shareToken);
+  if (!rootNote || cleanNoteKind(rootNote.kind) !== "page" || !rootNote.userId) {
     return error("分享页面不存在或已关闭。", 404);
   }
 
-  return json(await rowToPublicNote(env, note, shareToken));
+  const targetNote = linkedNoteId
+    ? await findSharedDescendantNote(env, rootNote, linkedNoteId)
+    : rootNote;
+
+  if (!targetNote || cleanNoteKind(targetNote.kind) !== "page") {
+    return error("子页面不存在，或不在这个分享页面中。", 404);
+  }
+
+  return json(await rowToPublicNote(env, targetNote, shareToken));
 }
 
 async function createNote(
@@ -1583,17 +1607,27 @@ function rowToSummary(row: DbNoteRow): NoteSummary {
 }
 
 async function rowToNote(env: Env, row: DbNoteRow, userId?: string): Promise<Note> {
+  const content = await readNoteContent(env, row, userId);
   return {
     ...rowToSummary(row),
-    content: await readNoteContent(env, row, userId)
+    content: userId ? await hydratePageLinkBlocks(env, userId, content) : content
   };
 }
 
 async function rowToPublicNote(env: Env, row: DbNoteRow, shareToken: string): Promise<Note> {
-  const content = await readNoteContent(env, row, row.userId ?? undefined);
+  const userId = row.userId ?? undefined;
+  const content = await readNoteContent(env, row, userId);
+  const hydratedContent = userId
+    ? await hydratePageLinkBlocks(env, userId, content, {
+        publicRootShareToken: shareToken,
+        publicView: true
+      })
+    : content;
+
   return {
     ...rowToSummary(row),
-    content: rewriteBlocksForPublicShare(content, shareToken)
+    shareToken,
+    content: rewriteBlocksForPublicShare(hydratedContent, shareToken)
   };
 }
 
@@ -1670,6 +1704,116 @@ async function readNoteContent(env: Env, row: DbNoteRow, userId?: string): Promi
     });
     return parseBlocks(row.content);
   }
+}
+
+async function hydratePageLinkBlocks(
+  env: Env,
+  userId: string,
+  blocks: NoteBlock[],
+  options: PageLinkHydrationOptions = {}
+): Promise<NoteBlock[]> {
+  const noteIds = new Set<string>();
+  collectPageLinkNoteIds(blocks, noteIds);
+
+  if (noteIds.size === 0) {
+    return blocks;
+  }
+
+  const summaries = await getPageLinkSummaries(env, userId, Array.from(noteIds));
+  return hydratePageLinkValue(blocks, summaries, options) as NoteBlock[];
+}
+
+function collectPageLinkNoteIds(value: unknown, noteIds: Set<string>): void {
+  if (Array.isArray(value)) {
+    value.forEach((item) => collectPageLinkNoteIds(item, noteIds));
+    return;
+  }
+
+  if (!isRecord(value)) {
+    return;
+  }
+
+  if (value.type === "pageLink" && isRecord(value.props)) {
+    const noteId = value.props.noteId;
+    if (typeof noteId === "string" && noteId.trim()) {
+      noteIds.add(noteId.trim());
+    }
+  }
+
+  Object.values(value).forEach((nestedValue) => collectPageLinkNoteIds(nestedValue, noteIds));
+}
+
+async function getPageLinkSummaries(
+  env: Env,
+  userId: string,
+  noteIds: string[]
+): Promise<Map<string, PageLinkNoteRow>> {
+  const uniqueIds = Array.from(new Set(noteIds.map((id) => id.trim()).filter(Boolean)));
+  if (uniqueIds.length === 0) {
+    return new Map();
+  }
+
+  const placeholders = uniqueIds.map(() => "?").join(", ");
+  const { results } = await env.DB.prepare(
+    `SELECT id,
+            title,
+            icon,
+            share_token AS shareToken
+     FROM notes
+     WHERE user_id = ?
+       AND kind = 'page'
+       AND is_archived = 0
+       AND id IN (${placeholders})`
+  )
+    .bind(userId, ...uniqueIds)
+    .all<PageLinkNoteRow>();
+
+  return new Map(results.map((note) => [note.id, note]));
+}
+
+function hydratePageLinkValue(
+  value: unknown,
+  summaries: Map<string, PageLinkNoteRow>,
+  options: PageLinkHydrationOptions
+): unknown {
+  if (Array.isArray(value)) {
+    return value.map((item) => hydratePageLinkValue(item, summaries, options));
+  }
+
+  if (!isRecord(value)) {
+    return value;
+  }
+
+  const next: Record<string, unknown> = {};
+  Object.entries(value).forEach(([key, nestedValue]) => {
+    next[key] = hydratePageLinkValue(nestedValue, summaries, options);
+  });
+
+  if (value.type !== "pageLink" || !isRecord(value.props)) {
+    return next;
+  }
+
+  const noteId = typeof value.props.noteId === "string" ? value.props.noteId.trim() : "";
+  const summary = noteId ? summaries.get(noteId) : null;
+  const props = isRecord(next.props) ? { ...next.props } : {};
+
+  if (summary) {
+    props.title = summary.title;
+    props.icon = summary.icon;
+    props.shareToken = summary.shareToken ?? "";
+  }
+
+  props.publicView = Boolean(options.publicView);
+  props.publicRootShareToken = options.publicRootShareToken ?? "";
+
+  return {
+    ...next,
+    props
+  };
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null;
 }
 
 async function migrateLegacyNoteContentsForUser(
@@ -2492,6 +2636,71 @@ async function findSharedNoteByToken(
   )
     .bind(shareToken)
     .first<DbNoteRow>();
+}
+
+async function findSharedDescendantNote(
+  env: Env,
+  rootNote: DbNoteRow,
+  linkedNoteId: string
+): Promise<DbNoteRow | null> {
+  const userId = rootNote.userId;
+  if (!userId) {
+    return null;
+  }
+
+  if (linkedNoteId === rootNote.id) {
+    return rootNote;
+  }
+
+  const note = await env.DB.prepare(
+    `SELECT ${NOTE_COLUMNS},
+            user_id AS userId,
+            content
+     FROM notes
+     WHERE id = ? AND user_id = ? AND is_archived = 0`
+  )
+    .bind(linkedNoteId, userId)
+    .first<DbNoteRow>();
+
+  if (!note || cleanNoteKind(note.kind) !== "page") {
+    return null;
+  }
+
+  const isDescendant = await isDescendantOfNote(env, userId, note.parentId, rootNote.id);
+  return isDescendant ? note : null;
+}
+
+async function isDescendantOfNote(
+  env: Env,
+  userId: string,
+  parentId: string | null,
+  rootNoteId: string
+): Promise<boolean> {
+  let currentParentId = parentId;
+  const visited = new Set<string>();
+
+  for (let depth = 0; currentParentId && depth < 80; depth += 1) {
+    if (currentParentId === rootNoteId) {
+      return true;
+    }
+
+    if (visited.has(currentParentId)) {
+      return false;
+    }
+    visited.add(currentParentId);
+
+    const row: { parentId: string | null } | null = await env.DB.prepare(
+      `SELECT parent_id AS parentId
+       FROM notes
+       WHERE id = ? AND user_id = ? AND is_archived = 0`
+    )
+      .bind(currentParentId, userId)
+      .first<{ parentId: string | null }>();
+
+    currentParentId = row?.parentId ?? null;
+  }
+
+  return false;
 }
 
 async function cleanupRemovedUploadsForUser(

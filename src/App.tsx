@@ -102,6 +102,11 @@ type PageHistoryState = {
   future: PageSnapshot[];
 };
 
+type PublicShareRoute = {
+  shareToken: string;
+  noteId: string | null;
+};
+
 const SIDEBAR_GROUP_PAGE_SIZE = 80;
 const SIDEBAR_GROUP_PAGE_STEP = 80;
 const SIDEBAR_SEARCH_PAGE_SIZE = 120;
@@ -149,8 +154,11 @@ const LEGACY_ICON_MAP: Record<string, string> = {
 };
 
 function App() {
-  const initialShareToken =
-    typeof window === "undefined" ? null : getShareTokenFromPath(window.location.pathname);
+  const [initialPublicRoute] = useState<PublicShareRoute | null>(() =>
+    typeof window === "undefined" ? null : getPublicShareRouteFromPath(window.location.pathname)
+  );
+  const initialShareToken = initialPublicRoute?.shareToken ?? null;
+  const initialPublicNoteId = initialPublicRoute?.noteId ?? null;
   const isPublicView = Boolean(initialShareToken);
 
   const [authMode, setAuthMode] = useState<AuthMode>("login");
@@ -389,42 +397,72 @@ function App() {
     void bootstrap();
   }, [bootstrap, isPublicView]);
 
+  const loadPublicNote = useCallback(async (shareToken: string, noteId?: string | null) => {
+    setPublicPending(true);
+    setPublicError(null);
+
+    try {
+      const note = normalizeNote(await getPublicNote(shareToken, noteId));
+      setPublicNote(note);
+    } catch (error) {
+      if (error instanceof ApiError) {
+        setPublicError(error.message);
+      } else {
+        setPublicError("分享页面暂时无法打开，请稍后重试。");
+      }
+    } finally {
+      setPublicPending(false);
+    }
+  }, []);
+
   useEffect(() => {
     if (!initialShareToken) {
       return;
     }
 
-    let cancelled = false;
-    setPublicPending(true);
-    setPublicError(null);
+    void loadPublicNote(initialShareToken, initialPublicNoteId);
+  }, [initialPublicNoteId, initialShareToken, loadPublicNote]);
 
-    void getPublicNote(initialShareToken)
-      .then((note) => {
-        if (!cancelled) {
-          setPublicNote(normalizeNote(note));
-        }
-      })
-      .catch((error) => {
-        if (cancelled) {
-          return;
-        }
+  useEffect(() => {
+    if (!isPublicView || typeof window === "undefined") {
+      return;
+    }
 
-        if (error instanceof ApiError) {
-          setPublicError(error.message);
-        } else {
-          setPublicError("分享页面暂时无法打开，请稍后重试。");
-        }
-      })
-      .finally(() => {
-        if (!cancelled) {
-          setPublicPending(false);
-        }
-      });
+    const handleOpenPublicNote = (event: Event) => {
+      const detail = (event as CustomEvent<{ noteId?: unknown; shareToken?: unknown; title?: unknown }>).detail;
+      const shareToken =
+        typeof detail?.shareToken === "string" && detail.shareToken
+          ? detail.shareToken
+          : initialShareToken;
+      const noteId = typeof detail?.noteId === "string" ? detail.noteId : "";
+
+      if (!shareToken || !noteId) {
+        window.alert("这个子页面暂时无法打开。");
+        return;
+      }
+
+      const nextPath = `/share/${encodeURIComponent(shareToken)}/${encodeURIComponent(noteId)}`;
+      window.history.pushState({ shareToken, noteId }, "", nextPath);
+      void loadPublicNote(shareToken, noteId);
+    };
+
+    const handlePublicPopState = () => {
+      const route = getPublicShareRouteFromPath(window.location.pathname);
+      if (!route) {
+        return;
+      }
+
+      void loadPublicNote(route.shareToken, route.noteId);
+    };
+
+    window.addEventListener("mini-notes:open-public-note", handleOpenPublicNote);
+    window.addEventListener("popstate", handlePublicPopState);
 
     return () => {
-      cancelled = true;
+      window.removeEventListener("mini-notes:open-public-note", handleOpenPublicNote);
+      window.removeEventListener("popstate", handlePublicPopState);
     };
-  }, [initialShareToken]);
+  }, [initialShareToken, isPublicView, loadPublicNote]);
 
   useEffect(() => {
     if (workspaceView === "admin" && !sessionUser?.isAdmin) {
@@ -3044,8 +3082,19 @@ function formatDateTime(value: string): string {
 }
 
 function getShareTokenFromPath(pathname: string): string | null {
-  const match = /^\/share\/([^/]+)\/?$/.exec(pathname);
-  return match ? decodeURIComponent(match[1]) : null;
+  return getPublicShareRouteFromPath(pathname)?.shareToken ?? null;
+}
+
+function getPublicShareRouteFromPath(pathname: string): PublicShareRoute | null {
+  const match = /^\/share\/([^/]+)(?:\/([^/]+))?\/?$/.exec(pathname);
+  if (!match) {
+    return null;
+  }
+
+  return {
+    shareToken: decodeURIComponent(match[1]),
+    noteId: match[2] ? decodeURIComponent(match[2]) : null
+  };
 }
 
 export default App;

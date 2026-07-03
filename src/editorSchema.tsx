@@ -343,6 +343,15 @@ const pageLinkBlock = createReactBlockSpec(
       noteId: {
         default: ""
       },
+      publicRootShareToken: {
+        default: ""
+      },
+      publicView: {
+        default: false
+      },
+      shareToken: {
+        default: ""
+      },
       title: {
         default: "未命名"
       }
@@ -354,6 +363,9 @@ const pageLinkBlock = createReactBlockSpec(
       const noteId = String(block.props.noteId || "");
       const title = String(block.props.title || "未命名");
       const icon = String(block.props.icon || "📝");
+      const publicRootShareToken = String(block.props.publicRootShareToken || "");
+      const publicView = Boolean(block.props.publicView);
+      const shareToken = publicRootShareToken || String(block.props.shareToken || "");
 
       return (
         <button
@@ -363,6 +375,19 @@ const pageLinkBlock = createReactBlockSpec(
             event.preventDefault();
             event.stopPropagation();
             if (!noteId) {
+              return;
+            }
+
+            if (publicView) {
+              window.dispatchEvent(
+                new CustomEvent("mini-notes:open-public-note", {
+                  detail: {
+                    noteId,
+                    shareToken,
+                    title
+                  }
+                })
+              );
               return;
             }
 
@@ -377,7 +402,7 @@ const pageLinkBlock = createReactBlockSpec(
           type="button"
         >
           <span className="page-link-block__icon" aria-hidden="true">
-            {icon}
+            {isImageIconValue(icon) ? <img alt="" src={icon} /> : icon}
           </span>
           <span className="page-link-block__title">{title}</span>
         </button>
@@ -386,7 +411,11 @@ const pageLinkBlock = createReactBlockSpec(
     toExternalHTML: ({ block }) => (
       <div className="page-link-block">
         <span className="page-link-block__icon" aria-hidden="true">
-          {block.props.icon || <FileText size={16} />}
+          {isImageIconValue(String(block.props.icon || "")) ? (
+            <img alt="" src={String(block.props.icon)} />
+          ) : (
+            block.props.icon || <FileText size={16} />
+          )}
         </span>
         <span className="page-link-block__title">{block.props.title || "未命名"}</span>
       </div>
@@ -479,4 +508,13 @@ function insertHardBreak(editor: BlockNoteEditor<any, any, any>): boolean {
 
 function getClassName(...values: Array<string | undefined>): string {
   return values.filter(Boolean).join(" ");
+}
+
+function isImageIconValue(value: string): boolean {
+  return (
+    /^https?:\/\//i.test(value) ||
+    value.startsWith("/api/files/") ||
+    value.startsWith("/api/public/files/") ||
+    value.startsWith("data:image/")
+  );
 }
