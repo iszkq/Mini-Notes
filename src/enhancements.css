@@ -288,8 +288,8 @@
 
 .note-drop-placeholder {
   position: relative;
-  height: 28px;
-  margin: 1px 0;
+  height: 20px;
+  margin: 0;
   border: 0;
   border-radius: 8px;
   background: rgba(47, 111, 115, 0.05);

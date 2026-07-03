@@ -118,6 +118,7 @@ const SIDEBAR_SEARCH_PAGE_SIZE = 120;
 const UNCATEGORIZED_GROUP_KEY = "__uncategorized__";
 const SIDEBAR_COLLAPSED_STORAGE_KEY = "mini-notes-sidebar-collapsed";
 const PAGE_HISTORY_LIMIT = 80;
+const DROP_TARGET_EDGE_RATIO = 0.34;
 
 /*
 const PAGE_PRESETS: PagePreset[] = [
@@ -223,6 +224,7 @@ function App() {
   const [pageIconPickerTargetId, setPageIconPickerTargetId] = useState<string | null>(null);
   const [draggedNoteId, setDraggedNoteId] = useState<string | null>(null);
   const [dropTarget, setDropTarget] = useState<NoteDropTarget | null>(null);
+  const dropTargetRef = useRef<NoteDropTarget | null>(null);
   const dragExpandTimerRef = useRef<number | null>(null);
   const dragExpandTargetRef = useRef<string | null>(null);
   const [sidebarGroupLimits, setSidebarGroupLimits] = useState<Record<string, number>>({});
@@ -240,6 +242,19 @@ function App() {
   useEffect(() => {
     pageHistoryRef.current = pageHistory;
   }, [pageHistory]);
+
+  useEffect(() => {
+    dropTargetRef.current = dropTarget;
+  }, [dropTarget]);
+
+  const updateDropTarget = useCallback((nextTarget: NoteDropTarget | null) => {
+    if (areDropTargetsEqual(dropTargetRef.current, nextTarget)) {
+      return;
+    }
+
+    dropTargetRef.current = nextTarget;
+    setDropTarget(nextTarget);
+  }, []);
 
   const replacePageHistory = useCallback((nextHistory: PageHistoryState) => {
     pageHistoryRef.current = nextHistory;
@@ -309,8 +324,8 @@ function App() {
     setPageActionMenu(null);
     setPageIconPickerTargetId(null);
     setDraggedNoteId(null);
-    setDropTarget(null);
-  }, [resetPageHistory]);
+    updateDropTarget(null);
+  }, [resetPageHistory, updateDropTarget]);
 
   const loadNote = useCallback(
     async (id: string) => {
@@ -1055,7 +1070,7 @@ function App() {
       const draggedId = draggedNoteId;
       clearDragExpandTimer();
       setDraggedNoteId(null);
-      setDropTarget(null);
+      updateDropTarget(null);
 
       if (!draggedId || draggedId === beforeId) {
         return;
@@ -1131,7 +1146,7 @@ function App() {
         }
       }
     },
-    [calculateDropSortOrder, clearDragExpandTimer, draggedNoteId, handleLoggedOut, hasUsers, isDescendantPage, notes]
+    [calculateDropSortOrder, clearDragExpandTimer, draggedNoteId, handleLoggedOut, hasUsers, isDescendantPage, notes, updateDropTarget]
   );
 
   const getNoteDropTarget = useCallback(
@@ -1150,13 +1165,33 @@ function App() {
       }
 
       const bounds = event.currentTarget.getBoundingClientRect();
-      const insertBeforeHovered = event.clientY < bounds.top + bounds.height / 2;
-      const insertionIndex = insertBeforeHovered ? hoveredIndex : hoveredIndex + 1;
-
-      return {
+      const relativeY = bounds.height > 0 ? (event.clientY - bounds.top) / bounds.height : 0.5;
+      const beforeTarget = {
         parentId,
-        beforeId: siblings[insertionIndex]?.id ?? null
+        beforeId: note.id
       };
+      const afterTarget = {
+        parentId,
+        beforeId: siblings[hoveredIndex + 1]?.id ?? null
+      };
+      const currentTarget = dropTargetRef.current;
+      const currentIsAdjacent =
+        areDropTargetsEqual(currentTarget, beforeTarget) ||
+        areDropTargetsEqual(currentTarget, afterTarget);
+
+      if (currentIsAdjacent) {
+        if (relativeY <= DROP_TARGET_EDGE_RATIO) {
+          return beforeTarget;
+        }
+
+        if (relativeY >= 1 - DROP_TARGET_EDGE_RATIO) {
+          return afterTarget;
+        }
+
+        return currentTarget;
+      }
+
+      return relativeY < 0.5 ? beforeTarget : afterTarget;
     },
     [draggedNoteId, sortedNotes]
   );
@@ -1171,7 +1206,7 @@ function App() {
     }
 
     setDraggedNoteId(note.id);
-    setDropTarget(null);
+    updateDropTarget(null);
     clearDragExpandTimer();
     event.dataTransfer.effectAllowed = "move";
     event.dataTransfer.setData("text/plain", note.id);
@@ -1181,7 +1216,7 @@ function App() {
   const handleDragEnd = () => {
     clearDragExpandTimer();
     setDraggedNoteId(null);
-    setDropTarget(null);
+    updateDropTarget(null);
   };
 
   const handleNoteDragOver = (
@@ -1197,7 +1232,7 @@ function App() {
     event.stopPropagation();
     event.dataTransfer.dropEffect = "move";
     clearDragExpandTimer();
-    setDropTarget(nextTarget);
+    updateDropTarget(nextTarget);
   };
 
   const handleNoteDrop = (
@@ -1226,14 +1261,14 @@ function App() {
       event.stopPropagation();
       event.dataTransfer.dropEffect = "none";
       clearDragExpandTimer();
-      setDropTarget(null);
+      updateDropTarget(null);
       return;
     }
 
     event.preventDefault();
     event.stopPropagation();
     event.dataTransfer.dropEffect = "move";
-    setDropTarget({ parentId, beforeId: null });
+    updateDropTarget({ parentId, beforeId: null });
     scheduleCategoryAutoExpand(parentId);
   };
 
@@ -1267,7 +1302,7 @@ function App() {
           event.preventDefault();
           event.stopPropagation();
           event.dataTransfer.dropEffect = "move";
-          setDropTarget({ parentId, beforeId });
+          updateDropTarget({ parentId, beforeId });
         }}
         onDrop={(event) => {
           event.preventDefault();
@@ -3148,6 +3183,10 @@ function toSummary(note: Note): NoteSummary {
 
 function updateSummary(notes: NoteSummary[], saved: Note): NoteSummary[] {
   return notes.map((note) => (note.id === saved.id ? normalizeNoteSummary(toSummary(saved)) : note));
+}
+
+function areDropTargetsEqual(first: NoteDropTarget | null, second: NoteDropTarget | null): boolean {
+  return first?.parentId === second?.parentId && first?.beforeId === second?.beforeId;
 }
 
 function flattenCategoryTree(
