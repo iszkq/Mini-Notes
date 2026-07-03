@@ -2292,12 +2292,12 @@ async function resolveParentIdForUser(
   noteId?: string
 ): Promise<string | null> {
   const parentId = cleanParentId(value);
-  if (!parentId || kind === "category") {
+  if (!parentId) {
     return null;
   }
 
   if (parentId === noteId) {
-    throw new HttpError("页面不能移动到自己下面。", 400);
+    throw new HttpError(kind === "category" ? "文件夹不能移动到自己下面。" : "页面不能移动到自己下面。", 400);
   }
 
   const parent = await env.DB.prepare(
@@ -2313,12 +2313,19 @@ async function resolveParentIdForUser(
   }
 
   const parentKind = cleanNoteKind(parent.kind);
-  if (parentKind !== "category" && parentKind !== "page") {
+  if (kind === "category" && parentKind !== "category") {
     return null;
   }
 
-  if (noteId && parentKind === "page" && (await wouldCreateParentCycle(env, userId, noteId, parent.id))) {
-    throw new HttpError("不能移动到自己的子页面中。", 400);
+  if (kind === "page" && parentKind !== "category" && parentKind !== "page") {
+    return null;
+  }
+
+  if (noteId && parentKind === kind && (await wouldCreateParentCycle(env, userId, noteId, parent.id))) {
+    throw new HttpError(
+      kind === "category" ? "不能移动到自己的子文件夹中。" : "不能移动到自己的子页面中。",
+      400
+    );
   }
 
   return parent.id;

@@ -107,6 +107,11 @@ type PublicShareRoute = {
   noteId: string | null;
 };
 
+type CategoryTreeItem = {
+  category: NoteSummary;
+  depth: number;
+};
+
 const SIDEBAR_GROUP_PAGE_SIZE = 80;
 const SIDEBAR_GROUP_PAGE_STEP = 80;
 const SIDEBAR_SEARCH_PAGE_SIZE = 120;
@@ -535,6 +540,29 @@ function App() {
     [sortedRecords]
   );
 
+  const categoriesById = useMemo(
+    () => new Map(categories.map((category) => [category.id, category])),
+    [categories]
+  );
+
+  const categoriesByParent = useMemo(() => {
+    const groups = new Map<string | null, NoteSummary[]>();
+    categories.forEach((category) => {
+      const key = category.parentId && categoriesById.has(category.parentId)
+        ? category.parentId
+        : null;
+      const current = groups.get(key) ?? [];
+      current.push(category);
+      groups.set(key, current);
+    });
+    return groups;
+  }, [categories, categoriesById]);
+
+  const categoryMenuItems = useMemo(
+    () => flattenCategoryTree(categoriesByParent.get(null) ?? [], categoriesByParent),
+    [categoriesByParent]
+  );
+
   const sortedNotes = useMemo(
     () => sortedRecords.filter((note) => note.kind === "page"),
     [sortedRecords]
@@ -593,30 +621,60 @@ function App() {
     [pagesByCategory]
   );
 
-  const visibleCategories = useMemo(() => {
+  const visibleCategoryIds = useMemo(() => {
     const term = query.trim().toLowerCase();
     if (!term) {
-      return categories;
+      return null;
     }
 
     const notesById = new Map(sortedNotes.map((note) => [note.id, note]));
-    const matchedParentIds = new Set<string>();
+    const matchedCategoryIds = new Set<string>();
+    const includeCategoryWithAncestors = (categoryId: string) => {
+      let currentId: string | null = categoryId;
+      const visited = new Set<string>();
+
+      while (currentId && !visited.has(currentId)) {
+        const category = categoriesById.get(currentId);
+        if (!category) {
+          return;
+        }
+
+        matchedCategoryIds.add(category.id);
+        visited.add(category.id);
+        currentId = category.parentId;
+      }
+    };
+
     visibleNotes.forEach((note) => {
       let parentId = note.parentId;
       const visited = new Set<string>();
 
       while (parentId && !visited.has(parentId)) {
-        matchedParentIds.add(parentId);
         visited.add(parentId);
+        if (categoriesById.has(parentId)) {
+          includeCategoryWithAncestors(parentId);
+          return;
+        }
+
         parentId = notesById.get(parentId)?.parentId ?? null;
       }
     });
 
-    return categories.filter(
-      (category) =>
-        matchedParentIds.has(category.id) || category.title.toLowerCase().includes(term)
-    );
-  }, [categories, query, sortedNotes, visibleNotes]);
+    categories.forEach((category) => {
+      if (category.title.toLowerCase().includes(term)) {
+        includeCategoryWithAncestors(category.id);
+      }
+    });
+
+    return matchedCategoryIds;
+  }, [categories, categoriesById, query, sortedNotes, visibleNotes]);
+
+  const visibleCategories = useMemo(() => {
+    const rootCategories = categoriesByParent.get(null) ?? [];
+    return visibleCategoryIds
+      ? rootCategories.filter((category) => visibleCategoryIds.has(category.id))
+      : rootCategories;
+  }, [categoriesByParent, visibleCategoryIds]);
 
   const getSidebarGroupKey = useCallback(
     (parentId: string | null) => parentId ?? UNCATEGORIZED_GROUP_KEY,
@@ -1236,7 +1294,7 @@ function App() {
     [getSidebarGroupKey, handleLoggedOut, hasUsers]
   );
 
-  const createCategory = useCallback(async () => {
+  const createCategory = useCallback(async (parentId: string | null = null) => {
     setWorkspaceView("notes");
     setCategoryActionMenu(null);
     if (draft && dirty) {
@@ -1249,11 +1307,14 @@ function App() {
           title: "未命名分类",
           icon: "📂",
           kind: "category",
+          parentId,
           content: []
         })
       );
       setNotes((current) => [normalizeNoteSummary(toSummary(created)), ...current]);
-      setCollapsedCategoryIds((current) => current.filter((id) => id !== created.id));
+      setCollapsedCategoryIds((current) =>
+        current.filter((id) => id !== created.id && id !== parentId)
+      );
       setEditingCategoryId(created.id);
       setEditingCategoryTitle(created.title);
     } catch (error) {
@@ -1402,7 +1463,7 @@ function App() {
     event.stopPropagation();
 
     const menuWidth = 178;
-    const menuHeight = 142;
+    const menuHeight = 178;
     const viewportWidth = typeof window === "undefined" ? 0 : window.innerWidth;
     const viewportHeight = typeof window === "undefined" ? 0 : window.innerHeight;
     const left = viewportWidth
@@ -1888,6 +1949,15 @@ function App() {
               </button>
               <button
                 className="category-context-menu__item"
+                onClick={() => void createCategory(contextCategory.id)}
+                role="menuitem"
+                type="button"
+              >
+                <FolderPlus size={15} />
+                新建子文件夹
+              </button>
+              <button
+                className="category-context-menu__item"
                 onClick={() => startCategoryEdit(contextCategory)}
                 role="menuitem"
                 type="button"
@@ -1957,13 +2027,15 @@ function App() {
                   <Folder size={15} />
                   未分类
                 </button>
-                {categories.map((category) => (
+                {categoryMenuItems.map(({ category, depth }) => (
                   <button
                     className={clsx(
                       "category-context-menu__item compact",
+                      "nested-category-option",
                       contextPage.parentId === category.id && "active"
                     )}
                     key={category.id}
+                    style={{ "--category-option-offset": `${depth * 14}px` } as CSSProperties}
                     onClick={() => void movePageToCategory(contextPage.id, category.id)}
                     role="menuitem"
                     type="button"
@@ -2039,6 +2111,133 @@ function App() {
       title="选择页面图标"
     />
   );
+
+  const renderCategoryNode = (
+    category: NoteSummary,
+    depth = 0,
+    visited = new Set<string>()
+  ): ReactNode => {
+    if (visited.has(category.id)) {
+      return null;
+    }
+
+    const nextVisited = new Set(visited);
+    nextVisited.add(category.id);
+    const childCategories = (categoriesByParent.get(category.id) ?? []).filter((child) =>
+      visibleCategoryIds ? visibleCategoryIds.has(child.id) : true
+    );
+    const categoryNotes = pagesByCategory.get(category.id) ?? [];
+    const categoryLimit = getSidebarGroupLimit(category.id);
+    const visibleCategoryNotes = categoryNotes.slice(0, categoryLimit);
+    const isCollapsed = collapsedCategoryIds.includes(category.id);
+    const isEditing = editingCategoryId === category.id;
+    const depthStyle =
+      depth > 0
+        ? ({ "--category-depth-offset": `${Math.min(depth, 6) * 18}px` } as CSSProperties)
+        : undefined;
+
+    return (
+      <div
+        className={clsx(
+          "note-group",
+          "category-tree-node",
+          depth > 0 && "nested",
+          depth > 1 && "deep"
+        )}
+        key={category.id}
+        style={depthStyle}
+      >
+        <div
+          className={clsx(
+            "category-row",
+            draggedNoteId &&
+              dropTarget?.parentId === category.id &&
+              !dropTarget.beforeId &&
+              "drop-target"
+          )}
+          onDragOver={(event) => handleGroupDragOver(event, category.id)}
+          onDrop={(event) => handleGroupDrop(event, category.id)}
+          onContextMenu={(event) => openCategoryActionMenu(event, category)}
+        >
+          <button
+            className="category-toggle"
+            onClick={() => toggleCategoryCollapse(category.id)}
+            type="button"
+          >
+            <ChevronRight
+              className={clsx("category-chevron", isCollapsed && "collapsed")}
+              size={14}
+            />
+            <Folder size={15} />
+          </button>
+
+          {isEditing ? (
+            <input
+              autoFocus
+              className="category-title-input"
+              onBlur={() => void saveCategoryTitle(category.id)}
+              onChange={(event) => setEditingCategoryTitle(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === "Enter") {
+                  event.preventDefault();
+                  void saveCategoryTitle(category.id);
+                }
+
+                if (event.key === "Escape") {
+                  event.preventDefault();
+                  setEditingCategoryId(null);
+                  setEditingCategoryTitle("");
+                }
+              }}
+              type="text"
+              value={editingCategoryTitle}
+            />
+          ) : (
+            <button
+              className="category-label"
+              onClick={() => toggleCategoryCollapse(category.id)}
+              type="button"
+            >
+              {category.title}
+            </button>
+          )}
+        </div>
+
+        {!isCollapsed ? (
+          <div
+            className={clsx(
+              "category-note-list",
+              draggedNoteId &&
+                dropTarget?.parentId === category.id &&
+                !dropTarget.beforeId &&
+                "drop-target"
+            )}
+            onDragOver={(event) => handleGroupDragOver(event, category.id)}
+            onDrop={(event) => handleGroupDrop(event, category.id)}
+          >
+            {childCategories.map((childCategory) =>
+              renderCategoryNode(childCategory, depth + 1, nextVisited)
+            )}
+            {categoryNotes.length > 0 ? (
+              visibleCategoryNotes.map((note) => renderPageNode(note, depth + 1))
+            ) : childCategories.length === 0 ? (
+              <div className="category-empty">这个文件夹下还没有内容</div>
+            ) : null}
+            {categoryNotes.length > categoryLimit ? (
+              <button
+                className="sidebar-show-more"
+                onClick={() => showMoreInSidebarGroup(category.id, categoryNotes.length)}
+                type="button"
+              >
+                显示更多（{categoryNotes.length - categoryLimit}）
+              </button>
+            ) : null}
+            {renderDropPlaceholder(category.id, null, true)}
+          </div>
+        ) : null}
+      </div>
+    );
+  };
 
   const renderPageNode = (
     note: NoteSummary,
@@ -2510,103 +2709,7 @@ function App() {
                 </div>
               ) : null}
 
-              {visibleCategories.map((category) => {
-                const categoryNotes = pagesByCategory.get(category.id) ?? [];
-                const categoryLimit = getSidebarGroupLimit(category.id);
-                const visibleCategoryNotes = categoryNotes.slice(0, categoryLimit);
-                const isCollapsed = collapsedCategoryIds.includes(category.id);
-                const isEditing = editingCategoryId === category.id;
-
-                return (
-                  <div className="note-group" key={category.id}>
-                    <div
-                      className={clsx(
-                        "category-row",
-                        draggedNoteId &&
-                          dropTarget?.parentId === category.id &&
-                          !dropTarget.beforeId &&
-                          "drop-target"
-                      )}
-                      onDragOver={(event) => handleGroupDragOver(event, category.id)}
-                      onDrop={(event) => handleGroupDrop(event, category.id)}
-                      onContextMenu={(event) => openCategoryActionMenu(event, category)}
-                    >
-                      <button
-                        className="category-toggle"
-                        onClick={() => toggleCategoryCollapse(category.id)}
-                        type="button"
-                      >
-                        <ChevronRight
-                          className={clsx("category-chevron", isCollapsed && "collapsed")}
-                          size={14}
-                        />
-                        <Folder size={15} />
-                      </button>
-
-                      {isEditing ? (
-                        <input
-                          autoFocus
-                          className="category-title-input"
-                          onBlur={() => void saveCategoryTitle(category.id)}
-                          onChange={(event) => setEditingCategoryTitle(event.target.value)}
-                          onKeyDown={(event) => {
-                            if (event.key === "Enter") {
-                              event.preventDefault();
-                              void saveCategoryTitle(category.id);
-                            }
-
-                            if (event.key === "Escape") {
-                              event.preventDefault();
-                              setEditingCategoryId(null);
-                              setEditingCategoryTitle("");
-                            }
-                          }}
-                          type="text"
-                          value={editingCategoryTitle}
-                        />
-                      ) : (
-                        <button
-                          className="category-label"
-                          onClick={() => toggleCategoryCollapse(category.id)}
-                          type="button"
-                        >
-                          {category.title}
-                        </button>
-                      )}
-                    </div>
-
-                    {!isCollapsed ? (
-                      <div
-                        className={clsx(
-                          "category-note-list",
-                          draggedNoteId &&
-                            dropTarget?.parentId === category.id &&
-                            !dropTarget.beforeId &&
-                            "drop-target"
-                        )}
-                        onDragOver={(event) => handleGroupDragOver(event, category.id)}
-                        onDrop={(event) => handleGroupDrop(event, category.id)}
-                      >
-                        {categoryNotes.length > 0 ? (
-                          visibleCategoryNotes.map((note) => renderPageNode(note, 1))
-                        ) : (
-                          <div className="category-empty">这个分类下还没有页面</div>
-                        )}
-                        {categoryNotes.length > categoryLimit ? (
-                          <button
-                            className="sidebar-show-more"
-                            onClick={() => showMoreInSidebarGroup(category.id, categoryNotes.length)}
-                            type="button"
-                          >
-                            显示更多（{categoryNotes.length - categoryLimit}）
-                          </button>
-                        ) : null}
-                        {renderDropPlaceholder(category.id, null, true)}
-                      </div>
-                    ) : null}
-                  </div>
-                );
-              })}
+              {visibleCategories.map((category) => renderCategoryNode(category))}
             </>
           )}
         </nav>
@@ -2725,13 +2828,15 @@ function App() {
                         >
                           未分类
                         </button>
-                        {categories.map((category) => (
+                        {categoryMenuItems.map(({ category, depth }) => (
                           <button
                             className={clsx(
                               "topbar-category-menu__item",
+                              "nested-category-option",
                               draft.parentId === category.id && "active"
                             )}
                             key={category.id}
+                            style={{ "--category-option-offset": `${depth * 14}px` } as CSSProperties}
                             onClick={() => {
                               editDraft({ parentId: category.id });
                               setCategoryMenuOpen(false);
@@ -2982,6 +3087,31 @@ function toSummary(note: Note): NoteSummary {
 
 function updateSummary(notes: NoteSummary[], saved: Note): NoteSummary[] {
   return notes.map((note) => (note.id === saved.id ? normalizeNoteSummary(toSummary(saved)) : note));
+}
+
+function flattenCategoryTree(
+  categories: NoteSummary[],
+  categoriesByParent: Map<string | null, NoteSummary[]>,
+  depth = 0,
+  visited = new Set<string>()
+): CategoryTreeItem[] {
+  return categories.flatMap((category) => {
+    if (visited.has(category.id)) {
+      return [];
+    }
+
+    const nextVisited = new Set(visited);
+    nextVisited.add(category.id);
+    return [
+      { category, depth },
+      ...flattenCategoryTree(
+        categoriesByParent.get(category.id) ?? [],
+        categoriesByParent,
+        depth + 1,
+        nextVisited
+      )
+    ];
+  });
 }
 
 function compareNoteOrder(a: NoteSummary, b: NoteSummary): number {
