@@ -143,6 +143,16 @@ const MIME_TYPE_BY_EXTENSION: Record<string, string> = {
   ".zip": "application/zip"
 };
 
+class HttpError extends Error {
+  status: number;
+
+  constructor(message: string, status: number) {
+    super(message);
+    this.name = "HttpError";
+    this.status = status;
+  }
+}
+
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
     const url = new URL(request.url);
@@ -294,6 +304,10 @@ async function handleApi(
 
     return error("未找到接口。", 404);
   } catch (cause) {
+    if (cause instanceof HttpError) {
+      return error(cause.message, cause.status);
+    }
+
     console.error(cause);
     return error("请求失败。", 500);
   }
@@ -2134,23 +2148,69 @@ async function resolveParentIdForUser(
   noteId?: string
 ): Promise<string | null> {
   const parentId = cleanParentId(value);
-  if (!parentId || kind === "category" || parentId === noteId) {
+  if (!parentId || kind === "category") {
     return null;
   }
 
+  if (parentId === noteId) {
+    throw new HttpError("页面不能移动到自己下面。", 400);
+  }
+
   const parent = await env.DB.prepare(
-    `SELECT id, kind
+    `SELECT id, kind, parent_id AS parentId
      FROM notes
      WHERE id = ? AND user_id = ? AND is_archived = 0`
   )
     .bind(parentId, userId)
-    .first<{ id: string; kind: NoteKind }>();
+    .first<{ id: string; kind: NoteKind; parentId: string | null }>();
 
-  if (!parent || cleanNoteKind(parent.kind) !== "category") {
+  if (!parent) {
     return null;
   }
 
+  const parentKind = cleanNoteKind(parent.kind);
+  if (parentKind !== "category" && parentKind !== "page") {
+    return null;
+  }
+
+  if (noteId && parentKind === "page" && (await wouldCreateParentCycle(env, userId, noteId, parent.id))) {
+    throw new HttpError("不能移动到自己的子页面中。", 400);
+  }
+
   return parent.id;
+}
+
+async function wouldCreateParentCycle(
+  env: Env,
+  userId: string,
+  noteId: string,
+  parentId: string
+): Promise<boolean> {
+  let currentParentId: string | null = parentId;
+  const visited = new Set<string>();
+
+  for (let depth = 0; currentParentId && depth < 80; depth += 1) {
+    if (currentParentId === noteId) {
+      return true;
+    }
+
+    if (visited.has(currentParentId)) {
+      return true;
+    }
+    visited.add(currentParentId);
+
+    const row: { parentId: string | null } | null = await env.DB.prepare(
+      `SELECT parent_id AS parentId
+       FROM notes
+       WHERE id = ? AND user_id = ? AND is_archived = 0`
+    )
+      .bind(currentParentId, userId)
+      .first<{ parentId: string | null }>();
+
+    currentParentId = row?.parentId ?? null;
+  }
+
+  return false;
 }
 
 function cleanUsername(value: unknown): string {

@@ -12,7 +12,7 @@ import {
   type FormattingToolbarProps,
   useCreateBlockNote
 } from "@blocknote/react";
-import { BookOpen, ChevronDown } from "lucide-react";
+import { BookOpen, ChevronDown, FileText } from "lucide-react";
 import {
   useCallback,
   useEffect,
@@ -35,7 +35,7 @@ import {
   collapsibleEnterExtension,
   noteSchema
 } from "../editorSchema";
-import type { Note, NoteBlock } from "../shared";
+import type { Note, NoteBlock, NoteSummary } from "../shared";
 import { BibleInsertModal } from "./BibleInsertModal";
 import { EmojiPackPicker } from "./EmojiPackPicker";
 import type { EmojiItem } from "../emojiPacks";
@@ -69,6 +69,7 @@ type NotebookEditorProps = {
   onFindReplaceClose?: () => void;
   readOnly?: boolean;
   onChange: (blocks: NoteBlock[]) => void;
+  onCreateSubPage?: (parentId: string) => Promise<NoteSummary>;
   onError?: (message: string) => void;
 };
 
@@ -105,6 +106,7 @@ export function NotebookEditor({
   focusRequest = 0,
   note,
   onChange,
+  onCreateSubPage,
   onError,
   onFindReplaceClose,
   readOnly = false
@@ -595,6 +597,52 @@ export function NotebookEditor({
     editor.focus();
   }, [editor, getCurrentBlockTextFromDom, getCurrentTextBlock]);
 
+  const insertSubPage = useCallback(async () => {
+    if (!onCreateSubPage) {
+      return;
+    }
+
+    const currentBlock = getCurrentTextBlock();
+    const plainText = getCurrentBlockTextFromDom();
+
+    try {
+      const created = await onCreateSubPage(note.id);
+      const pageBlock = {
+        type: "pageLink",
+        props: {
+          icon: created.icon,
+          noteId: created.id,
+          title: created.title
+        }
+      } as unknown as PartialBlock;
+      const spacerBlock = {
+        type: "paragraph",
+        content: []
+      } as PartialBlock;
+      const blocksToInsert = [pageBlock, spacerBlock];
+
+      if (!plainText || plainText.startsWith("/")) {
+        const result = editor.replaceBlocks([currentBlock.id], blocksToInsert);
+        const cursorBlock = result.insertedBlocks[1] ?? result.insertedBlocks[0];
+        if (cursorBlock) {
+          editor.setTextCursorPosition(cursorBlock);
+        }
+      } else {
+        const insertedBlocks = editor.insertBlocks(blocksToInsert, currentBlock.id, "after");
+        const cursorBlock = insertedBlocks[1] ?? insertedBlocks[0];
+        if (cursorBlock) {
+          editor.setTextCursorPosition(cursorBlock);
+        }
+      }
+
+      editor.focus();
+    } catch (error) {
+      const message =
+        error instanceof Error && error.message ? error.message : "子页面创建失败。";
+      onError?.(message);
+    }
+  }, [editor, getCurrentBlockTextFromDom, getCurrentTextBlock, note.id, onCreateSubPage, onError]);
+
   const handleInsertBibleVerses = useCallback(
     (verses: BibleVerse[]) => {
       if (!bibleInsertTarget || verses.length === 0) {
@@ -910,6 +958,14 @@ export function NotebookEditor({
         icon: <BookOpen size={18} />,
         onItemClick: openBibleInsertModal
       };
+      const subPageItem: DefaultReactSuggestionItem = {
+        title: "子页面",
+        subtext: "在当前页面中新建一个子页面",
+        aliases: ["页面", "子页面", "page", "subpage", "notion"],
+        group: "基础",
+        icon: <FileText size={18} />,
+        onItemClick: () => void insertSubPage()
+      };
       const emojiItem: DefaultReactSuggestionItem = {
         title: "表情符号",
         subtext: "从表情包插入图片表情",
@@ -920,12 +976,13 @@ export function NotebookEditor({
       };
       const items = [...defaultItems];
       items.splice(toggleListIndex >= 0 ? toggleListIndex + 1 : 0, 0, collapsibleItem);
+      items.splice(toggleListIndex >= 0 ? toggleListIndex + 2 : 1, 0, subPageItem);
       items.splice(heading3Index >= 0 ? heading3Index + 1 : 0, 0, bibleItem);
       items.push(emojiItem);
 
       return filterSuggestionItems(items, query);
     },
-    [editor, insertCollapsibleContent, openBibleInsertModal]
+    [editor, insertCollapsibleContent, insertSubPage, openBibleInsertModal]
   );
 
   const renderFormattingToolbar = useCallback(

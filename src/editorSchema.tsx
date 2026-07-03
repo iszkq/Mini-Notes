@@ -6,7 +6,7 @@ import {
   type BlockNoteEditor
 } from "@blocknote/core";
 import { createReactBlockSpec, createReactStyleSpec } from "@blocknote/react";
-import { ChevronDown } from "lucide-react";
+import { ChevronDown, FileText } from "lucide-react";
 import { formatBibleReference, parseBibleVersePayload } from "./bible";
 import { parseNoteComment } from "./comments";
 
@@ -333,6 +333,67 @@ const bibleVerseCard = createReactBlockSpec(
   }
 )();
 
+const pageLinkBlock = createReactBlockSpec(
+  {
+    type: "pageLink",
+    propSchema: {
+      icon: {
+        default: "📝"
+      },
+      noteId: {
+        default: ""
+      },
+      title: {
+        default: "未命名"
+      }
+    },
+    content: "none"
+  },
+  {
+    render: ({ block }) => {
+      const noteId = String(block.props.noteId || "");
+      const title = String(block.props.title || "未命名");
+      const icon = String(block.props.icon || "📝");
+
+      return (
+        <button
+          className="page-link-block"
+          contentEditable={false}
+          onClick={(event) => {
+            event.preventDefault();
+            event.stopPropagation();
+            if (!noteId) {
+              return;
+            }
+
+            window.dispatchEvent(
+              new CustomEvent("mini-notes:open-note", {
+                detail: {
+                  noteId
+                }
+              })
+            );
+          }}
+          type="button"
+        >
+          <span className="page-link-block__icon" aria-hidden="true">
+            {icon}
+          </span>
+          <span className="page-link-block__title">{title}</span>
+        </button>
+      );
+    },
+    toExternalHTML: ({ block }) => (
+      <div className="page-link-block">
+        <span className="page-link-block__icon" aria-hidden="true">
+          {block.props.icon || <FileText size={16} />}
+        </span>
+        <span className="page-link-block__title">{block.props.title || "未命名"}</span>
+      </div>
+    )
+  }
+)();
+
 export const collapsibleEnterExtension = createExtension({
   key: "embedded-card-enter-hard-break",
   keyboardShortcuts: {
@@ -358,7 +419,8 @@ export const noteSchema = BlockNoteSchema.create({
   blockSpecs: {
     ...defaultBlockSpecs,
     collapsibleContent,
-    bibleVerseCard
+    bibleVerseCard,
+    pageLink: pageLinkBlock
   },
   styleSpecs: {
     ...defaultStyleSpecs,

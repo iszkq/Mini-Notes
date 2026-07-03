@@ -35,6 +35,7 @@ import {
   type DragEvent as ReactDragEvent,
   type FormEvent,
   type MouseEvent as ReactMouseEvent,
+  type ReactNode,
   useCallback,
   useEffect,
   useMemo,
@@ -560,15 +561,24 @@ function App() {
       return categories;
     }
 
-    const matchedParentIds = new Set(
-      visibleNotes.map((note) => note.parentId).filter((parentId): parentId is string => Boolean(parentId))
-    );
+    const notesById = new Map(sortedNotes.map((note) => [note.id, note]));
+    const matchedParentIds = new Set<string>();
+    visibleNotes.forEach((note) => {
+      let parentId = note.parentId;
+      const visited = new Set<string>();
+
+      while (parentId && !visited.has(parentId)) {
+        matchedParentIds.add(parentId);
+        visited.add(parentId);
+        parentId = notesById.get(parentId)?.parentId ?? null;
+      }
+    });
 
     return categories.filter(
       (category) =>
         matchedParentIds.has(category.id) || category.title.toLowerCase().includes(term)
     );
-  }, [categories, query, visibleNotes]);
+  }, [categories, query, sortedNotes, visibleNotes]);
 
   const getSidebarGroupKey = useCallback(
     (parentId: string | null) => parentId ?? UNCATEGORIZED_GROUP_KEY,
@@ -609,25 +619,41 @@ function App() {
       return;
     }
 
-    const parentId = selectedNote.parentId ?? null;
-    const groupNotes = pagesByCategory.get(parentId) ?? [];
-    const selectedIndex = groupNotes.findIndex((note) => note.id === selectedId);
-    if (selectedIndex < 0) {
+    const notesById = new Map(sortedNotes.map((note) => [note.id, note]));
+    const requiredLimits: Record<string, number> = {};
+    let currentNote: NoteSummary | undefined = selectedNote;
+    const visited = new Set<string>();
+
+    while (currentNote && !visited.has(currentNote.id)) {
+      visited.add(currentNote.id);
+      const parentId = currentNote.parentId ?? null;
+      const groupNotes = pagesByCategory.get(parentId) ?? [];
+      const selectedIndex = groupNotes.findIndex((note) => note.id === currentNote?.id);
+
+      if (selectedIndex >= 0) {
+        requiredLimits[getSidebarGroupKey(parentId)] =
+          Math.ceil((selectedIndex + 1) / SIDEBAR_GROUP_PAGE_STEP) * SIDEBAR_GROUP_PAGE_STEP;
+      }
+
+      currentNote = currentNote.parentId ? notesById.get(currentNote.parentId) : undefined;
+    }
+
+    if (Object.keys(requiredLimits).length === 0) {
       return;
     }
 
-    const minimumLimit =
-      Math.ceil((selectedIndex + 1) / SIDEBAR_GROUP_PAGE_STEP) * SIDEBAR_GROUP_PAGE_STEP;
-    const groupKey = getSidebarGroupKey(parentId);
     setSidebarGroupLimits((current) => {
-      if ((current[groupKey] ?? SIDEBAR_GROUP_PAGE_SIZE) >= minimumLimit) {
-        return current;
-      }
+      let changed = false;
+      const next = { ...current };
 
-      return {
-        ...current,
-        [groupKey]: minimumLimit
-      };
+      Object.entries(requiredLimits).forEach(([groupKey, minimumLimit]) => {
+        if ((next[groupKey] ?? SIDEBAR_GROUP_PAGE_SIZE) < minimumLimit) {
+          next[groupKey] = minimumLimit;
+          changed = true;
+        }
+      });
+
+      return changed ? next : current;
     });
   }, [getSidebarGroupKey, pagesByCategory, query, selectedId, sortedNotes]);
 
@@ -828,6 +854,37 @@ function App() {
     [dirty, draft, loadNote, saveDraft, selectedId]
   );
 
+  useEffect(() => {
+    const handleOpenNote = (event: Event) => {
+      const noteId = (event as CustomEvent<{ noteId?: unknown }>).detail?.noteId;
+      if (typeof noteId === "string" && noteId) {
+        void selectNote(noteId);
+      }
+    };
+
+    window.addEventListener("mini-notes:open-note", handleOpenNote);
+    return () => window.removeEventListener("mini-notes:open-note", handleOpenNote);
+  }, [selectNote]);
+
+  const isDescendantPage = useCallback(
+    (candidateParentId: string, noteId: string): boolean => {
+      let currentId: string | null = candidateParentId;
+      const visited = new Set<string>();
+
+      while (currentId && !visited.has(currentId)) {
+        if (currentId === noteId) {
+          return true;
+        }
+
+        visited.add(currentId);
+        currentId = notes.find((note) => note.id === currentId)?.parentId ?? null;
+      }
+
+      return false;
+    },
+    [notes]
+  );
+
   const calculateDropSortOrder = useCallback(
     (parentId: string | null, beforeId: string | null, draggedId: string): number => {
       const targetGroup = sortedNotes.filter(
@@ -867,6 +924,11 @@ function App() {
 
       const draggedNote = notes.find((note) => note.id === draggedId && note.kind === "page");
       if (!draggedNote) {
+        return;
+      }
+
+      if (parentId && isDescendantPage(parentId, draggedId)) {
+        setAppError("不能移动到自己的子页面中。");
         return;
       }
 
@@ -930,7 +992,7 @@ function App() {
         }
       }
     },
-    [calculateDropSortOrder, draggedNoteId, handleLoggedOut, hasUsers, notes]
+    [calculateDropSortOrder, draggedNoteId, handleLoggedOut, hasUsers, isDescendantPage, notes]
   );
 
   const getNoteDropTarget = useCallback(
@@ -1017,6 +1079,10 @@ function App() {
       return;
     }
 
+    if (parentId && isDescendantPage(parentId, draggedNoteId)) {
+      return;
+    }
+
     event.preventDefault();
     event.dataTransfer.dropEffect = "move";
     setDropTarget({ parentId, beforeId: null });
@@ -1037,6 +1103,10 @@ function App() {
 
   const renderDropPlaceholder = (parentId: string | null, beforeId: string | null, nested = false) => {
     if (!draggedNoteId || dropTarget?.parentId !== parentId || dropTarget.beforeId !== beforeId) {
+      return null;
+    }
+
+    if (parentId && isDescendantPage(parentId, draggedNoteId)) {
       return null;
     }
 
@@ -1087,6 +1157,46 @@ function App() {
       }
     }
   }, [dirty, draft, handleLoggedOut, hasUsers, loadNote, saveDraft]);
+
+  const createSubPage = useCallback(
+    async (parentId: string): Promise<NoteSummary> => {
+      setWorkspaceView("notes");
+      setAppError(null);
+
+      try {
+        const created = normalizeNote(
+          await createNote({
+            title: "未命名",
+            icon: "📝",
+            kind: "page",
+            parentId,
+            content: []
+          })
+        );
+        const summary = normalizeNoteSummary(toSummary(created));
+        setNotes((current) => [summary, ...current]);
+        setSidebarGroupLimits((current) => ({
+          ...current,
+          [getSidebarGroupKey(parentId)]: Math.max(
+            current[getSidebarGroupKey(parentId)] ?? SIDEBAR_GROUP_PAGE_SIZE,
+            SIDEBAR_GROUP_PAGE_SIZE
+          )
+        }));
+        return summary;
+      } catch (error) {
+        if (error instanceof ApiError && error.status === 401) {
+          handleLoggedOut(hasUsers);
+          setAppError("登录状态已失效，请重新登录。");
+          throw new Error("登录状态已失效，请重新登录。");
+        }
+
+        const message = error instanceof ApiError ? error.message : "子页面创建失败。";
+        setAppError(message);
+        throw new Error(message);
+      }
+    },
+    [getSidebarGroupKey, handleLoggedOut, hasUsers]
+  );
 
   const createCategory = useCallback(async () => {
     setWorkspaceView("notes");
@@ -1892,6 +2002,90 @@ function App() {
     />
   );
 
+  const renderPageNode = (
+    note: NoteSummary,
+    depth = 0,
+    visited = new Set<string>()
+  ): ReactNode => {
+    if (visited.has(note.id)) {
+      return null;
+    }
+
+    const nextVisited = new Set(visited);
+    nextVisited.add(note.id);
+    const childNotes = pagesByCategory.get(note.id) ?? [];
+    const childLimit = getSidebarGroupLimit(note.id);
+    const visibleChildNotes = childNotes.slice(0, childLimit);
+    const nested = depth > 0;
+    const canDropInside = Boolean(
+      draggedNoteId && draggedNoteId !== note.id && !isDescendantPage(note.id, draggedNoteId)
+    );
+    const depthStyle =
+      depth > 1
+        ? ({ "--note-depth-offset": `${Math.min(depth, 6) * 18}px` } as CSSProperties)
+        : undefined;
+
+    return (
+      <Fragment key={note.id}>
+        {renderDropPlaceholder(note.parentId ?? null, note.id, nested)}
+        <button
+          className={clsx(
+            "note-row",
+            nested && "nested",
+            depth > 1 && "deep",
+            note.id === selectedId && "active",
+            draggedNoteId === note.id && "dragging"
+          )}
+          draggable={!query.trim()}
+          onDragEnd={handleDragEnd}
+          onDragOver={(event) => handleNoteDragOver(event, note)}
+          onDragStart={(event) => handleNoteDragStart(event, note)}
+          onDrop={(event) => handleNoteDrop(event, note)}
+          onClick={() => void selectNote(note.id)}
+          onContextMenu={(event) => openPageActionMenu(event, note)}
+          style={depthStyle}
+          type="button"
+        >
+          <NoteIcon icon={normalizePageIcon(note.icon)} />
+          <span className="note-row-text">
+            <strong>{note.title}</strong>
+            <span className="note-row-subline">
+              <small>{formatRelative(note.updatedAt)}</small>
+              {note.shareToken ? <em className="mini-share-badge">已共享</em> : null}
+            </span>
+          </span>
+        </button>
+        {childNotes.length > 0 || canDropInside ? (
+          <div
+            className={clsx(
+              "note-child-list",
+              childNotes.length === 0 && canDropInside && "empty-drop-zone"
+            )}
+            onDragOver={(event) => handleGroupDragOver(event, note.id)}
+            onDrop={(event) => handleGroupDrop(event, note.id)}
+          >
+            {visibleChildNotes.map((childNote) =>
+              renderPageNode(childNote, depth + 1, nextVisited)
+            )}
+            {childNotes.length > childLimit ? (
+              <button
+                className="sidebar-show-more"
+                onClick={() => showMoreInSidebarGroup(note.id, childNotes.length)}
+                type="button"
+              >
+                显示更多（{childNotes.length - childLimit}）
+              </button>
+            ) : null}
+            {childNotes.length === 0 && canDropInside ? (
+              <div className="note-child-drop-hint">拖到这里作为子页面</div>
+            ) : null}
+            {renderDropPlaceholder(note.id, null, true)}
+          </div>
+        ) : null}
+      </Fragment>
+    );
+  };
+
   if (isPublicView) {
     if (publicPending) {
       return (
@@ -2258,37 +2452,11 @@ function App() {
                   onDrop={(event) => handleGroupDrop(event, null)}
                 >
                   <div className="note-group-title">未分类</div>
-                  {uncategorizedNotes.length > 0 ? uncategorizedNotes
-                    .slice(0, getSidebarGroupLimit(null))
-                    .map((note) => (
-                    <Fragment key={note.id}>
-                    {renderDropPlaceholder(null, note.id)}
-                    <button
-                      className={clsx(
-                        "note-row",
-                        note.id === selectedId && "active",
-                        draggedNoteId === note.id && "dragging"
-                      )}
-                      draggable={!query.trim()}
-                      onDragEnd={handleDragEnd}
-                      onDragOver={(event) => handleNoteDragOver(event, note)}
-                      onDragStart={(event) => handleNoteDragStart(event, note)}
-                      onDrop={(event) => handleNoteDrop(event, note)}
-                      onClick={() => void selectNote(note.id)}
-                      onContextMenu={(event) => openPageActionMenu(event, note)}
-                      type="button"
-                    >
-                      <NoteIcon icon={normalizePageIcon(note.icon)} />
-                      <span className="note-row-text">
-                        <strong>{note.title}</strong>
-                        <span className="note-row-subline">
-                          <small>{formatRelative(note.updatedAt)}</small>
-                          {note.shareToken ? <em className="mini-share-badge">已共享</em> : null}
-                        </span>
-                      </span>
-                    </button>
-                    </Fragment>
-                  )) : (
+                  {uncategorizedNotes.length > 0 ? (
+                    uncategorizedNotes
+                      .slice(0, getSidebarGroupLimit(null))
+                      .map((note) => renderPageNode(note))
+                  ) : (
                     <div className="category-empty">拖到这里移出分类</div>
                   )}
                   {uncategorizedNotes.length > getSidebarGroupLimit(null) ? (
@@ -2382,35 +2550,7 @@ function App() {
                         onDrop={(event) => handleGroupDrop(event, category.id)}
                       >
                         {categoryNotes.length > 0 ? (
-                          visibleCategoryNotes.map((note) => (
-                            <Fragment key={note.id}>
-                            {renderDropPlaceholder(category.id, note.id, true)}
-                            <button
-                              className={clsx(
-                                "note-row nested",
-                                note.id === selectedId && "active",
-                                draggedNoteId === note.id && "dragging"
-                              )}
-                              draggable={!query.trim()}
-                              onDragEnd={handleDragEnd}
-                              onDragOver={(event) => handleNoteDragOver(event, note)}
-                              onDragStart={(event) => handleNoteDragStart(event, note)}
-                              onDrop={(event) => handleNoteDrop(event, note)}
-                              onClick={() => void selectNote(note.id)}
-                              onContextMenu={(event) => openPageActionMenu(event, note)}
-                              type="button"
-                            >
-                              <NoteIcon icon={normalizePageIcon(note.icon)} />
-                              <span className="note-row-text">
-                                <strong>{note.title}</strong>
-                                <span className="note-row-subline">
-                                  <small>{formatRelative(note.updatedAt)}</small>
-                                  {note.shareToken ? <em className="mini-share-badge">已共享</em> : null}
-                                </span>
-                              </span>
-                            </button>
-                            </Fragment>
-                          ))
+                          visibleCategoryNotes.map((note) => renderPageNode(note, 1))
                         ) : (
                           <div className="category-empty">这个分类下还没有页面</div>
                         )}
@@ -2686,6 +2826,7 @@ function App() {
               key={`${draft.id}:${editorDocumentVersion}`}
               note={draft}
               onError={setAppError}
+              onCreateSubPage={createSubPage}
               onFindReplaceClose={() => setFindReplaceOpen(false)}
               onChange={(content) => editDraft({ content })}
             />
