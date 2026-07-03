@@ -223,6 +223,8 @@ function App() {
   const [pageIconPickerTargetId, setPageIconPickerTargetId] = useState<string | null>(null);
   const [draggedNoteId, setDraggedNoteId] = useState<string | null>(null);
   const [dropTarget, setDropTarget] = useState<NoteDropTarget | null>(null);
+  const dragExpandTimerRef = useRef<number | null>(null);
+  const dragExpandTargetRef = useRef<string | null>(null);
   const [sidebarGroupLimits, setSidebarGroupLimits] = useState<Record<string, number>>({});
   const [sidebarSearchLimit, setSidebarSearchLimit] = useState(SIDEBAR_SEARCH_PAGE_SIZE);
   const isAdminView = workspaceView === "admin" && Boolean(sessionUser?.isAdmin);
@@ -981,6 +983,46 @@ function App() {
     [notes]
   );
 
+  const clearDragExpandTimer = useCallback(() => {
+    if (dragExpandTimerRef.current !== null && typeof window !== "undefined") {
+      window.clearTimeout(dragExpandTimerRef.current);
+    }
+
+    dragExpandTimerRef.current = null;
+    dragExpandTargetRef.current = null;
+  }, []);
+
+  const scheduleCategoryAutoExpand = useCallback(
+    (categoryId: string | null) => {
+      if (
+        !categoryId ||
+        !categoriesById.has(categoryId) ||
+        !collapsedCategoryIds.includes(categoryId) ||
+        typeof window === "undefined"
+      ) {
+        if (!categoryId || !categoriesById.has(categoryId) || dragExpandTargetRef.current === categoryId) {
+          clearDragExpandTimer();
+        }
+        return;
+      }
+
+      if (dragExpandTargetRef.current === categoryId && dragExpandTimerRef.current !== null) {
+        return;
+      }
+
+      clearDragExpandTimer();
+      dragExpandTargetRef.current = categoryId;
+      dragExpandTimerRef.current = window.setTimeout(() => {
+        setCollapsedCategoryIds((current) => current.filter((id) => id !== categoryId));
+        dragExpandTimerRef.current = null;
+        dragExpandTargetRef.current = null;
+      }, 520);
+    },
+    [categoriesById, clearDragExpandTimer, collapsedCategoryIds]
+  );
+
+  useEffect(() => clearDragExpandTimer, [clearDragExpandTimer]);
+
   const calculateDropSortOrder = useCallback(
     (parentId: string | null, beforeId: string | null, draggedId: string): number => {
       const targetGroup = sortedNotes.filter(
@@ -1011,6 +1053,7 @@ function App() {
   const moveDraggedNote = useCallback(
     async (parentId: string | null, beforeId: string | null) => {
       const draggedId = draggedNoteId;
+      clearDragExpandTimer();
       setDraggedNoteId(null);
       setDropTarget(null);
 
@@ -1088,7 +1131,7 @@ function App() {
         }
       }
     },
-    [calculateDropSortOrder, draggedNoteId, handleLoggedOut, hasUsers, isDescendantPage, notes]
+    [calculateDropSortOrder, clearDragExpandTimer, draggedNoteId, handleLoggedOut, hasUsers, isDescendantPage, notes]
   );
 
   const getNoteDropTarget = useCallback(
@@ -1129,12 +1172,14 @@ function App() {
 
     setDraggedNoteId(note.id);
     setDropTarget(null);
+    clearDragExpandTimer();
     event.dataTransfer.effectAllowed = "move";
     event.dataTransfer.setData("text/plain", note.id);
     setNoteDragImage(event, note);
   };
 
   const handleDragEnd = () => {
+    clearDragExpandTimer();
     setDraggedNoteId(null);
     setDropTarget(null);
   };
@@ -1151,6 +1196,7 @@ function App() {
     event.preventDefault();
     event.stopPropagation();
     event.dataTransfer.dropEffect = "move";
+    clearDragExpandTimer();
     setDropTarget(nextTarget);
   };
 
@@ -1176,12 +1222,19 @@ function App() {
     }
 
     if (parentId && isDescendantPage(parentId, draggedNoteId)) {
+      event.preventDefault();
+      event.stopPropagation();
+      event.dataTransfer.dropEffect = "none";
+      clearDragExpandTimer();
+      setDropTarget(null);
       return;
     }
 
     event.preventDefault();
+    event.stopPropagation();
     event.dataTransfer.dropEffect = "move";
     setDropTarget({ parentId, beforeId: null });
+    scheduleCategoryAutoExpand(parentId);
   };
 
   const handleGroupDrop = (
@@ -2155,6 +2208,7 @@ function App() {
               !dropTarget.beforeId &&
               "drop-target"
           )}
+          data-drop-label={draggedNoteId ? "放入文件夹" : undefined}
           onDragOver={(event) => handleGroupDragOver(event, category.id)}
           onDrop={(event) => handleGroupDrop(event, category.id)}
           onContextMenu={(event) => openCategoryActionMenu(event, category)}
@@ -2212,6 +2266,7 @@ function App() {
                 !dropTarget.beforeId &&
                 "drop-target"
             )}
+            data-drop-label={draggedNoteId ? "放到文件夹末尾" : undefined}
             onDragOver={(event) => handleGroupDragOver(event, category.id)}
             onDrop={(event) => handleGroupDrop(event, category.id)}
           >
@@ -2296,8 +2351,13 @@ function App() {
           <div
             className={clsx(
               "note-child-list",
-              childNotes.length === 0 && canDropInside && "empty-drop-zone"
+              childNotes.length === 0 && canDropInside && "empty-drop-zone",
+              draggedNoteId &&
+                dropTarget?.parentId === note.id &&
+                !dropTarget.beforeId &&
+                "drop-target"
             )}
+            data-drop-label={draggedNoteId ? "放为子页面" : undefined}
             onDragOver={(event) => handleGroupDragOver(event, note.id)}
             onDrop={(event) => handleGroupDrop(event, note.id)}
           >
@@ -2685,6 +2745,7 @@ function App() {
                     "note-group",
                     draggedNoteId && dropTarget?.parentId === null && !dropTarget.beforeId && "drop-target"
                   )}
+                  data-drop-label={draggedNoteId ? "放到未分类" : undefined}
                   onDragOver={(event) => handleGroupDragOver(event, null)}
                   onDrop={(event) => handleGroupDrop(event, null)}
                 >

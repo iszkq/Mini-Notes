@@ -28,9 +28,65 @@
 
 .note-group.drop-target,
 .category-note-list.drop-target,
+.note-child-list.drop-target,
 .category-row.drop-target {
-  background: rgba(47, 111, 115, 0.08);
-  box-shadow: inset 0 0 0 1px rgba(47, 111, 115, 0.16);
+  background: rgba(47, 111, 115, 0.1);
+  box-shadow: inset 0 0 0 1px rgba(47, 111, 115, 0.24);
+}
+
+.note-group.drop-target,
+.category-note-list.drop-target,
+.note-child-list.drop-target {
+  position: relative;
+}
+
+.note-group.drop-target > .note-group-title::after,
+.category-note-list.drop-target::before,
+.note-child-list.drop-target::before {
+  display: inline-flex;
+  align-items: center;
+  min-height: 22px;
+  margin-left: 8px;
+  padding: 0 8px;
+  border: 1px solid rgba(47, 111, 115, 0.28);
+  border-radius: 999px;
+  color: #24595d;
+  background: #eaf6f3;
+  font-size: 0.7rem;
+  font-weight: 800;
+  content: attr(data-drop-label);
+}
+
+.category-note-list.drop-target::before,
+.note-child-list.drop-target::before {
+  width: fit-content;
+  margin: 4px 0 2px 22px;
+}
+
+.category-row.drop-target {
+  position: relative;
+  background: #eaf6f3;
+  box-shadow:
+    inset 0 0 0 1px rgba(47, 111, 115, 0.36),
+    0 6px 16px rgba(47, 111, 115, 0.1);
+}
+
+.category-row.drop-target .category-label {
+  padding-right: 86px;
+}
+
+.category-row.drop-target::after {
+  position: absolute;
+  top: 50%;
+  right: 8px;
+  padding: 3px 8px;
+  border-radius: 999px;
+  color: #24595d;
+  background: #ffffff;
+  font-size: 0.7rem;
+  font-weight: 800;
+  content: attr(data-drop-label);
+  transform: translateY(-50%);
 }
 
 .note-group-title {
@@ -232,22 +288,37 @@
 
 .note-drop-placeholder {
   position: relative;
-  height: 42px;
-  margin: 2px 0;
-  border: 1px dashed rgba(47, 111, 115, 0.42);
-  border-radius: 10px;
-  background: rgba(47, 111, 115, 0.08);
+  height: 28px;
+  margin: 1px 0;
+  border: 0;
+  border-radius: 8px;
+  background: rgba(47, 111, 115, 0.05);
 }
 
 .note-drop-placeholder::before {
   position: absolute;
   top: 50%;
-  right: 12px;
-  left: 12px;
-  height: 2px;
+  right: 8px;
+  left: 8px;
+  height: 3px;
   border-radius: 999px;
   background: #2f6f73;
   content: "";
+  transform: translateY(-50%);
+}
+
+.note-drop-placeholder::after {
+  position: absolute;
+  top: 50%;
+  right: 10px;
+  padding: 2px 8px;
+  border: 1px solid rgba(47, 111, 115, 0.28);
+  border-radius: 999px;
+  color: #24595d;
+  background: #ffffff;
+  font-size: 0.7rem;
+  font-weight: 800;
+  content: "放到这里";
   transform: translateY(-50%);
 }
 
