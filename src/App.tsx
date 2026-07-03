@@ -215,6 +215,9 @@ function App() {
   const draftRef = useRef<Note | null>(null);
   const lastPageSnapshotRef = useRef<PageSnapshot | null>(null);
   const pageHistoryRef = useRef<PageHistoryState>(createEmptyPageHistory(null));
+  const authUsernameInputRef = useRef<HTMLInputElement | null>(null);
+  const authPasswordInputRef = useRef<HTMLInputElement | null>(null);
+  const authInviteCodeInputRef = useRef<HTMLInputElement | null>(null);
   const shareButtonRef = useRef<HTMLButtonElement | null>(null);
   const findReplaceButtonRef = useRef<HTMLButtonElement | null>(null);
   const [sharePanelStyle, setSharePanelStyle] = useState<CSSProperties>({});
@@ -2606,7 +2609,14 @@ function App() {
                 autoFocus
                 className="token-input"
                 onChange={(event) => setAuthUsername(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter" && !event.nativeEvent.isComposing) {
+                    event.preventDefault();
+                    authPasswordInputRef.current?.focus();
+                  }
+                }}
                 placeholder="输入用户名"
+                ref={authUsernameInputRef}
                 type="text"
                 value={authUsername}
               />
@@ -2618,7 +2628,18 @@ function App() {
                 autoComplete={authMode === "register" ? "new-password" : "current-password"}
                 className="token-input"
                 onChange={(event) => setAuthPassword(event.target.value)}
+                onKeyDown={(event) => {
+                  if (
+                    authMode === "register" &&
+                    event.key === "Enter" &&
+                    !event.nativeEvent.isComposing
+                  ) {
+                    event.preventDefault();
+                    authInviteCodeInputRef.current?.focus();
+                  }
+                }}
                 placeholder="至少 6 位"
+                ref={authPasswordInputRef}
                 type="password"
                 value={authPassword}
               />
@@ -2631,6 +2652,7 @@ function App() {
                   className="token-input"
                   onChange={(event) => setAuthInviteCode(event.target.value)}
                   placeholder="输入邀请码"
+                  ref={authInviteCodeInputRef}
                   type="password"
                   value={authInviteCode}
                 />

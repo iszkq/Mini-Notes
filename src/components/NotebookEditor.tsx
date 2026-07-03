@@ -129,6 +129,8 @@ export function NotebookEditor({
   const importedRemoteImagesRef = useRef<Map<string, string>>(new Map());
   const pendingRemoteImageBlocksRef = useRef<Set<string>>(new Set());
   const pendingRemoteImageUrlsRef = useRef<Map<string, Promise<string | null>>>(new Map());
+  const handledClipboardPasteEventsRef = useRef<WeakSet<ClipboardEvent>>(new WeakSet());
+  const suppressClipboardImagePasteUntilRef = useRef(0);
 
   const initialContent = useMemo(() => {
     return note.content.length > 0 ? hydrateBibleVerseCards(note.content) : undefined;
@@ -463,6 +465,7 @@ export function NotebookEditor({
 
     insertCopiedImageBlock(editor, copiedImageBlock);
     editor.focus();
+    suppressClipboardImagePasteUntilRef.current = Date.now() + 900;
     return true;
   }, [editor]);
 
@@ -766,6 +769,10 @@ export function NotebookEditor({
     }
 
     const handlePaste = (event: ClipboardEvent) => {
+      if (handledClipboardPasteEventsRef.current.has(event)) {
+        return;
+      }
+
       const target = event.target instanceof Element ? event.target : null;
       if (!target?.closest(".note-editor")) {
         return;
@@ -778,8 +785,14 @@ export function NotebookEditor({
 
       const imageFiles = getClipboardImageFiles(clipboardData);
       if (imageFiles.length > 0) {
+        handledClipboardPasteEventsRef.current.add(event);
         event.preventDefault();
         event.stopPropagation();
+        event.stopImmediatePropagation();
+        if (Date.now() < suppressClipboardImagePasteUntilRef.current) {
+          return;
+        }
+
         setPasteUploadAnchor(getPasteUploadAnchor(target, root));
         void insertClipboardImageFiles(imageFiles);
         return;
@@ -790,8 +803,14 @@ export function NotebookEditor({
         return;
       }
 
+      handledClipboardPasteEventsRef.current.add(event);
       event.preventDefault();
       event.stopPropagation();
+      event.stopImmediatePropagation();
+      if (Date.now() < suppressClipboardImagePasteUntilRef.current) {
+        return;
+      }
+
       if (/^data:/i.test(imageSource)) {
         setPasteUploadAnchor(getPasteUploadAnchor(target, root));
       }
@@ -1816,7 +1835,7 @@ function getClipboardImageFiles(clipboardData: DataTransfer): File[] {
 }
 
 function addUniqueImageFile(files: File[], seen: Set<string>, file: File) {
-  const key = `${file.name}:${file.type}:${file.size}:${file.lastModified}`;
+  const key = `${file.type || "image"}:${file.size}`;
   if (seen.has(key)) {
     return;
   }
