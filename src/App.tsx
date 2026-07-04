@@ -2,6 +2,7 @@ import clsx from "clsx";
 import {
   Archive,
   ArrowRight,
+  BookOpen,
   Check,
   ChevronDown,
   ChevronRight,
@@ -60,6 +61,7 @@ import {
 } from "./api";
 import { collectNoteComments } from "./comments";
 import { AdminPanel } from "./components/AdminPanel";
+import { BibleReader } from "./components/BibleReader";
 import { EmojiPackPicker } from "./components/EmojiPackPicker";
 import { ExportPanel } from "./components/ExportPanel";
 import { NoteIcon } from "./components/NoteIcon";
@@ -70,7 +72,7 @@ import type { AuthUser, Note, NoteBlock, NoteSummary } from "./shared";
 
 type SaveStatus = "idle" | "saving" | "saved" | "error";
 type AuthMode = "login" | "register";
-type WorkspaceView = "notes" | "admin";
+type WorkspaceView = "notes" | "bible" | "admin";
 
 type PagePreset = {
   value: string;
@@ -233,6 +235,7 @@ function App() {
   const [sidebarGroupLimits, setSidebarGroupLimits] = useState<Record<string, number>>({});
   const [sidebarSearchLimit, setSidebarSearchLimit] = useState(SIDEBAR_SEARCH_PAGE_SIZE);
   const isAdminView = workspaceView === "admin" && Boolean(sessionUser?.isAdmin);
+  const isBibleView = workspaceView === "bible";
 
   useEffect(() => {
     selectedIdRef.current = selectedId;
@@ -496,7 +499,7 @@ function App() {
   }, [sessionUser?.isAdmin, workspaceView]);
 
   useEffect(() => {
-    if (workspaceView === "admin") {
+    if (workspaceView !== "notes") {
       setExportOpen(false);
       setFindReplaceOpen(false);
       setCategoryMenuOpen(false);
@@ -510,7 +513,7 @@ function App() {
     setCategoryActionMenu(null);
     setPageActionMenu(null);
     setFindReplaceOpen(false);
-  }, [draft?.id, isAdminView]);
+  }, [draft?.id, isAdminView, isBibleView]);
 
   useEffect(() => {
     setExportSelection((current) => current.filter((id) => notes.some((note) => note.id === id)));
@@ -829,7 +832,7 @@ function App() {
   }, [dirty, draft, isLocked, saveDraft]);
 
   useEffect(() => {
-    if (isLocked || isPublicView || isAdminView) {
+    if (isLocked || isPublicView || isAdminView || isBibleView) {
       return;
     }
 
@@ -850,7 +853,7 @@ function App() {
 
     window.addEventListener("keydown", handleKeydown);
     return () => window.removeEventListener("keydown", handleKeydown);
-  }, [dirty, draft, isAdminView, isLocked, isPublicView, saveDraft]);
+  }, [dirty, draft, isAdminView, isBibleView, isLocked, isPublicView, saveDraft]);
 
   const editDraft = useCallback(
     (patch: Partial<Note>) => {
@@ -2736,28 +2739,37 @@ function App() {
           <span className="sidebar-action-label">新建分类</span>
         </button>
 
-        {sessionUser?.isAdmin ? (
-          <div className="sidebar-view-toggle">
-            <button
-              className={clsx("toolbar-button sidebar-view-button", workspaceView === "notes" && "active")}
-              onClick={() => setWorkspaceView("notes")}
-              title="笔记"
-              type="button"
-            >
-              <FileText size={15} />
-              笔记
-            </button>
+        <div className="sidebar-view-toggle">
+          <button
+            className={clsx("toolbar-button sidebar-view-button", workspaceView === "notes" && "active")}
+            onClick={() => setWorkspaceView("notes")}
+            title="笔记"
+            type="button"
+          >
+            <FileText size={15} />
+            笔记
+          </button>
+          <button
+            className={clsx("toolbar-button sidebar-view-button", workspaceView === "bible" && "active")}
+            onClick={() => setWorkspaceView("bible")}
+            title="读经"
+            type="button"
+          >
+            <BookOpen size={15} />
+            读经
+          </button>
+          {sessionUser?.isAdmin ? (
             <button
               className={clsx("toolbar-button sidebar-view-button", workspaceView === "admin" && "active")}
               onClick={() => setWorkspaceView("admin")}
-              title="管理台"
+              title="管理"
               type="button"
             >
               <ShieldCheck size={15} />
-              管理台
+              管理
             </button>
-          </div>
-        ) : null}
+          ) : null}
+        </div>
 
         <nav aria-label="页面列表" className="note-list">
           {query.trim() ? (
@@ -2836,16 +2848,35 @@ function App() {
       <section className="workspace">
         <header className="topbar">
           <div className="topbar-left">
-            {isAdminView ? <ShieldCheck size={17} /> : <FileText size={17} />}
+            {isAdminView ? (
+              <ShieldCheck size={17} />
+            ) : isBibleView ? (
+              <BookOpen size={17} />
+            ) : (
+              <FileText size={17} />
+            )}
             <span>
               {isAdminView
                 ? "管理员后台"
+                : isBibleView
+                  ? "读经"
                 : draft?.title ?? (noteCount > 0 ? "选择页面" : "还没有页面")}
             </span>
           </div>
 
           <div className="topbar-actions">
             {isAdminView ? (
+              <>
+                <button
+                  className="toolbar-button"
+                  onClick={() => setWorkspaceView("notes")}
+                  type="button"
+                >
+                  <FileText size={16} />
+                  返回笔记
+                </button>
+              </>
+            ) : isBibleView ? (
               <>
                 <button
                   className="toolbar-button"
@@ -3047,6 +3078,8 @@ function App() {
 
         {isAdminView && sessionUser ? (
           <AdminPanel currentUser={sessionUser} onSessionRefresh={bootstrap} />
+        ) : isBibleView ? (
+          <BibleReader onError={setAppError} />
         ) : draft && !isLoadingNote ? (
           <article className={clsx("page", draftCommentCount > 0 && "has-comments")}>
             <div className="page-heading-layout">

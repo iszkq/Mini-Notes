@@ -121,25 +121,31 @@ type CommentAnchorPositions = Record<string, CommentAnchorPosition>;
 
 type CommentCardLayout = {
   anchorTop: number;
-  branchHeight: number;
-  branchTop: number;
   connectorTop: number;
   connectorWidth: number;
+  diagonalAngle: number;
+  diagonalLength: number;
+  diagonalRun: number;
+  horizontalWidth: number;
   top: number;
 };
 
 type CommentCardStyle = CSSProperties & {
   "--comment-anchor-top"?: string;
-  "--comment-branch-height"?: string;
-  "--comment-branch-top"?: string;
   "--comment-connector-top"?: string;
   "--comment-connector-width"?: string;
+  "--comment-diagonal-angle"?: string;
+  "--comment-diagonal-length"?: string;
+  "--comment-diagonal-run"?: string;
+  "--comment-horizontal-width"?: string;
 };
 
 const IMAGE_URL_EXTENSION_PATTERN = /\.(?:avif|gif|jpe?g|png|svg|webp)(?:$|[?#])/i;
 const COMMENT_CARD_DEFAULT_HEIGHT = 96;
 const COMMENT_CARD_GAP = 10;
 const COMMENT_CARD_LEFT_INSET = 18;
+const COMMENT_CARD_CONNECTOR_TOP = 28;
+const COMMENT_CONNECTOR_DIAGONAL_RUN = 28;
 const COMMENT_CONNECTOR_TOP = 22;
 
 export function NotebookEditor({
@@ -1433,15 +1439,24 @@ function CommentsSidebar({
       const top = Math.max(0, previousBottom ? previousBottom + COMMENT_CARD_GAP : 0, desiredTop);
       const anchorTop = anchor ? anchor.centerY - top : COMMENT_CONNECTOR_TOP;
       const connectorTop = anchor
-        ? clamp(anchorTop, 14, Math.max(14, cardHeight - 14))
+        ? clamp(COMMENT_CARD_CONNECTOR_TOP, 14, Math.max(14, cardHeight - 14))
         : COMMENT_CONNECTOR_TOP;
+      const connectorWidth = anchor?.connectorWidth ?? 0;
+      const diagonalRun =
+        connectorWidth > 0
+          ? clamp(connectorWidth * 0.36, 14, COMMENT_CONNECTOR_DIAGONAL_RUN)
+          : 0;
+      const diagonalRise = connectorTop - anchorTop;
+      const diagonalLength = diagonalRun > 0 ? Math.hypot(diagonalRun, diagonalRise) : 0;
 
       layouts.set(comment.id, {
         anchorTop,
-        branchHeight: Math.abs(connectorTop - anchorTop),
-        branchTop: Math.min(anchorTop, connectorTop),
         connectorTop,
-        connectorWidth: anchor?.connectorWidth ?? 0,
+        connectorWidth,
+        diagonalAngle: diagonalRun > 0 ? Math.atan2(diagonalRise, diagonalRun) : 0,
+        diagonalLength,
+        diagonalRun,
+        horizontalWidth: Math.max(0, connectorWidth - diagonalRun),
         top
       });
 
@@ -1570,10 +1585,12 @@ function CommentsSidebar({
           const cardStyle: CommentCardStyle | undefined = layout
             ? {
                 "--comment-anchor-top": `${layout.anchorTop}px`,
-                "--comment-branch-height": `${layout.branchHeight}px`,
-                "--comment-branch-top": `${layout.branchTop}px`,
                 "--comment-connector-top": `${layout.connectorTop}px`,
                 "--comment-connector-width": `${layout.connectorWidth}px`,
+                "--comment-diagonal-angle": `${layout.diagonalAngle}rad`,
+                "--comment-diagonal-length": `${layout.diagonalLength}px`,
+                "--comment-diagonal-run": `${layout.diagonalRun}px`,
+                "--comment-horizontal-width": `${layout.horizontalWidth}px`,
                 top: `${layout.top}px`
               }
             : undefined;

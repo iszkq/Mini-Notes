@@ -5,6 +5,9 @@
   AdminUserCreateInput,
   AdminUserUpdateInput,
   AuthUser,
+  BibleNote,
+  BibleNoteCreateInput,
+  BibleNoteUpdateInput,
   LoginInput,
   Note,
   NoteBlock,
@@ -84,6 +87,19 @@ type DbAdminUserRow = {
   createdAt: string;
   noteCount: number | string;
   uploadCount: number | string;
+};
+
+type DbBibleNoteRow = {
+  id: string;
+  bookName: string;
+  chapterNumber: number | string;
+  verseStart: number | string;
+  verseEnd: number | string;
+  selectedText: string | null;
+  body: string;
+  tags: string;
+  createdAt: string;
+  updatedAt: string;
 };
 
 type PageLinkNoteRow = {
@@ -246,6 +262,22 @@ async function handleApi(
 
     if (segments[0] === "bible" && segments[1] === "search" && request.method === "GET") {
       return searchBible(request, env, url);
+    }
+
+    if (segments[0] === "bible" && segments[1] === "notes" && request.method === "GET" && !segments[2]) {
+      return listBibleNotes(env, user.id, url);
+    }
+
+    if (segments[0] === "bible" && segments[1] === "notes" && request.method === "POST" && !segments[2]) {
+      return createBibleNote(request, env, user.id);
+    }
+
+    if (segments[0] === "bible" && segments[1] === "notes" && segments[2] && request.method === "PATCH") {
+      return updateBibleNote(request, env, user.id, segments[2]);
+    }
+
+    if (segments[0] === "bible" && segments[1] === "notes" && segments[2] && request.method === "DELETE") {
+      return deleteBibleNote(env, user.id, segments[2]);
     }
 
     if (segments[0] === "emoji-index" && request.method === "GET") {
@@ -488,6 +520,261 @@ function bibleCacheHeaders(): HeadersInit {
   return {
     "Cache-Control": "public, max-age=3600"
   };
+}
+
+async function listBibleNotes(
+  env: Env,
+  userId: string,
+  url: URL
+): Promise<Response> {
+  const bookName = cleanBibleBookName(url.searchParams.get("book") ?? "");
+  const chapterNumber = Number(url.searchParams.get("chapter") ?? 0);
+
+  if (!bookName || !Number.isInteger(chapterNumber) || chapterNumber <= 0) {
+    return error("请选择有效的卷名和章节。", 400);
+  }
+
+  const { results } = await env.DB.prepare(
+    `SELECT id,
+            book_name AS bookName,
+            chapter_number AS chapterNumber,
+            verse_start AS verseStart,
+            verse_end AS verseEnd,
+            COALESCE(selected_text, '') AS selectedText,
+            body,
+            tags,
+            created_at AS createdAt,
+            updated_at AS updatedAt
+     FROM bible_notes
+     WHERE user_id = ?
+       AND book_name = ?
+       AND chapter_number = ?
+     ORDER BY verse_start ASC, verse_end ASC, updated_at DESC`
+  )
+    .bind(userId, bookName, chapterNumber)
+    .all<DbBibleNoteRow>();
+
+  return json(results.map(rowToBibleNote));
+}
+
+async function createBibleNote(
+  request: Request,
+  env: Env,
+  userId: string
+): Promise<Response> {
+  const body = await readJson<BibleNoteCreateInput>(request);
+  const noteInput = await cleanBibleNoteInput(request, env, body);
+  const now = new Date().toISOString();
+  const note: BibleNote = {
+    ...noteInput,
+    createdAt: now,
+    id: crypto.randomUUID(),
+    updatedAt: now
+  };
+
+  await env.DB.prepare(
+    `INSERT INTO bible_notes
+       (id, user_id, book_name, chapter_number, verse_start, verse_end, selected_text, body, tags, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+  )
+    .bind(
+      note.id,
+      userId,
+      note.bookName,
+      note.chapterNumber,
+      note.verseStart,
+      note.verseEnd,
+      note.selectedText,
+      note.body,
+      JSON.stringify(note.tags),
+      note.createdAt,
+      note.updatedAt
+    )
+    .run();
+
+  return json(note, 201);
+}
+
+async function updateBibleNote(
+  request: Request,
+  env: Env,
+  userId: string,
+  noteId: string
+): Promise<Response> {
+  const current = await findBibleNoteById(env, userId, noteId);
+  if (!current) {
+    return error("读经笔记不存在。", 404);
+  }
+
+  const body = await readJson<BibleNoteUpdateInput>(request);
+  const nextBody = body.body === undefined ? current.body : cleanBibleNoteBody(body.body);
+  const nextTags = body.tags === undefined ? current.tags : cleanBibleNoteTags(body.tags);
+
+  if (!nextBody) {
+    return error("笔记内容不能为空。", 400);
+  }
+
+  const updatedAt = new Date().toISOString();
+  await env.DB.prepare(
+    `UPDATE bible_notes
+     SET body = ?,
+         tags = ?,
+         updated_at = ?
+     WHERE id = ?
+       AND user_id = ?`
+  )
+    .bind(nextBody, JSON.stringify(nextTags), updatedAt, noteId, userId)
+    .run();
+
+  return json({
+    ...current,
+    body: nextBody,
+    tags: nextTags,
+    updatedAt
+  });
+}
+
+async function deleteBibleNote(
+  env: Env,
+  userId: string,
+  noteId: string
+): Promise<Response> {
+  const current = await findBibleNoteById(env, userId, noteId);
+  if (!current) {
+    return error("读经笔记不存在。", 404);
+  }
+
+  await env.DB.prepare(
+    "DELETE FROM bible_notes WHERE id = ? AND user_id = ?"
+  )
+    .bind(noteId, userId)
+    .run();
+
+  return json({ ok: true });
+}
+
+async function cleanBibleNoteInput(
+  request: Request,
+  env: Env,
+  input: BibleNoteCreateInput
+): Promise<Omit<BibleNote, "createdAt" | "id" | "updatedAt">> {
+  const bookName = cleanBibleBookName(input.bookName ?? "");
+  const chapterNumber = Number(input.chapterNumber ?? 0);
+  const verseStart = Number(input.verseStart ?? 0);
+  const verseEnd = Number(input.verseEnd ?? verseStart);
+  const body = cleanBibleNoteBody(input.body);
+  const selectedText = cleanBibleSelectedText(input.selectedText);
+  const tags = cleanBibleNoteTags(input.tags);
+
+  if (!bookName || !Number.isInteger(chapterNumber) || chapterNumber <= 0) {
+    throw new HttpError("请选择有效的卷名和章节。", 400);
+  }
+
+  if (
+    !Number.isInteger(verseStart) ||
+    !Number.isInteger(verseEnd) ||
+    verseStart <= 0 ||
+    verseEnd < verseStart
+  ) {
+    throw new HttpError("请选择有效的经文章节范围。", 400);
+  }
+
+  if (!body) {
+    throw new HttpError("笔记内容不能为空。", 400);
+  }
+
+  const data = await getBibleData(request, env);
+  const chapterVerses = data.verses.filter(
+    (verse) => verse.bookName === bookName && verse.chapterNumber === chapterNumber
+  );
+  const verseNumbers = new Set(chapterVerses.map((verse) => verse.verseNumber));
+
+  if (!verseNumbers.has(verseStart) || !verseNumbers.has(verseEnd)) {
+    throw new HttpError("经文不存在，请重新选择。", 400);
+  }
+
+  return {
+    body,
+    bookName,
+    chapterNumber,
+    selectedText,
+    tags,
+    verseEnd,
+    verseStart
+  };
+}
+
+async function findBibleNoteById(
+  env: Env,
+  userId: string,
+  noteId: string
+): Promise<BibleNote | null> {
+  const row = await env.DB.prepare(
+    `SELECT id,
+            book_name AS bookName,
+            chapter_number AS chapterNumber,
+            verse_start AS verseStart,
+            verse_end AS verseEnd,
+            COALESCE(selected_text, '') AS selectedText,
+            body,
+            tags,
+            created_at AS createdAt,
+            updated_at AS updatedAt
+     FROM bible_notes
+     WHERE id = ?
+       AND user_id = ?`
+  )
+    .bind(noteId, userId)
+    .first<DbBibleNoteRow>();
+
+  return row ? rowToBibleNote(row) : null;
+}
+
+function rowToBibleNote(row: DbBibleNoteRow): BibleNote {
+  return {
+    body: row.body,
+    bookName: row.bookName,
+    chapterNumber: Number(row.chapterNumber),
+    createdAt: row.createdAt,
+    id: row.id,
+    selectedText: row.selectedText ?? "",
+    tags: parseJsonStringArray(row.tags),
+    updatedAt: row.updatedAt,
+    verseEnd: Number(row.verseEnd),
+    verseStart: Number(row.verseStart)
+  };
+}
+
+function cleanBibleNoteBody(value: unknown): string {
+  return typeof value === "string" ? value.trim().slice(0, 6000) : "";
+}
+
+function cleanBibleSelectedText(value: unknown): string {
+  return typeof value === "string" ? value.trim().replace(/\s+/g, " ").slice(0, 1200) : "";
+}
+
+function cleanBibleNoteTags(value: unknown): string[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return Array.from(
+    new Set(
+      value
+        .filter((item): item is string => typeof item === "string")
+        .map((item) => item.trim().slice(0, 24))
+        .filter(Boolean)
+    )
+  ).slice(0, 8);
+}
+
+function parseJsonStringArray(value: string): string[] {
+  try {
+    const parsed = JSON.parse(value);
+    return cleanBibleNoteTags(parsed);
+  } catch {
+    return [];
+  }
 }
 
 async function getEmojiIndex(): Promise<Response> {

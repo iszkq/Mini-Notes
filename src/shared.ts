@@ -44,6 +44,34 @@ export type NoteUpdateInput = {
   isArchived?: boolean;
 };
 
+export type BibleNote = {
+  id: string;
+  bookName: string;
+  chapterNumber: number;
+  verseStart: number;
+  verseEnd: number;
+  selectedText: string;
+  body: string;
+  tags: string[];
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type BibleNoteCreateInput = {
+  bookName: string;
+  chapterNumber: number;
+  verseStart: number;
+  verseEnd?: number;
+  selectedText?: string;
+  body: string;
+  tags?: string[];
+};
+
+export type BibleNoteUpdateInput = {
+  body?: string;
+  tags?: string[];
+};
+
 export type LoginInput = {
   username: string;
   password: string;

@@ -1341,9 +1341,9 @@
 .note-comment-list.has-positioned-comments .note-comment-card::before {
   position: absolute;
   top: var(--comment-anchor-top, var(--comment-connector-top, 22px));
-  right: 100%;
+  right: calc(100% + var(--comment-diagonal-run, 0px));
   left: auto;
-  width: var(--comment-connector-width, 0);
+  width: var(--comment-horizontal-width, var(--comment-connector-width, 0));
   height: 0;
   border-top: 1px dotted rgba(239, 68, 68, 0.72);
   border-radius: 0;
@@ -1355,14 +1355,16 @@
 
 .note-comment-list.has-positioned-comments .note-comment-card::after {
   position: absolute;
-  top: var(--comment-branch-top, var(--comment-connector-top, 22px));
+  top: var(--comment-connector-top, 22px);
   right: 100%;
   left: auto;
-  width: 0;
-  height: var(--comment-branch-height, 0);
-  border-left: 1px dotted rgba(239, 68, 68, 0.72);
+  width: var(--comment-diagonal-length, 0);
+  height: 0;
+  border-top: 1px dotted rgba(239, 68, 68, 0.72);
   content: "";
   pointer-events: none;
+  transform: rotate(var(--comment-diagonal-angle, 0rad));
+  transform-origin: right center;
 }
 
 .note-comment-card.is-active {
@@ -1376,7 +1378,7 @@
 }
 
 .note-comment-card.is-active::after {
-  border-left-color: rgba(220, 38, 38, 0.9);
+  border-top-color: rgba(220, 38, 38, 0.9);
 }
 
 .note-comment-card.is-resolved {
@@ -1388,7 +1390,7 @@
 }
 
 .note-comment-card.is-resolved::after {
-  border-left-color: rgba(148, 163, 184, 0.68);
+  border-top-color: rgba(148, 163, 184, 0.68);
 }
 
 .note-comment-card.is-draft {
@@ -1546,6 +1548,10 @@
   }
 
   .note-comment-list.has-positioned-comments .note-comment-card::before {
+    content: none;
+  }
+
+  .note-comment-list.has-positioned-comments .note-comment-card::after {
     content: none;
   }
 

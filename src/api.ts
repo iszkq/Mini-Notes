@@ -4,6 +4,9 @@ import type {
   AdminUser,
   AdminUserCreateInput,
   AdminUserUpdateInput,
+  BibleNote,
+  BibleNoteCreateInput,
+  BibleNoteUpdateInput,
   LoginInput,
   Note,
   NoteCreateInput,
@@ -91,6 +94,40 @@ export async function enableShare(id: string): Promise<Note> {
 
 export async function disableShare(id: string): Promise<Note> {
   return apiRequest(`/api/notes/${encodeURIComponent(id)}/share`, {
+    method: "DELETE"
+  });
+}
+
+export async function listBibleNotes(
+  bookName: string,
+  chapterNumber: number
+): Promise<BibleNote[]> {
+  const params = new URLSearchParams({
+    book: bookName,
+    chapter: String(chapterNumber)
+  });
+  return apiRequest(`/api/bible/notes?${params}`);
+}
+
+export async function createBibleNote(input: BibleNoteCreateInput): Promise<BibleNote> {
+  return apiRequest("/api/bible/notes", {
+    method: "POST",
+    body: JSON.stringify(input)
+  });
+}
+
+export async function updateBibleNote(
+  id: string,
+  input: BibleNoteUpdateInput
+): Promise<BibleNote> {
+  return apiRequest(`/api/bible/notes/${encodeURIComponent(id)}`, {
+    method: "PATCH",
+    body: JSON.stringify(input)
+  });
+}
+
+export async function deleteBibleNote(id: string): Promise<{ ok: true }> {
+  return apiRequest(`/api/bible/notes/${encodeURIComponent(id)}`, {
     method: "DELETE"
   });
 }
