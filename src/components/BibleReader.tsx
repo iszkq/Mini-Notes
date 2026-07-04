@@ -443,11 +443,6 @@ export function BibleReader({ onError }: BibleReaderProps) {
     }
 
     const range = selection.getRangeAt(0);
-    if (!root.contains(range.commonAncestorContainer)) {
-      setSelectionToolbar(null);
-      return;
-    }
-
     const collectedSelection = collectBibleTextSelection(root, range);
     if (!collectedSelection) {
       setSelectionToolbar(null);
@@ -483,6 +478,40 @@ export function BibleReader({ onError }: BibleReaderProps) {
       top: toolbarTop
     });
   }, [selectedBook, selectedChapter]);
+
+  useEffect(() => {
+    if (!selectedBook || selectedChapter == null) {
+      return;
+    }
+
+    let frameId: number | null = null;
+    const scheduleSelectionCheck = () => {
+      if (frameId !== null) {
+        window.cancelAnimationFrame(frameId);
+      }
+
+      frameId = window.requestAnimationFrame(() => {
+        frameId = null;
+        handleBibleTextSelection();
+      });
+    };
+
+    document.addEventListener("selectionchange", scheduleSelectionCheck);
+    document.addEventListener("pointerup", scheduleSelectionCheck);
+    document.addEventListener("mouseup", scheduleSelectionCheck);
+    document.addEventListener("keyup", scheduleSelectionCheck);
+
+    return () => {
+      if (frameId !== null) {
+        window.cancelAnimationFrame(frameId);
+      }
+
+      document.removeEventListener("selectionchange", scheduleSelectionCheck);
+      document.removeEventListener("pointerup", scheduleSelectionCheck);
+      document.removeEventListener("mouseup", scheduleSelectionCheck);
+      document.removeEventListener("keyup", scheduleSelectionCheck);
+    };
+  }, [handleBibleTextSelection, selectedBook, selectedChapter]);
 
   const openNoteFromSelection = useCallback(() => {
     if (!selectionToolbar) {
