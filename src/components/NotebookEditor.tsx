@@ -100,9 +100,16 @@ type TextSelectionRange = {
 };
 
 type CommentComposer = {
+  anchorRect: CommentAnchorClientRect | null;
   body: string;
   range: TextSelectionRange;
   selectedText: string;
+};
+
+type CommentAnchorClientRect = {
+  bottom: number;
+  left: number;
+  right: number;
 };
 
 type CommentFilter = "open" | "all" | "resolved";
@@ -141,6 +148,17 @@ type CommentCardStyle = CSSProperties & {
   "--comment-horizontal-width"?: string;
 };
 
+type CommentSidebarItem =
+  | {
+      comment: NoteCommentThread;
+      id: string;
+      kind: "comment";
+    }
+  | {
+      id: string;
+      kind: "draft";
+    };
+
 const IMAGE_URL_EXTENSION_PATTERN = /\.(?:avif|gif|jpe?g|png|svg|webp)(?:$|[?#])/i;
 const COMMENT_CARD_DEFAULT_HEIGHT = 96;
 const COMMENT_CARD_GAP = 10;
@@ -149,6 +167,8 @@ const COMMENT_CARD_CONNECTOR_TOP = 28;
 const COMMENT_CONNECTOR_DIAGONAL_RUN = 28;
 const COMMENT_CONNECTOR_TOP = 22;
 const COMMENT_SAME_LINE_THRESHOLD = 8;
+const COMMENT_TEXT_CONNECTOR_OFFSET = -1;
+const COMMENT_DRAFT_ID = "__comment_draft__";
 
 export function NotebookEditor({
   findReplaceAnchorRef,
@@ -356,14 +376,14 @@ export function NotebookEditor({
 
     visibleComments.forEach((comment) => {
       const marker = root.querySelector<HTMLElement>(getCommentMarkerSelector(comment.id));
-      const markerRect = getFirstVisibleClientRect(marker);
+      const markerRect = getCommentAnchorClientRect(marker);
       if (!markerRect) {
         return;
       }
 
       nextPositions[comment.id] = {
         anchorLeft: markerRect.left,
-        centerY: markerRect.top - listRect.top + markerRect.height / 2,
+        centerY: markerRect.bottom - listRect.top + COMMENT_TEXT_CONNECTOR_OFFSET,
         connectorWidth: Math.max(
           24,
           listRect.left + COMMENT_CARD_LEFT_INSET - markerRect.right
@@ -411,7 +431,15 @@ export function NotebookEditor({
     setEditingCommentId(null);
     setEditingCommentBody("");
     setCommentFilter("open");
+    const selectionRect = getCurrentSelectionAnchorRect();
     setCommentComposer({
+      anchorRect: selectionRect
+        ? {
+            bottom: selectionRect.bottom,
+            left: selectionRect.left,
+            right: selectionRect.right
+          }
+        : null,
       body: "",
       range,
       selectedText: truncateCommentExcerpt(selectedText)
@@ -1397,6 +1425,56 @@ function CommentsSidebar({
   const commentCardRefs = useRef(new Map<string, HTMLElement>());
   const [commentCardHeights, setCommentCardHeights] = useState<Record<string, number>>({});
 
+  const draftAnchorPosition = useMemo<CommentAnchorPosition | null>(() => {
+    if (!commentComposer?.anchorRect || typeof window === "undefined") {
+      return null;
+    }
+
+    const commentList = document.querySelector<HTMLElement>(".note-comment-list");
+    if (!commentList) {
+      return null;
+    }
+
+    const listRect = commentList.getBoundingClientRect();
+    const anchorRect = commentComposer.anchorRect;
+    return {
+      anchorLeft: anchorRect.left,
+      centerY: anchorRect.bottom - listRect.top + COMMENT_TEXT_CONNECTOR_OFFSET,
+      connectorWidth: Math.max(
+        24,
+        listRect.left + COMMENT_CARD_LEFT_INSET - anchorRect.right
+      )
+    };
+  }, [commentComposer?.anchorRect]);
+
+  const sidebarAnchorPositions = useMemo(() => {
+    if (!draftAnchorPosition) {
+      return commentAnchorPositions;
+    }
+
+    return {
+      ...commentAnchorPositions,
+      [COMMENT_DRAFT_ID]: draftAnchorPosition
+    };
+  }, [commentAnchorPositions, draftAnchorPosition]);
+
+  const commentSidebarItems = useMemo<CommentSidebarItem[]>(() => {
+    const items: CommentSidebarItem[] = comments.map((comment) => ({
+      comment,
+      id: comment.id,
+      kind: "comment"
+    }));
+
+    if (commentComposer) {
+      items.push({
+        id: COMMENT_DRAFT_ID,
+        kind: "draft"
+      });
+    }
+
+    return items;
+  }, [commentComposer, comments]);
+
   useLayoutEffect(() => {
     if (typeof window === "undefined") {
       return;
@@ -1404,10 +1482,10 @@ function CommentsSidebar({
 
     const measureCards = () => {
       const nextHeights: Record<string, number> = {};
-      comments.forEach((comment) => {
-        const card = commentCardRefs.current.get(comment.id);
+      commentSidebarItems.forEach((item) => {
+        const card = commentCardRefs.current.get(item.id);
         if (card) {
-          nextHeights[comment.id] = Math.ceil(card.offsetHeight);
+          nextHeights[item.id] = Math.ceil(card.offsetHeight);
         }
       });
 
@@ -1421,28 +1499,28 @@ function CommentsSidebar({
     const resizeObserver =
       typeof ResizeObserver !== "undefined" ? new ResizeObserver(measureCards) : null;
 
-    comments.forEach((comment) => {
-      const card = commentCardRefs.current.get(comment.id);
+    commentSidebarItems.forEach((item) => {
+      const card = commentCardRefs.current.get(item.id);
       if (card) {
         resizeObserver?.observe(card);
       }
     });
 
     return () => resizeObserver?.disconnect();
-  }, [activeCommentId, comments, editingCommentBody, editingCommentId, readOnly]);
+  }, [activeCommentId, commentSidebarItems, editingCommentBody, editingCommentId, readOnly]);
 
-  const orderedComments = useMemo(
-    () => orderCommentsByAnchorPosition(comments, commentAnchorPositions),
-    [commentAnchorPositions, comments]
+  const orderedSidebarItems = useMemo(
+    () => orderCommentSidebarItemsByAnchorPosition(commentSidebarItems, sidebarAnchorPositions),
+    [commentSidebarItems, sidebarAnchorPositions]
   );
 
   const commentCardLayout = useMemo(() => {
     const layouts = new Map<string, CommentCardLayout>();
     let previousBottom = 0;
 
-    orderedComments.forEach((comment) => {
-      const anchor = commentAnchorPositions[comment.id];
-      const cardHeight = commentCardHeights[comment.id] ?? COMMENT_CARD_DEFAULT_HEIGHT;
+    orderedSidebarItems.forEach((item) => {
+      const anchor = sidebarAnchorPositions[item.id];
+      const cardHeight = commentCardHeights[item.id] ?? COMMENT_CARD_DEFAULT_HEIGHT;
       const desiredTop = anchor ? anchor.centerY - COMMENT_CONNECTOR_TOP : previousBottom;
       const top = Math.max(0, previousBottom ? previousBottom + COMMENT_CARD_GAP : 0, desiredTop);
       const anchorTop = anchor ? anchor.centerY - top : COMMENT_CONNECTOR_TOP;
@@ -1457,7 +1535,7 @@ function CommentsSidebar({
       const diagonalRise = connectorTop - anchorTop;
       const diagonalLength = diagonalRun > 0 ? Math.hypot(diagonalRun, diagonalRise) : 0;
 
-      layouts.set(comment.id, {
+      layouts.set(item.id, {
         anchorTop,
         connectorTop,
         connectorWidth,
@@ -1475,7 +1553,7 @@ function CommentsSidebar({
       listHeight: previousBottom,
       layouts
     };
-  }, [commentAnchorPositions, commentCardHeights, orderedComments]);
+  }, [commentCardHeights, orderedSidebarItems, sidebarAnchorPositions]);
   const commentListStyle: CSSProperties | undefined =
     commentCardLayout.listHeight > 0
       ? { minHeight: `${commentCardLayout.listHeight}px` }
@@ -1512,57 +1590,10 @@ function CommentsSidebar({
 
       {commentNotice ? <div className="note-comment-notice">{commentNotice}</div> : null}
 
-      {commentComposer ? (
-        <form
-          className="note-comment-card is-draft"
-          onSubmit={(event) => {
-            event.preventDefault();
-            onSaveComposer();
-          }}
-        >
-          <div className="note-comment-card__head">
-            <strong className="note-comment-card__title">
-              <MessageSquareText size={15} />
-              新批注
-            </strong>
-            <button
-              aria-label="取消新批注"
-              className="note-comment-card__icon-button"
-              onClick={onCancelComposer}
-              type="button"
-            >
-              <X size={14} />
-            </button>
-          </div>
-          <div className="note-comment-card__excerpt">
-            <span>原文</span>
-            <blockquote>{commentComposer.selectedText}</blockquote>
-          </div>
-          <textarea
-            autoFocus
-            className="note-comment-card__textarea"
-            onChange={(event) => onChangeComposerBody(event.target.value)}
-            onKeyDown={(event) => {
-              if ((event.ctrlKey || event.metaKey) && event.key === "Enter") {
-                event.preventDefault();
-                onSaveComposer();
-              }
-            }}
-            placeholder="输入批注，Ctrl+Enter 保存"
-            value={commentComposer.body}
-          />
-          <div className="note-comment-card__actions">
-            <button className="note-comment-card__button primary" type="submit">
-              保存批注
-            </button>
-          </div>
-        </form>
-      ) : null}
-
       <div
         className={getClassName(
           "note-comment-list",
-          comments.length > 0 ? "has-positioned-comments" : undefined
+          comments.length > 0 || commentComposer ? "has-positioned-comments" : undefined
         )}
         style={commentListStyle}
       >
@@ -1585,7 +1616,81 @@ function CommentsSidebar({
           </div>
         ) : null}
 
-        {orderedComments.map((comment) => {
+        {orderedSidebarItems.map((item) => {
+          if (item.kind === "draft") {
+            const layout = commentCardLayout.layouts.get(item.id);
+            const cardStyle: CommentCardStyle | undefined = layout
+              ? {
+                  "--comment-anchor-top": `${layout.anchorTop}px`,
+                  "--comment-connector-top": `${layout.connectorTop}px`,
+                  "--comment-connector-width": `${layout.connectorWidth}px`,
+                  "--comment-diagonal-angle": `${layout.diagonalAngle}rad`,
+                  "--comment-diagonal-length": `${layout.diagonalLength}px`,
+                  "--comment-diagonal-run": `${layout.diagonalRun}px`,
+                  "--comment-horizontal-width": `${layout.horizontalWidth}px`,
+                  top: `${layout.top}px`
+                }
+              : undefined;
+
+            return commentComposer ? (
+              <form
+                className="note-comment-card is-draft"
+                key={item.id}
+                onSubmit={(event) => {
+                  event.preventDefault();
+                  onSaveComposer();
+                }}
+                ref={(node) => {
+                  if (node) {
+                    commentCardRefs.current.set(item.id, node);
+                    return;
+                  }
+
+                  commentCardRefs.current.delete(item.id);
+                }}
+                style={cardStyle}
+              >
+                <div className="note-comment-card__head">
+                  <strong className="note-comment-card__title">
+                    <MessageSquareText size={15} />
+                    新批注
+                  </strong>
+                  <button
+                    aria-label="取消新批注"
+                    className="note-comment-card__icon-button"
+                    onClick={onCancelComposer}
+                    type="button"
+                  >
+                    <X size={14} />
+                  </button>
+                </div>
+                <div className="note-comment-card__excerpt">
+                  <span>原文</span>
+                  <blockquote>{commentComposer.selectedText}</blockquote>
+                </div>
+                <textarea
+                  autoFocus
+                  className="note-comment-card__textarea"
+                  onChange={(event) => onChangeComposerBody(event.target.value)}
+                  onKeyDown={(event) => {
+                    if ((event.ctrlKey || event.metaKey) && event.key === "Enter") {
+                      event.preventDefault();
+                      onSaveComposer();
+                    }
+                  }}
+                  placeholder="输入批注，Ctrl+Enter 保存"
+                  value={commentComposer.body}
+                />
+                <div className="note-comment-card__actions">
+                  <button className="note-comment-card__button primary" type="submit">
+                    保存批注
+                  </button>
+                </div>
+              </form>
+            ) : null;
+          }
+
+          const comment = item.comment;
           const isActive = activeCommentId === comment.id;
           const isEditing = editingCommentId === comment.id;
           const statusLabel = comment.resolved ? "已解决" : "待处理";
@@ -2308,6 +2413,36 @@ function getCurrentSelectionRect(): DOMRect | null {
   return Array.from(range.getClientRects()).map(getUsableRect).find(Boolean) ?? null;
 }
 
+function getCurrentSelectionAnchorRect(): DOMRect | null {
+  const selection = window.getSelection();
+  if (!selection || selection.rangeCount === 0) {
+    return null;
+  }
+
+  const range = selection.getRangeAt(0);
+  return getLastVisualRect(Array.from(range.getClientRects())) ?? getUsableRect(range.getBoundingClientRect());
+}
+
+function getLastVisualRect(rects: DOMRect[]): DOMRect | null {
+  const usableRects = rects.filter((rect) => rect.width > 0 || rect.height > 0);
+  if (usableRects.length === 0) {
+    return null;
+  }
+
+  return usableRects.reduce((lastRect, rect) => {
+    const bottomDelta = rect.bottom - lastRect.bottom;
+    if (bottomDelta > 0.5) {
+      return rect;
+    }
+
+    if (Math.abs(bottomDelta) <= 0.5 && rect.right > lastRect.right) {
+      return rect;
+    }
+
+    return lastRect;
+  });
+}
+
 function getUsableRect(rect: DOMRect): DOMRect | null {
   return rect.width > 0 || rect.height > 0 ? rect : null;
 }
@@ -2579,15 +2714,14 @@ function getCommentMarkerSelector(commentId: string): string {
   return `.note-comment-mark[data-comment-id="${escapeAttributeSelectorValue(commentId)}"]`;
 }
 
-function getFirstVisibleClientRect(element: HTMLElement | null): DOMRect | null {
+function getCommentAnchorClientRect(element: HTMLElement | null): DOMRect | null {
   if (!element) {
     return null;
   }
 
-  for (const rect of element.getClientRects()) {
-    if (rect.width > 0 && rect.height > 0) {
-      return rect;
-    }
+  const lastRect = getLastVisualRect(Array.from(element.getClientRects()));
+  if (lastRect) {
+    return lastRect;
   }
 
   const rect = element.getBoundingClientRect();
@@ -2619,15 +2753,15 @@ function areCommentAnchorPositionsEqual(
   });
 }
 
-function orderCommentsByAnchorPosition(
-  comments: NoteCommentThread[],
+function orderCommentSidebarItemsByAnchorPosition(
+  items: CommentSidebarItem[],
   anchors: CommentAnchorPositions
-): NoteCommentThread[] {
-  return comments
-    .map((comment, index) => ({
-      anchor: anchors[comment.id],
-      comment,
-      index
+): CommentSidebarItem[] {
+  return items
+    .map((item, index) => ({
+      anchor: anchors[item.id],
+      index,
+      item
     }))
     .sort((first, second) => {
       if (first.anchor && second.anchor) {
@@ -2652,7 +2786,7 @@ function orderCommentsByAnchorPosition(
 
       return first.index - second.index;
     })
-    .map(({ comment }) => comment);
+    .map(({ item }) => item);
 }
 
 function areNumberRecordsEqual(first: Record<string, number>, second: Record<string, number>) {
