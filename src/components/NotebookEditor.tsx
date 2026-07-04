@@ -26,9 +26,11 @@ import {
 import {
   useCallback,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
+  type CSSProperties,
   type PointerEvent as ReactPointerEvent,
   type RefObject
 } from "react";
@@ -110,7 +112,35 @@ type PasteUploadAnchor = {
   top: number;
 };
 
+type CommentAnchorPosition = {
+  centerY: number;
+  connectorWidth: number;
+};
+
+type CommentAnchorPositions = Record<string, CommentAnchorPosition>;
+
+type CommentCardLayout = {
+  anchorTop: number;
+  branchHeight: number;
+  branchTop: number;
+  connectorTop: number;
+  connectorWidth: number;
+  top: number;
+};
+
+type CommentCardStyle = CSSProperties & {
+  "--comment-anchor-top"?: string;
+  "--comment-branch-height"?: string;
+  "--comment-branch-top"?: string;
+  "--comment-connector-top"?: string;
+  "--comment-connector-width"?: string;
+};
+
 const IMAGE_URL_EXTENSION_PATTERN = /\.(?:avif|gif|jpe?g|png|svg|webp)(?:$|[?#])/i;
+const COMMENT_CARD_DEFAULT_HEIGHT = 96;
+const COMMENT_CARD_GAP = 10;
+const COMMENT_CARD_LEFT_INSET = 18;
+const COMMENT_CONNECTOR_TOP = 22;
 
 export function NotebookEditor({
   findReplaceAnchorRef,
@@ -127,6 +157,7 @@ export function NotebookEditor({
   const [bibleInsertTarget, setBibleInsertTarget] = useState<BibleInsertTarget | null>(null);
   const [emojiPickerOpen, setEmojiPickerOpen] = useState(false);
   const [activeCommentId, setActiveCommentId] = useState<string | null>(null);
+  const [commentAnchorPositions, setCommentAnchorPositions] = useState<CommentAnchorPositions>({});
   const [commentComposer, setCommentComposer] = useState<CommentComposer | null>(null);
   const [commentFilter, setCommentFilter] = useState<CommentFilter>("open");
   const [commentNotice, setCommentNotice] = useState<string | null>(null);
@@ -298,6 +329,43 @@ export function NotebookEditor({
     () => getVisibleComments(comments, commentFilter),
     [commentFilter, comments]
   );
+
+  const updateCommentAnchorPositions = useCallback(() => {
+    if (typeof window === "undefined" || visibleComments.length === 0) {
+      setCommentAnchorPositions((current) => (Object.keys(current).length === 0 ? current : {}));
+      return;
+    }
+
+    const root = editorShellRef.current;
+    const commentList = root?.querySelector<HTMLElement>(".note-comment-list");
+    if (!root || !commentList) {
+      setCommentAnchorPositions((current) => (Object.keys(current).length === 0 ? current : {}));
+      return;
+    }
+
+    const listRect = commentList.getBoundingClientRect();
+    const nextPositions: CommentAnchorPositions = {};
+
+    visibleComments.forEach((comment) => {
+      const marker = root.querySelector<HTMLElement>(getCommentMarkerSelector(comment.id));
+      const markerRect = getFirstVisibleClientRect(marker);
+      if (!markerRect) {
+        return;
+      }
+
+      nextPositions[comment.id] = {
+        centerY: markerRect.top - listRect.top + markerRect.height / 2,
+        connectorWidth: Math.max(
+          24,
+          listRect.left + COMMENT_CARD_LEFT_INSET - markerRect.right
+        )
+      };
+    });
+
+    setCommentAnchorPositions((current) =>
+      areCommentAnchorPositionsEqual(current, nextPositions) ? current : nextPositions
+    );
+  }, [visibleComments]);
 
   const getCurrentTextBlock = useCallback(() => {
     return editor.getTextCursorPosition().block as TextBlock;
@@ -974,6 +1042,41 @@ export function NotebookEditor({
     }
   }, [activeCommentId, commentFilter, comments]);
 
+  useLayoutEffect(() => {
+    if (typeof window === "undefined") {
+      return;
+    }
+
+    let frame = 0;
+    const scheduleUpdate = () => {
+      window.cancelAnimationFrame(frame);
+      frame = window.requestAnimationFrame(updateCommentAnchorPositions);
+    };
+
+    scheduleUpdate();
+
+    const root = editorShellRef.current;
+    const resizeObserver =
+      typeof ResizeObserver !== "undefined" ? new ResizeObserver(scheduleUpdate) : null;
+
+    if (root) {
+      resizeObserver?.observe(root);
+      root
+        .querySelectorAll<HTMLElement>(".note-editor-main, .note-comments-sidebar, .note-comment-list")
+        .forEach((element) => resizeObserver?.observe(element));
+    }
+
+    window.addEventListener("resize", scheduleUpdate);
+    window.addEventListener("scroll", scheduleUpdate, true);
+
+    return () => {
+      window.cancelAnimationFrame(frame);
+      resizeObserver?.disconnect();
+      window.removeEventListener("resize", scheduleUpdate);
+      window.removeEventListener("scroll", scheduleUpdate, true);
+    };
+  }, [updateCommentAnchorPositions]);
+
   useEffect(() => {
     const root = editorShellRef.current;
     if (!root) {
@@ -1141,6 +1244,7 @@ export function NotebookEditor({
         {comments.length > 0 || commentComposer || commentNotice ? (
           <CommentsSidebar
             activeCommentId={activeCommentId}
+            commentAnchorPositions={commentAnchorPositions}
             commentComposer={commentComposer}
             commentFilter={commentFilter}
             commentNotice={commentNotice}
@@ -1214,6 +1318,7 @@ export function NotebookEditor({
 
 type CommentsSidebarProps = {
   activeCommentId: string | null;
+  commentAnchorPositions: CommentAnchorPositions;
   commentComposer: CommentComposer | null;
   commentFilter: CommentFilter;
   commentNotice: string | null;
@@ -1239,6 +1344,7 @@ type CommentsSidebarProps = {
 
 function CommentsSidebar({
   activeCommentId,
+  commentAnchorPositions,
   commentComposer,
   commentFilter,
   commentNotice,
@@ -1279,6 +1385,78 @@ function CommentsSidebar({
       value: "resolved"
     }
   ];
+  const commentCardRefs = useRef(new Map<string, HTMLElement>());
+  const [commentCardHeights, setCommentCardHeights] = useState<Record<string, number>>({});
+
+  useLayoutEffect(() => {
+    if (typeof window === "undefined") {
+      return;
+    }
+
+    const measureCards = () => {
+      const nextHeights: Record<string, number> = {};
+      comments.forEach((comment) => {
+        const card = commentCardRefs.current.get(comment.id);
+        if (card) {
+          nextHeights[comment.id] = Math.ceil(card.offsetHeight);
+        }
+      });
+
+      setCommentCardHeights((current) =>
+        areNumberRecordsEqual(current, nextHeights) ? current : nextHeights
+      );
+    };
+
+    measureCards();
+
+    const resizeObserver =
+      typeof ResizeObserver !== "undefined" ? new ResizeObserver(measureCards) : null;
+
+    comments.forEach((comment) => {
+      const card = commentCardRefs.current.get(comment.id);
+      if (card) {
+        resizeObserver?.observe(card);
+      }
+    });
+
+    return () => resizeObserver?.disconnect();
+  }, [activeCommentId, comments, editingCommentBody, editingCommentId, readOnly]);
+
+  const commentCardLayout = useMemo(() => {
+    const layouts = new Map<string, CommentCardLayout>();
+    let previousBottom = 0;
+
+    comments.forEach((comment) => {
+      const anchor = commentAnchorPositions[comment.id];
+      const cardHeight = commentCardHeights[comment.id] ?? COMMENT_CARD_DEFAULT_HEIGHT;
+      const desiredTop = anchor ? anchor.centerY - COMMENT_CONNECTOR_TOP : previousBottom;
+      const top = Math.max(0, previousBottom ? previousBottom + COMMENT_CARD_GAP : 0, desiredTop);
+      const anchorTop = anchor ? anchor.centerY - top : COMMENT_CONNECTOR_TOP;
+      const connectorTop = anchor
+        ? clamp(anchorTop, 14, Math.max(14, cardHeight - 14))
+        : COMMENT_CONNECTOR_TOP;
+
+      layouts.set(comment.id, {
+        anchorTop,
+        branchHeight: Math.abs(connectorTop - anchorTop),
+        branchTop: Math.min(anchorTop, connectorTop),
+        connectorTop,
+        connectorWidth: anchor?.connectorWidth ?? 0,
+        top
+      });
+
+      previousBottom = top + cardHeight;
+    });
+
+    return {
+      listHeight: previousBottom,
+      layouts
+    };
+  }, [commentAnchorPositions, commentCardHeights, comments]);
+  const commentListStyle: CSSProperties | undefined =
+    commentCardLayout.listHeight > 0
+      ? { minHeight: `${commentCardLayout.listHeight}px` }
+      : undefined;
 
   return (
     <aside className="note-comments-sidebar" aria-label="批注">
@@ -1358,7 +1536,13 @@ function CommentsSidebar({
         </form>
       ) : null}
 
-      <div className="note-comment-list">
+      <div
+        className={getClassName(
+          "note-comment-list",
+          comments.length > 0 ? "has-positioned-comments" : undefined
+        )}
+        style={commentListStyle}
+      >
         {comments.length === 0 && !commentComposer ? (
           <div className="note-comment-empty">
             <span className="note-comment-empty__icon" aria-hidden="true">
@@ -1382,6 +1566,17 @@ function CommentsSidebar({
           const isActive = activeCommentId === comment.id;
           const isEditing = editingCommentId === comment.id;
           const statusLabel = comment.resolved ? "已解决" : "待处理";
+          const layout = commentCardLayout.layouts.get(comment.id);
+          const cardStyle: CommentCardStyle | undefined = layout
+            ? {
+                "--comment-anchor-top": `${layout.anchorTop}px`,
+                "--comment-branch-height": `${layout.branchHeight}px`,
+                "--comment-branch-top": `${layout.branchTop}px`,
+                "--comment-connector-top": `${layout.connectorTop}px`,
+                "--comment-connector-width": `${layout.connectorWidth}px`,
+                top: `${layout.top}px`
+              }
+            : undefined;
 
           return (
             <article
@@ -1391,6 +1586,15 @@ function CommentsSidebar({
                 comment.resolved ? "is-resolved" : undefined
               )}
               key={comment.id}
+              ref={(node) => {
+                if (node) {
+                  commentCardRefs.current.set(comment.id, node);
+                  return;
+                }
+
+                commentCardRefs.current.delete(comment.id);
+              }}
+              style={cardStyle}
             >
               <div className="note-comment-card__head">
                 <button
@@ -2348,6 +2552,55 @@ function scrollCommentIntoView(root: HTMLElement | null, commentId: string) {
 
 function getCommentMarkerSelector(commentId: string): string {
   return `.note-comment-mark[data-comment-id="${escapeAttributeSelectorValue(commentId)}"]`;
+}
+
+function getFirstVisibleClientRect(element: HTMLElement | null): DOMRect | null {
+  if (!element) {
+    return null;
+  }
+
+  for (const rect of element.getClientRects()) {
+    if (rect.width > 0 && rect.height > 0) {
+      return rect;
+    }
+  }
+
+  const rect = element.getBoundingClientRect();
+  return rect.width > 0 && rect.height > 0 ? rect : null;
+}
+
+function areCommentAnchorPositionsEqual(
+  first: CommentAnchorPositions,
+  second: CommentAnchorPositions
+): boolean {
+  const firstKeys = Object.keys(first);
+  const secondKeys = Object.keys(second);
+  if (firstKeys.length !== secondKeys.length) {
+    return false;
+  }
+
+  return firstKeys.every((key) => {
+    const firstPosition = first[key];
+    const secondPosition = second[key];
+    if (!secondPosition) {
+      return false;
+    }
+
+    return (
+      Math.abs(firstPosition.centerY - secondPosition.centerY) < 0.5 &&
+      Math.abs(firstPosition.connectorWidth - secondPosition.connectorWidth) < 0.5
+    );
+  });
+}
+
+function areNumberRecordsEqual(first: Record<string, number>, second: Record<string, number>) {
+  const firstKeys = Object.keys(first);
+  const secondKeys = Object.keys(second);
+  if (firstKeys.length !== secondKeys.length) {
+    return false;
+  }
+
+  return firstKeys.every((key) => Math.abs(first[key] - second[key]) < 0.5);
 }
 
 function escapeAttributeSelectorValue(value: string): string {

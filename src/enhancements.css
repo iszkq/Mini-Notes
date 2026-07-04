@@ -1243,6 +1243,317 @@
   box-shadow: none;
 }
 
+.note-editor-layout.has-comments {
+  grid-template-columns: minmax(0, 1fr) 220px;
+}
+
+.note-editor-layout.is-readonly.has-comments {
+  grid-template-columns: minmax(0, 1fr) minmax(200px, 220px);
+}
+
+.note-comments-sidebar {
+  gap: 8px;
+  min-height: 52vh;
+  padding-left: 18px;
+  overflow: visible;
+  border-left: 1px solid #e2e5ea;
+  scrollbar-width: auto;
+}
+
+.note-comments-sidebar__head {
+  display: none;
+}
+
+.note-comments-sidebar__summary {
+  gap: 1px;
+}
+
+.note-comments-sidebar__summary strong {
+  color: #4b5563;
+  font-size: 0.78rem;
+  font-weight: 800;
+}
+
+.note-comments-sidebar__summary small {
+  color: #9ca3af;
+  font-size: 0.66rem;
+}
+
+.note-comments-sidebar__count {
+  min-width: 22px;
+  height: 22px;
+  color: #b91c1c;
+  background: #fee2e2;
+  font-size: 0.68rem;
+}
+
+.note-comments-sidebar__tabs {
+  display: none;
+}
+
+.note-comments-sidebar__tab {
+  min-height: 24px;
+  border-radius: 3px;
+  color: #6b7280;
+  font-size: 0.68rem;
+}
+
+.note-comments-sidebar__tab b {
+  min-width: 16px;
+  height: 16px;
+  font-size: 0.62rem;
+}
+
+.note-comments-sidebar__tab:hover,
+.note-comments-sidebar__tab.is-active {
+  color: #b91c1c;
+  box-shadow: none;
+}
+
+.note-comment-list {
+  position: relative;
+  display: block;
+}
+
+.note-comment-list.has-positioned-comments .note-comment-card {
+  position: absolute;
+  right: 0;
+  left: 0;
+}
+
+.note-comment-card {
+  gap: 6px;
+  padding: 7px 8px;
+  border-color: #e5e7eb;
+  border-radius: 2px;
+  background: #ffffff;
+  box-shadow: none;
+}
+
+.note-comment-card::before {
+  content: none;
+}
+
+.note-comment-card::after {
+  content: none;
+}
+
+.note-comment-list.has-positioned-comments .note-comment-card::before {
+  position: absolute;
+  top: var(--comment-anchor-top, var(--comment-connector-top, 22px));
+  right: 100%;
+  left: auto;
+  width: var(--comment-connector-width, 0);
+  height: 0;
+  border-top: 1px dotted rgba(239, 68, 68, 0.72);
+  border-radius: 0;
+  background: transparent;
+  content: "";
+  opacity: 1;
+  pointer-events: none;
+}
+
+.note-comment-list.has-positioned-comments .note-comment-card::after {
+  position: absolute;
+  top: var(--comment-branch-top, var(--comment-connector-top, 22px));
+  right: 100%;
+  left: auto;
+  width: 0;
+  height: var(--comment-branch-height, 0);
+  border-left: 1px dotted rgba(239, 68, 68, 0.72);
+  content: "";
+  pointer-events: none;
+}
+
+.note-comment-card.is-active {
+  border-color: rgba(239, 68, 68, 0.68);
+  background: #fffafa;
+  box-shadow: 0 0 0 1px rgba(239, 68, 68, 0.16);
+}
+
+.note-comment-card.is-active::before {
+  border-top-color: rgba(220, 38, 38, 0.9);
+}
+
+.note-comment-card.is-active::after {
+  border-left-color: rgba(220, 38, 38, 0.9);
+}
+
+.note-comment-card.is-resolved {
+  background: #f8fafc;
+}
+
+.note-comment-card.is-resolved::before {
+  border-top-color: rgba(148, 163, 184, 0.68);
+}
+
+.note-comment-card.is-resolved::after {
+  border-left-color: rgba(148, 163, 184, 0.68);
+}
+
+.note-comment-card.is-draft {
+  border-color: rgba(239, 68, 68, 0.46);
+  background: #fffafa;
+}
+
+.note-comment-card__head {
+  align-items: flex-start;
+}
+
+.note-comment-card__focus {
+  gap: 1px;
+}
+
+.note-comment-card__title {
+  gap: 4px;
+  color: #6b7280;
+  font-size: 0.7rem;
+  font-weight: 750;
+}
+
+.note-comment-card__title svg {
+  width: 12px;
+  height: 12px;
+}
+
+.note-comment-card__focus:hover .note-comment-card__title {
+  color: #b91c1c;
+}
+
+.note-comment-card__focus small {
+  color: #9ca3af;
+  font-size: 0.62rem;
+  font-weight: 650;
+}
+
+.note-comment-card__status {
+  display: none;
+}
+
+.note-comment-card:not(.is-draft) .note-comment-card__excerpt {
+  display: none;
+}
+
+.note-comment-card__excerpt {
+  gap: 3px;
+}
+
+.note-comment-card__excerpt > span {
+  color: #9ca3af;
+  font-size: 0.64rem;
+}
+
+.note-comment-card__excerpt blockquote {
+  padding: 6px 7px;
+  border-left-color: #fca5a5;
+  border-radius: 2px;
+  color: #6b7280;
+  background: #fff1f2;
+  font-size: 0.72rem;
+  line-height: 1.45;
+}
+
+.note-comment-card__body {
+  color: #374151;
+  font-size: 0.78rem;
+  line-height: 1.45;
+}
+
+.note-comment-card.is-resolved .note-comment-card__body {
+  color: #6b7280;
+}
+
+.note-comment-card:not(.is-draft):not(:hover):not(:focus-within) .note-comment-card__actions {
+  display: none;
+}
+
+.note-comment-card__actions {
+  gap: 5px;
+}
+
+.note-comment-card__button,
+.note-comment-card__mini-button,
+.note-comment-card__icon-button {
+  min-height: 24px;
+  border-radius: 3px;
+  font-size: 0.68rem;
+  font-weight: 750;
+}
+
+.note-comment-card__button.primary {
+  border-color: #dc2626;
+  background: #dc2626;
+}
+
+.note-comment-card__button.primary:hover {
+  border-color: #b91c1c;
+  background: #b91c1c;
+}
+
+.note-comment-card__textarea {
+  min-height: 76px;
+  border-radius: 3px;
+  font-size: 0.78rem;
+}
+
+.note-comment-card__textarea:focus {
+  border-color: rgba(239, 68, 68, 0.62);
+  box-shadow: 0 0 0 3px rgba(239, 68, 68, 0.12);
+}
+
+.note-comment-mark {
+  border: 0;
+  border-bottom: 1px dotted rgba(239, 68, 68, 0.78);
+  border-radius: 1px;
+  background: rgba(254, 202, 202, 0.48);
+  box-shadow: inset 0 0 0 1px rgba(239, 68, 68, 0.18);
+  box-decoration-break: clone;
+  -webkit-box-decoration-break: clone;
+}
+
+.note-comment-mark:hover,
+.note-comment-mark.is-active {
+  background: rgba(254, 202, 202, 0.72);
+  border-bottom-color: #dc2626;
+  box-shadow: inset 0 0 0 1px rgba(220, 38, 38, 0.38);
+}
+
+.note-comment-mark.is-resolved:not(.is-active) {
+  background: rgba(226, 232, 240, 0.62);
+  border-bottom-color: rgba(100, 116, 139, 0.58);
+  box-shadow: inset 0 0 0 1px rgba(148, 163, 184, 0.24);
+}
+
+@media (max-width: 760px) {
+  .note-comments-sidebar {
+    min-height: 0;
+    padding-left: 0;
+    overflow: visible;
+    border-left: 0;
+  }
+
+  .note-comment-list.has-positioned-comments {
+    display: grid;
+    gap: 8px;
+    min-height: 0 !important;
+  }
+
+  .note-comment-list.has-positioned-comments .note-comment-card {
+    position: relative;
+    top: auto !important;
+    right: auto;
+    left: auto;
+  }
+
+  .note-comment-list.has-positioned-comments .note-comment-card::before {
+    content: none;
+  }
+
+  .note-comment-card:not(.is-draft):not(:hover):not(:focus-within) .note-comment-card__actions {
+    display: flex;
+  }
+}
+
 .collapsible-content-block {
   overflow: hidden;
   border: 1px solid #e8e2d7;
