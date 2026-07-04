@@ -1129,12 +1129,12 @@ function collectBibleTextSelection(
         return;
       }
 
-      const intersection = getRangeIntersection(range, element);
-      if (!intersection) {
+      const selection = collectElementTextSelection(range, element);
+      if (!selection) {
         return;
       }
 
-      const text = cleanSelectedBibleText(intersection.toString());
+      const text = cleanSelectedBibleText(selection.text);
       if (!text) {
         return;
       }
@@ -1143,8 +1143,7 @@ function collectBibleTextSelection(
         text,
         verseNumber
       });
-      rects.push(...Array.from(intersection.getClientRects()));
-      intersection.detach();
+      rects.push(...selection.rects);
     }
   );
 
@@ -1172,28 +1171,40 @@ function collectBibleTextSelection(
   };
 }
 
-function getRangeIntersection(range: Range, element: HTMLElement): Range | null {
-  const elementRange = document.createRange();
-  elementRange.selectNodeContents(element);
+function collectElementTextSelection(
+  range: Range,
+  element: HTMLElement
+): { rects: DOMRect[]; text: string } | null {
+  const rects: DOMRect[] = [];
+  const textParts: string[] = [];
+  const walker = document.createTreeWalker(element, NodeFilter.SHOW_TEXT);
+  let node = walker.nextNode();
 
-  if (
-    range.compareBoundaryPoints(Range.END_TO_START, elementRange) <= 0 ||
-    range.compareBoundaryPoints(Range.START_TO_END, elementRange) >= 0
-  ) {
-    elementRange.detach();
-    return null;
+  while (node) {
+    const textNode = node as Text;
+    const nodeText = textNode.nodeValue ?? "";
+    if (nodeText && range.intersectsNode(textNode)) {
+      const startOffset = range.startContainer === textNode ? range.startOffset : 0;
+      const endOffset = range.endContainer === textNode ? range.endOffset : nodeText.length;
+      const start = clamp(startOffset, 0, nodeText.length);
+      const end = clamp(endOffset, start, nodeText.length);
+      const text = nodeText.slice(start, end);
+
+      if (text) {
+        const textRange = document.createRange();
+        textRange.setStart(textNode, start);
+        textRange.setEnd(textNode, end);
+
+        textParts.push(text);
+        rects.push(...Array.from(textRange.getClientRects()));
+        textRange.detach();
+      }
+    }
+
+    node = walker.nextNode();
   }
 
-  const intersection = range.cloneRange();
-  if (intersection.compareBoundaryPoints(Range.START_TO_START, elementRange) < 0) {
-    intersection.setStart(elementRange.startContainer, elementRange.startOffset);
-  }
-  if (intersection.compareBoundaryPoints(Range.END_TO_END, elementRange) > 0) {
-    intersection.setEnd(elementRange.endContainer, elementRange.endOffset);
-  }
-
-  elementRange.detach();
-  return intersection;
+  return textParts.length > 0 ? { rects, text: textParts.join("") } : null;
 }
 
 function findMatchingBibleNote(
