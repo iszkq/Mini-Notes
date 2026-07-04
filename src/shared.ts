@@ -51,10 +51,16 @@ export type BibleNote = {
   verseStart: number;
   verseEnd: number;
   selectedText: string;
+  selectedVerses: BibleNoteSelectedVerse[];
   body: string;
   tags: string[];
   createdAt: string;
   updatedAt: string;
+};
+
+export type BibleNoteSelectedVerse = {
+  verseNumber: number;
+  text: string;
 };
 
 export type BibleNoteCreateInput = {
@@ -63,6 +69,7 @@ export type BibleNoteCreateInput = {
   verseStart: number;
   verseEnd?: number;
   selectedText?: string;
+  selectedVerses?: BibleNoteSelectedVerse[];
   body: string;
   tags?: string[];
 };

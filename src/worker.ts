@@ -1,4 +1,4 @@
-﻿import type {
+import type {
   AdminUpload,
   AdminUploadUpdateInput,
   AdminUser,
@@ -7,6 +7,7 @@
   AuthUser,
   BibleNote,
   BibleNoteCreateInput,
+  BibleNoteSelectedVerse,
   BibleNoteUpdateInput,
   LoginInput,
   Note,
@@ -96,10 +97,13 @@ type DbBibleNoteRow = {
   verseStart: number | string;
   verseEnd: number | string;
   selectedText: string | null;
+  selectedRanges?: string | null;
   body: string;
   tags: string;
   createdAt: string;
   updatedAt: string;
+  contentKey?: string | null;
+  contentSize?: number | string | null;
 };
 
 type PageLinkNoteRow = {
@@ -133,6 +137,7 @@ const SESSION_TTL_SECONDS = 60 * 60 * 24 * 30;
 const PBKDF2_ITERATIONS = 60000;
 const LEGACY_PBKDF2_ITERATIONS = [210000];
 const NOTE_CONTENT_OBJECT_PREFIX = "note-content";
+const BIBLE_NOTE_CONTENT_OBJECT_PREFIX = "bible-note-content";
 const NOTE_SEARCH_TEXT_MAX_BYTES = 16 * 1024;
 const NOTE_SUMMARY_MAX_BYTES = 512;
 const NOTE_SEARCH_PATTERN_MAX_BYTES = 50;
@@ -541,10 +546,13 @@ async function listBibleNotes(
             verse_start AS verseStart,
             verse_end AS verseEnd,
             COALESCE(selected_text, '') AS selectedText,
+            COALESCE(selected_ranges, '[]') AS selectedRanges,
             body,
             tags,
             created_at AS createdAt,
-            updated_at AS updatedAt
+            updated_at AS updatedAt,
+            content_key AS contentKey,
+            content_size AS contentSize
      FROM bible_notes
      WHERE user_id = ?
        AND book_name = ?
@@ -554,7 +562,11 @@ async function listBibleNotes(
     .bind(userId, bookName, chapterNumber)
     .all<DbBibleNoteRow>();
 
-  return json(results.map(rowToBibleNote));
+  const notes = await Promise.all(
+    results.map((row) => materializeBibleNote(env, userId, row))
+  );
+
+  return json(notes);
 }
 
 async function createBibleNote(
@@ -571,11 +583,12 @@ async function createBibleNote(
     id: crypto.randomUUID(),
     updatedAt: now
   };
+  const storedBody = await persistBibleNoteBody(env, userId, note.id, note.body);
 
   await env.DB.prepare(
     `INSERT INTO bible_notes
-       (id, user_id, book_name, chapter_number, verse_start, verse_end, selected_text, body, tags, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+       (id, user_id, book_name, chapter_number, verse_start, verse_end, selected_text, selected_ranges, body, tags, created_at, updated_at, content_key, content_size)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
   )
     .bind(
       note.id,
@@ -585,10 +598,13 @@ async function createBibleNote(
       note.verseStart,
       note.verseEnd,
       note.selectedText,
-      note.body,
+      JSON.stringify(note.selectedVerses),
+      "",
       JSON.stringify(note.tags),
       note.createdAt,
-      note.updatedAt
+      note.updatedAt,
+      storedBody.contentKey,
+      storedBody.contentSize
     )
     .run();
 
@@ -601,11 +617,12 @@ async function updateBibleNote(
   userId: string,
   noteId: string
 ): Promise<Response> {
-  const current = await findBibleNoteById(env, userId, noteId);
-  if (!current) {
+  const currentRow = await findBibleNoteRowById(env, userId, noteId);
+  if (!currentRow) {
     return error("读经笔记不存在。", 404);
   }
 
+  const current = await materializeBibleNote(env, userId, currentRow);
   const body = await readJson<BibleNoteUpdateInput>(request);
   const nextBody = body.body === undefined ? current.body : cleanBibleNoteBody(body.body);
   const nextTags = body.tags === undefined ? current.tags : cleanBibleNoteTags(body.tags);
@@ -615,15 +632,32 @@ async function updateBibleNote(
   }
 
   const updatedAt = new Date().toISOString();
+  const storedBody =
+    body.body !== undefined || !currentRow.contentKey
+      ? await persistBibleNoteBody(env, userId, noteId, nextBody)
+      : {
+          contentKey: currentRow.contentKey,
+          contentSize: Number(currentRow.contentSize ?? byteLength(nextBody))
+        };
   await env.DB.prepare(
     `UPDATE bible_notes
      SET body = ?,
          tags = ?,
-         updated_at = ?
+         updated_at = ?,
+         content_key = ?,
+         content_size = ?
      WHERE id = ?
        AND user_id = ?`
   )
-    .bind(nextBody, JSON.stringify(nextTags), updatedAt, noteId, userId)
+    .bind(
+      "",
+      JSON.stringify(nextTags),
+      updatedAt,
+      storedBody.contentKey,
+      storedBody.contentSize,
+      noteId,
+      userId
+    )
     .run();
 
   return json({
@@ -639,7 +673,7 @@ async function deleteBibleNote(
   userId: string,
   noteId: string
 ): Promise<Response> {
-  const current = await findBibleNoteById(env, userId, noteId);
+  const current = await findBibleNoteRowById(env, userId, noteId);
   if (!current) {
     return error("读经笔记不存在。", 404);
   }
@@ -649,6 +683,7 @@ async function deleteBibleNote(
   )
     .bind(noteId, userId)
     .run();
+  await deleteBibleNoteBody(env, current.contentKey);
 
   return json({ ok: true });
 }
@@ -664,6 +699,7 @@ async function cleanBibleNoteInput(
   const verseEnd = Number(input.verseEnd ?? verseStart);
   const body = cleanBibleNoteBody(input.body);
   const selectedText = cleanBibleSelectedText(input.selectedText);
+  const selectedVerses = cleanBibleSelectedVerses(input.selectedVerses);
   const tags = cleanBibleNoteTags(input.tags);
 
   if (!bookName || !Number.isInteger(chapterNumber) || chapterNumber <= 0) {
@@ -693,11 +729,23 @@ async function cleanBibleNoteInput(
     throw new HttpError("经文不存在，请重新选择。", 400);
   }
 
+  if (
+    selectedVerses.some(
+      (selectedVerse) =>
+        selectedVerse.verseNumber < verseStart ||
+        selectedVerse.verseNumber > verseEnd ||
+        !verseNumbers.has(selectedVerse.verseNumber)
+    )
+  ) {
+    throw new HttpError("选中的经文范围无效，请重新选择。", 400);
+  }
+
   return {
     body,
     bookName,
     chapterNumber,
     selectedText,
+    selectedVerses,
     tags,
     verseEnd,
     verseStart
@@ -709,6 +757,15 @@ async function findBibleNoteById(
   userId: string,
   noteId: string
 ): Promise<BibleNote | null> {
+  const row = await findBibleNoteRowById(env, userId, noteId);
+  return row ? materializeBibleNote(env, userId, row) : null;
+}
+
+async function findBibleNoteRowById(
+  env: Env,
+  userId: string,
+  noteId: string
+): Promise<DbBibleNoteRow | null> {
   const row = await env.DB.prepare(
     `SELECT id,
             book_name AS bookName,
@@ -716,10 +773,13 @@ async function findBibleNoteById(
             verse_start AS verseStart,
             verse_end AS verseEnd,
             COALESCE(selected_text, '') AS selectedText,
+            COALESCE(selected_ranges, '[]') AS selectedRanges,
             body,
             tags,
             created_at AS createdAt,
-            updated_at AS updatedAt
+            updated_at AS updatedAt,
+            content_key AS contentKey,
+            content_size AS contentSize
      FROM bible_notes
      WHERE id = ?
        AND user_id = ?`
@@ -727,17 +787,27 @@ async function findBibleNoteById(
     .bind(noteId, userId)
     .first<DbBibleNoteRow>();
 
-  return row ? rowToBibleNote(row) : null;
+  return row ?? null;
 }
 
-function rowToBibleNote(row: DbBibleNoteRow): BibleNote {
+async function materializeBibleNote(
+  env: Env,
+  userId: string,
+  row: DbBibleNoteRow
+): Promise<BibleNote> {
+  const body = await readBibleNoteBody(env, userId, row);
+  return rowToBibleNote(row, body);
+}
+
+function rowToBibleNote(row: DbBibleNoteRow, body: string): BibleNote {
   return {
-    body: row.body,
+    body,
     bookName: row.bookName,
     chapterNumber: Number(row.chapterNumber),
     createdAt: row.createdAt,
     id: row.id,
     selectedText: row.selectedText ?? "",
+    selectedVerses: parseBibleSelectedVerses(row.selectedRanges, row.selectedText ?? ""),
     tags: parseJsonStringArray(row.tags),
     updatedAt: row.updatedAt,
     verseEnd: Number(row.verseEnd),
@@ -751,6 +821,34 @@ function cleanBibleNoteBody(value: unknown): string {
 
 function cleanBibleSelectedText(value: unknown): string {
   return typeof value === "string" ? value.trim().replace(/\s+/g, " ").slice(0, 1200) : "";
+}
+
+function cleanBibleSelectedVerses(value: unknown): BibleNoteSelectedVerse[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  const selectedVerses = new Map<number, string>();
+  value.forEach((item) => {
+    if (!isRecord(item)) {
+      return;
+    }
+
+    const verseNumber = Number(item.verseNumber ?? 0);
+    const text = cleanBibleSelectedText(item.text);
+    if (!Number.isInteger(verseNumber) || verseNumber <= 0 || !text) {
+      return;
+    }
+
+    selectedVerses.set(verseNumber, text);
+  });
+
+  return Array.from(selectedVerses.entries())
+    .sort(([leftVerse], [rightVerse]) => leftVerse - rightVerse)
+    .map(([verseNumber, text]) => ({
+      text,
+      verseNumber
+    }));
 }
 
 function cleanBibleNoteTags(value: unknown): string[] {
@@ -775,6 +873,126 @@ function parseJsonStringArray(value: string): string[] {
   } catch {
     return [];
   }
+}
+
+function parseBibleSelectedVerses(
+  value: string | null | undefined,
+  fallbackSelectedText: string
+): BibleNoteSelectedVerse[] {
+  if (typeof value === "string" && value.trim()) {
+    try {
+      const selectedVerses = cleanBibleSelectedVerses(JSON.parse(value));
+      if (selectedVerses.length > 0) {
+        return selectedVerses;
+      }
+    } catch {
+      // Fall back to older selected_text below.
+    }
+  }
+
+  return [];
+}
+
+async function readBibleNoteBody(
+  env: Env,
+  userId: string,
+  row: DbBibleNoteRow
+): Promise<string> {
+  if (!row.contentKey) {
+    const legacyBody = cleanBibleNoteBody(row.body);
+    if (!legacyBody) {
+      return "";
+    }
+
+    try {
+      const storedBody = await persistBibleNoteBody(env, userId, row.id, legacyBody);
+      await env.DB.prepare(
+        `UPDATE bible_notes
+         SET body = ?,
+             content_key = ?,
+             content_size = ?
+         WHERE id = ?
+           AND user_id = ?
+           AND content_key IS NULL`
+      )
+        .bind("", storedBody.contentKey, storedBody.contentSize, row.id, userId)
+        .run();
+
+      row.body = "";
+      row.contentKey = storedBody.contentKey;
+      row.contentSize = storedBody.contentSize;
+    } catch (cause) {
+      console.error("Failed to migrate legacy bible note body", {
+        noteId: row.id,
+        userId,
+        cause
+      });
+    }
+
+    return legacyBody;
+  }
+
+  try {
+    const object = await env.FILES.get(row.contentKey);
+    if (!object) {
+      console.error("R2 bible note body is missing", {
+        contentKey: row.contentKey,
+        noteId: row.id
+      });
+      return cleanBibleNoteBody(row.body);
+    }
+
+    return cleanBibleNoteBody(await object.text());
+  } catch (cause) {
+    console.error("Failed to read R2 bible note body", {
+      contentKey: row.contentKey,
+      noteId: row.id,
+      cause
+    });
+    return cleanBibleNoteBody(row.body);
+  }
+}
+
+async function persistBibleNoteBody(
+  env: Env,
+  userId: string,
+  noteId: string,
+  body: string
+): Promise<{ contentKey: string; contentSize: number }> {
+  const contentKey = getBibleNoteContentObjectKey(userId, noteId);
+  const contentSize = byteLength(body);
+  await env.FILES.put(contentKey, body, {
+    httpMetadata: {
+      contentType: "text/plain; charset=utf-8"
+    }
+  });
+
+  return {
+    contentKey,
+    contentSize
+  };
+}
+
+async function deleteBibleNoteBody(
+  env: Env,
+  contentKey: string | null | undefined
+): Promise<void> {
+  if (!contentKey) {
+    return;
+  }
+
+  try {
+    await env.FILES.delete(contentKey);
+  } catch (cause) {
+    console.error("Failed to delete R2 bible note body", {
+      contentKey,
+      cause
+    });
+  }
+}
+
+function getBibleNoteContentObjectKey(userId: string, noteId: string): string {
+  return `${BIBLE_NOTE_CONTENT_OBJECT_PREFIX}/${userId}/${noteId}.txt`;
 }
 
 async function getEmojiIndex(): Promise<Response> {

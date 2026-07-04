@@ -3,6 +3,8 @@ import {
   BookOpen,
   ChevronLeft,
   ChevronRight,
+  Copy,
+  MessageSquareText,
   Pencil,
   Trash2,
   X
@@ -14,7 +16,8 @@ import {
   useMemo,
   useRef,
   useState,
-  type CSSProperties
+  type CSSProperties,
+  type ReactNode
 } from "react";
 import {
   createBibleNote,
@@ -43,34 +46,82 @@ type BibleReaderProps = {
 };
 
 type BibleSelectionTarget = {
+  anchorRect: BibleAnchorClientRect;
   anchorVerseNumber: number;
   bookName: string;
   chapterNumber: number;
   selectedText: string;
+  selectedVerses: BibleSelectedVerse[];
   verseEnd: number;
   verseStart: number;
 };
 
-type BibleNoteRailLayout = {
-  anchorTop: number;
-  connectorTop: number;
-  diagonalAngle: number;
-  diagonalLength: number;
+type BibleSelectedVerse = {
+  text: string;
+  verseNumber: number;
+};
+
+type BibleSelectionToolbar = {
+  left: number;
+  target: BibleSelectionTarget;
   top: number;
 };
 
-type BibleNoteRailStyle = CSSProperties & {
-  "--bible-note-anchor-top"?: string;
-  "--bible-note-connector-top"?: string;
-  "--bible-note-diagonal-angle"?: string;
-  "--bible-note-diagonal-length"?: string;
+type BibleAnchorClientRect = {
+  bottom: number;
+  left: number;
+  right: number;
 };
 
-const BIBLE_NOTE_RAIL_DEFAULT_HEIGHT = 96;
-const BIBLE_NOTE_RAIL_GAP = 8;
+type BibleNoteAnchorPosition = {
+  anchorLeft: number;
+  centerY: number;
+  connectorWidth: number;
+};
+
+type BibleNoteAnchorPositions = Record<string, BibleNoteAnchorPosition>;
+
+type BibleNoteListItem =
+  | {
+      id: string;
+      kind: "note";
+      note: BibleNote;
+    }
+  | {
+      id: string;
+      kind: "draft";
+    };
+
+type BibleNoteCardLayout = {
+  anchorTop: number;
+  connectorTop: number;
+  connectorWidth: number;
+  diagonalAngle: number;
+  diagonalLength: number;
+  diagonalRun: number;
+  horizontalWidth: number;
+  top: number;
+};
+
+type BibleNoteCardStyle = CSSProperties & {
+  "--bible-note-anchor-top"?: string;
+  "--bible-note-connector-top"?: string;
+  "--bible-note-connector-width"?: string;
+  "--bible-note-diagonal-angle"?: string;
+  "--bible-note-diagonal-length"?: string;
+  "--bible-note-diagonal-run"?: string;
+  "--bible-note-horizontal-width"?: string;
+};
+
+const BIBLE_NOTE_CARD_DEFAULT_HEIGHT = 96;
+const BIBLE_NOTE_CARD_GAP = 8;
 const BIBLE_NOTE_CONNECTOR_TOP = 22;
+const BIBLE_NOTE_CARD_CONNECTOR_TOP = 28;
 const BIBLE_NOTE_DIAGONAL_RUN = 28;
-const BIBLE_VERSE_ANCHOR_OFFSET = 22;
+const BIBLE_NOTE_TEXT_CONNECTOR_OFFSET = -1;
+const BIBLE_NOTE_DRAFT_ID = "__bible_note_draft__";
+const BIBLE_NOTE_SAME_LINE_THRESHOLD = 8;
+const BIBLE_NOTE_LIST_WIDTH = 260;
 
 export function BibleReader({ onError }: BibleReaderProps) {
   const [data, setData] = useState<BibleData | null>(null);
@@ -83,13 +134,15 @@ export function BibleReader({ onError }: BibleReaderProps) {
   const [verses, setVerses] = useState<BibleVerse[]>([]);
   const [notes, setNotes] = useState<BibleNote[]>([]);
   const [selectionTarget, setSelectionTarget] = useState<BibleSelectionTarget | null>(null);
+  const [selectionToolbar, setSelectionToolbar] = useState<BibleSelectionToolbar | null>(null);
+  const [activeNoteId, setActiveNoteId] = useState<string | null>(null);
   const [composerBody, setComposerBody] = useState("");
   const [editingNoteId, setEditingNoteId] = useState<string | null>(null);
   const [editingBody, setEditingBody] = useState("");
-  const [noteRailHeights, setNoteRailHeights] = useState<Record<number, number>>({});
-  const [verseAnchorTops, setVerseAnchorTops] = useState<Record<number, number>>({});
+  const [noteAnchorPositions, setNoteAnchorPositions] = useState<BibleNoteAnchorPositions>({});
+  const [noteCardHeights, setNoteCardHeights] = useState<Record<string, number>>({});
   const composerRef = useRef<HTMLTextAreaElement | null>(null);
-  const noteRailRefs = useRef<Map<number, HTMLDivElement>>(new Map());
+  const noteCardRefs = useRef<Map<string, HTMLElement>>(new Map());
   const verseRowRefs = useRef<Map<number, HTMLElement>>(new Map());
   const versesRef = useRef<HTMLDivElement | null>(null);
 
@@ -131,7 +184,6 @@ export function BibleReader({ onError }: BibleReaderProps) {
       ? chapterSequence[currentChapterIndex + 1]
       : null;
   const sortedVerses = useMemo(() => sortBibleVerses(verses), [verses]);
-  const notesByVerse = useMemo(() => groupNotesByVerse(notes), [notes]);
 
   useEffect(() => {
     let cancelled = false;
@@ -177,8 +229,10 @@ export function BibleReader({ onError }: BibleReaderProps) {
     setEditingBody("");
     setComposerBody("");
     setSelectionTarget(null);
-    setNoteRailHeights({});
-    setVerseAnchorTops({});
+    setSelectionToolbar(null);
+    setActiveNoteId(null);
+    setNoteAnchorPositions({});
+    setNoteCardHeights({});
 
     void Promise.all([
       loadBibleChapter(selectedBook, selectedChapter),
@@ -207,104 +261,155 @@ export function BibleReader({ onError }: BibleReaderProps) {
     };
   }, [onError, selectedBook, selectedChapter]);
 
+  const noteListItems = useMemo<BibleNoteListItem[]>(() => {
+    const items: BibleNoteListItem[] = notes.map((note) => ({
+      id: note.id,
+      kind: "note",
+      note
+    }));
+
+    if (selectionTarget) {
+      items.push({
+        id: BIBLE_NOTE_DRAFT_ID,
+        kind: "draft"
+      });
+    }
+
+    return items;
+  }, [notes, selectionTarget]);
+
   useLayoutEffect(() => {
-    const measureNoteRails = () => {
+    const measureNotes = () => {
       const root = versesRef.current;
-      if (!root) {
-        setVerseAnchorTops((current) => (Object.keys(current).length === 0 ? current : {}));
-        setNoteRailHeights((current) => (Object.keys(current).length === 0 ? current : {}));
+      const noteList = root?.querySelector<HTMLElement>(".bible-reader-note-list");
+      if (!root || !noteList) {
+        setNoteAnchorPositions((current) => (Object.keys(current).length === 0 ? current : {}));
+        setNoteCardHeights((current) => (Object.keys(current).length === 0 ? current : {}));
         return;
       }
 
       const rootRect = root.getBoundingClientRect();
-      const nextAnchorTops: Record<number, number> = {};
-      sortedVerses.forEach((verse) => {
-        const row = verseRowRefs.current.get(verse.verseNumber);
-        if (!row) {
+      const listRect = noteList.getBoundingClientRect();
+      const nextAnchorPositions: BibleNoteAnchorPositions = {};
+
+      notes.forEach((note) => {
+        const marker =
+          root.querySelector<HTMLElement>(getBibleNoteMarkerSelector(note.id)) ??
+          verseRowRefs.current.get(note.verseStart) ??
+          null;
+        const markerRect = getBibleAnchorClientRect(marker);
+        if (!markerRect) {
           return;
         }
 
-        const rect = row.getBoundingClientRect();
-        nextAnchorTops[verse.verseNumber] =
-          rect.top - rootRect.top + Math.min(BIBLE_VERSE_ANCHOR_OFFSET, rect.height / 2);
+        nextAnchorPositions[note.id] = createBibleNoteAnchorPosition(markerRect, rootRect, listRect);
       });
 
-      const nextRailHeights: Record<number, number> = {};
-      noteRailRefs.current.forEach((rail, verseNumber) => {
-        nextRailHeights[verseNumber] = rail.getBoundingClientRect().height;
+      if (selectionTarget) {
+        nextAnchorPositions[BIBLE_NOTE_DRAFT_ID] = createBibleNoteAnchorPosition(
+          selectionTarget.anchorRect,
+          rootRect,
+          listRect
+        );
+      }
+
+      const nextCardHeights: Record<string, number> = {};
+      noteListItems.forEach((item) => {
+        const card = noteCardRefs.current.get(item.id);
+        if (card) {
+          nextCardHeights[item.id] = Math.ceil(card.getBoundingClientRect().height);
+        }
       });
 
-      setVerseAnchorTops((current) =>
-        areNumberRecordsEqual(current, nextAnchorTops) ? current : nextAnchorTops
+      setNoteAnchorPositions((current) =>
+        areBibleNoteAnchorPositionsEqual(current, nextAnchorPositions)
+          ? current
+          : nextAnchorPositions
       );
-      setNoteRailHeights((current) =>
-        areNumberRecordsEqual(current, nextRailHeights) ? current : nextRailHeights
+      setNoteCardHeights((current) =>
+        areStringNumberRecordsEqual(current, nextCardHeights) ? current : nextCardHeights
       );
     };
 
-    measureNoteRails();
+    measureNotes();
 
     if (typeof ResizeObserver === "undefined") {
-      window.addEventListener("resize", measureNoteRails);
-      return () => window.removeEventListener("resize", measureNoteRails);
+      window.addEventListener("resize", measureNotes);
+      return () => window.removeEventListener("resize", measureNotes);
     }
 
-    const resizeObserver = new ResizeObserver(measureNoteRails);
+    const resizeObserver = new ResizeObserver(measureNotes);
     if (versesRef.current) {
       resizeObserver.observe(versesRef.current);
     }
     verseRowRefs.current.forEach((row) => resizeObserver.observe(row));
-    noteRailRefs.current.forEach((rail) => resizeObserver.observe(rail));
-    window.addEventListener("resize", measureNoteRails);
+    noteCardRefs.current.forEach((card) => resizeObserver.observe(card));
+    window.addEventListener("resize", measureNotes);
 
     return () => {
       resizeObserver.disconnect();
-      window.removeEventListener("resize", measureNoteRails);
+      window.removeEventListener("resize", measureNotes);
     };
-  }, [composerBody, editingBody, editingNoteId, notes, selectionTarget, sortedVerses]);
+  }, [
+    activeNoteId,
+    composerBody,
+    editingBody,
+    editingNoteId,
+    noteListItems,
+    notes,
+    selectionTarget,
+    sortedVerses
+  ]);
 
-  const noteRailLayout = useMemo(() => {
-    const layouts = new Map<number, BibleNoteRailLayout>();
+  const orderedNoteListItems = useMemo(
+    () => orderBibleNoteListItemsByAnchorPosition(noteListItems, noteAnchorPositions),
+    [noteAnchorPositions, noteListItems]
+  );
+
+  const noteListLayout = useMemo(() => {
+    const layouts = new Map<string, BibleNoteCardLayout>();
     let previousBottom = 0;
 
-    sortedVerses.forEach((verse) => {
-      const verseNotes = notesByVerse.get(verse.verseNumber) ?? [];
-      const hasComposer = selectionTarget?.anchorVerseNumber === verse.verseNumber;
-      if (verseNotes.length === 0 && !hasComposer) {
-        return;
-      }
-
-      const railHeight = noteRailHeights[verse.verseNumber] ?? BIBLE_NOTE_RAIL_DEFAULT_HEIGHT;
-      const anchorY = verseAnchorTops[verse.verseNumber] ?? previousBottom;
+    orderedNoteListItems.forEach((item) => {
+      const anchor = noteAnchorPositions[item.id];
+      const cardHeight = noteCardHeights[item.id] ?? BIBLE_NOTE_CARD_DEFAULT_HEIGHT;
+      const desiredTop = anchor ? anchor.centerY - BIBLE_NOTE_CONNECTOR_TOP : previousBottom;
       const top = Math.max(
         0,
-        previousBottom ? previousBottom + BIBLE_NOTE_RAIL_GAP : 0,
-        anchorY - BIBLE_NOTE_CONNECTOR_TOP
+        previousBottom ? previousBottom + BIBLE_NOTE_CARD_GAP : 0,
+        desiredTop
       );
-      const anchorTop = anchorY - top;
-      const connectorTop = clamp(
-        BIBLE_NOTE_CONNECTOR_TOP,
-        14,
-        Math.max(14, railHeight - 14)
-      );
+      const anchorTop = anchor ? anchor.centerY - top : BIBLE_NOTE_CONNECTOR_TOP;
+      const connectorTop = anchor
+        ? clamp(BIBLE_NOTE_CARD_CONNECTOR_TOP, 14, Math.max(14, cardHeight - 14))
+        : BIBLE_NOTE_CONNECTOR_TOP;
+      const connectorWidth = anchor?.connectorWidth ?? 0;
+      const diagonalRun =
+        connectorWidth > 0
+          ? clamp(connectorWidth * 0.36, 14, BIBLE_NOTE_DIAGONAL_RUN)
+          : 0;
       const diagonalRise = connectorTop - anchorTop;
+      const diagonalLength = diagonalRun > 0 ? Math.hypot(diagonalRun, diagonalRise) : 0;
 
-      layouts.set(verse.verseNumber, {
+      layouts.set(item.id, {
         anchorTop,
         connectorTop,
-        diagonalAngle: Math.atan2(diagonalRise, BIBLE_NOTE_DIAGONAL_RUN),
-        diagonalLength: Math.hypot(BIBLE_NOTE_DIAGONAL_RUN, diagonalRise),
+        connectorWidth,
+        diagonalAngle: diagonalRun > 0 ? Math.atan2(diagonalRise, diagonalRun) : 0,
+        diagonalLength,
+        diagonalRun,
+        horizontalWidth: Math.max(0, connectorWidth - diagonalRun),
         top
       });
 
-      previousBottom = top + railHeight;
+      previousBottom = top + cardHeight;
     });
 
     return {
       layouts,
       listHeight: previousBottom
     };
-  }, [noteRailHeights, notesByVerse, selectionTarget, sortedVerses, verseAnchorTops]);
+  }, [noteAnchorPositions, noteCardHeights, orderedNoteListItems]);
 
   useEffect(() => {
     if (selectionTarget && composerBody === "") {
@@ -333,39 +438,103 @@ export function BibleReader({ onError }: BibleReaderProps) {
     const root = versesRef.current;
     const selection = window.getSelection();
     if (!root || !selection || selection.rangeCount === 0 || selection.isCollapsed) {
-      return;
-    }
-
-    const selectedText = selection.toString().replace(/\s+/g, " ").trim();
-    if (!selectedText) {
+      setSelectionToolbar(null);
       return;
     }
 
     const range = selection.getRangeAt(0);
     if (!root.contains(range.commonAncestorContainer)) {
+      setSelectionToolbar(null);
       return;
     }
 
-    const verseStart = getBibleVerseNumberFromNode(range.startContainer);
-    const verseEnd = getBibleVerseNumberFromNode(range.endContainer);
-    if (!verseStart || !verseEnd) {
+    const collectedSelection = collectBibleTextSelection(root, range);
+    if (!collectedSelection) {
+      setSelectionToolbar(null);
       return;
     }
 
-    const nextVerseStart = Math.min(verseStart, verseEnd);
-    const nextVerseEnd = Math.max(verseStart, verseEnd);
-    setSelectionTarget({
-      anchorVerseNumber: nextVerseStart,
-      bookName: selectedBook,
-      chapterNumber: selectedChapter,
-      selectedText: selectedText.slice(0, 1200),
-      verseEnd: nextVerseEnd,
-      verseStart: nextVerseStart
+    const toolbarWidth = 156;
+    const toolbarTop = Math.max(12, collectedSelection.toolbarRect.top - 44);
+    const toolbarLeft = clamp(
+      collectedSelection.toolbarRect.left +
+        collectedSelection.toolbarRect.width / 2 -
+        toolbarWidth / 2,
+      12,
+      window.innerWidth - toolbarWidth - 12
+    );
+
+    setSelectionToolbar({
+      left: toolbarLeft,
+      target: {
+        anchorRect: {
+          bottom: collectedSelection.anchorRect.bottom,
+          left: collectedSelection.anchorRect.left,
+          right: collectedSelection.anchorRect.right
+        },
+        anchorVerseNumber: collectedSelection.verseStart,
+        bookName: selectedBook,
+        chapterNumber: selectedChapter,
+        selectedText: collectedSelection.selectedText,
+        selectedVerses: collectedSelection.selectedVerses,
+        verseEnd: collectedSelection.verseEnd,
+        verseStart: collectedSelection.verseStart
+      },
+      top: toolbarTop
     });
+  }, [selectedBook, selectedChapter]);
+
+  const openNoteFromSelection = useCallback(() => {
+    if (!selectionToolbar) {
+      return;
+    }
+
+    const matchingNote = findMatchingBibleNote(notes, selectionToolbar.target);
+    setSelectionToolbar(null);
+    clearBrowserSelection();
+
+    if (matchingNote) {
+      setSelectionTarget(null);
+      setComposerBody("");
+      setActiveNoteId(matchingNote.id);
+      setEditingNoteId(matchingNote.id);
+      setEditingBody(matchingNote.body);
+      requestAnimationFrame(() => scrollBibleNoteCardIntoView(noteCardRefs.current, matchingNote.id));
+      return;
+    }
+
+    setSelectionTarget(selectionToolbar.target);
     setComposerBody("");
     setEditingBody("");
     setEditingNoteId(null);
-  }, [selectedBook, selectedChapter]);
+    setActiveNoteId(BIBLE_NOTE_DRAFT_ID);
+  }, [notes, selectionToolbar]);
+
+  const copySelectedBibleText = useCallback(async () => {
+    if (!selectionToolbar) {
+      return;
+    }
+
+    try {
+      await navigator.clipboard.writeText(selectionToolbar.target.selectedText);
+    } catch {
+      onError?.("复制失败，请手动复制选中的经文。");
+    } finally {
+      setSelectionToolbar(null);
+      clearBrowserSelection();
+    }
+  }, [onError, selectionToolbar]);
+
+  const selectBibleNote = useCallback((noteId: string) => {
+    setActiveNoteId(noteId);
+    requestAnimationFrame(() => scrollBibleNoteCardIntoView(noteCardRefs.current, noteId));
+  }, []);
+
+  const cancelComposer = useCallback(() => {
+    setSelectionTarget(null);
+    setComposerBody("");
+    setActiveNoteId(null);
+  }, []);
 
   const saveComposer = async () => {
     if (!selectionTarget || !selectedBook || selectedChapter == null) {
@@ -380,17 +549,33 @@ export function BibleReader({ onError }: BibleReaderProps) {
 
     setNoteSaving(true);
     try {
+      const matchingNote = findMatchingBibleNote(notes, selectionTarget);
+      if (matchingNote) {
+        const updated = await updateBibleNote(matchingNote.id, { body });
+        setNotes((current) =>
+          sortBibleNotes(current.map((item) => (item.id === updated.id ? updated : item)))
+        );
+        setComposerBody("");
+        setSelectionTarget(null);
+        setActiveNoteId(updated.id);
+        setEditingNoteId(updated.id);
+        setEditingBody(updated.body);
+        return;
+      }
+
       const created = await createBibleNote({
         body,
         bookName: selectedBook,
         chapterNumber: selectedChapter,
         selectedText: selectionTarget.selectedText,
+        selectedVerses: selectionTarget.selectedVerses,
         verseEnd: selectionTarget.verseEnd,
         verseStart: selectionTarget.verseStart
       });
       setNotes((current) => sortBibleNotes([...current, created]));
       setComposerBody("");
       setSelectionTarget(null);
+      setActiveNoteId(created.id);
     } catch (error) {
       onError?.(error instanceof Error ? error.message : "保存读经笔记失败。");
     } finally {
@@ -411,6 +596,7 @@ export function BibleReader({ onError }: BibleReaderProps) {
       setNotes((current) =>
         sortBibleNotes(current.map((item) => (item.id === updated.id ? updated : item)))
       );
+      setActiveNoteId(updated.id);
       setEditingNoteId(null);
       setEditingBody("");
     } catch (error) {
@@ -428,13 +614,16 @@ export function BibleReader({ onError }: BibleReaderProps) {
     try {
       await deleteBibleNote(note.id);
       setNotes((current) => current.filter((item) => item.id !== note.id));
+      if (activeNoteId === note.id) {
+        setActiveNoteId(null);
+      }
     } catch (error) {
       onError?.(error instanceof Error ? error.message : "删除读经笔记失败。");
     }
   };
 
   const versesStyle: CSSProperties | undefined =
-    noteRailLayout.listHeight > 0 ? { minHeight: `${noteRailLayout.listHeight}px` } : undefined;
+    noteListLayout.listHeight > 0 ? { minHeight: `${noteListLayout.listHeight}px` } : undefined;
 
   return (
     <section className="bible-reader-page">
@@ -542,18 +731,12 @@ export function BibleReader({ onError }: BibleReaderProps) {
             ) : null}
 
             {sortedVerses.map((verse) => {
-              const verseNotes = notesByVerse.get(verse.verseNumber) ?? [];
-              const isSelected = selectionTarget?.anchorVerseNumber === verse.verseNumber;
-              const railLayout = noteRailLayout.layouts.get(verse.verseNumber);
-              const railStyle: BibleNoteRailStyle | undefined = railLayout
-                ? {
-                    "--bible-note-anchor-top": `${railLayout.anchorTop}px`,
-                    "--bible-note-connector-top": `${railLayout.connectorTop}px`,
-                    "--bible-note-diagonal-angle": `${railLayout.diagonalAngle}rad`,
-                    "--bible-note-diagonal-length": `${railLayout.diagonalLength}px`,
-                    top: `${railLayout.top}px`
-                  }
-                : undefined;
+              const verseNotes = getBibleNotesForVerse(notes, verse.verseNumber);
+              const isSelected = Boolean(
+                selectionTarget?.selectedVerses.some(
+                  (selectedVerse) => selectedVerse.verseNumber === verse.verseNumber
+                )
+              );
 
               return (
                 <article
@@ -563,6 +746,7 @@ export function BibleReader({ onError }: BibleReaderProps) {
                     verseNotes.length > 0 && "has-notes"
                   )}
                   key={verse.id}
+                  data-bible-verse-row={verse.verseNumber}
                   ref={(node) => {
                     if (node) {
                       verseRowRefs.current.set(verse.verseNumber, node);
@@ -576,148 +760,198 @@ export function BibleReader({ onError }: BibleReaderProps) {
                     className="bible-reader-verse-button"
                     data-bible-verse-number={verse.verseNumber}
                   >
-                    <span>{formatBibleReference(verse)}</span>
-                    <strong>{verse.content}</strong>
-                  </div>
-
-                  <div
-                    className="bible-reader-note-rail"
-                    ref={(node) => {
-                      if (node) {
-                        noteRailRefs.current.set(verse.verseNumber, node);
-                        return;
-                      }
-
-                      noteRailRefs.current.delete(verse.verseNumber);
-                    }}
-                    style={railStyle}
-                  >
-                    {verseNotes.map((note) => {
-                      const isEditing = editingNoteId === note.id;
-                      return (
-                        <article className="bible-reader-note-card" key={note.id}>
-                          <div className="bible-reader-note-card__head">
-                            <span>笔记</span>
-                            <small>{formatBibleNoteTime(note.updatedAt)}</small>
-                          </div>
-                          {note.selectedText ? (
-                            <blockquote className="bible-reader-note-card__excerpt">
-                              {note.selectedText}
-                            </blockquote>
-                          ) : null}
-                          {isEditing ? (
-                            <>
-                              <textarea
-                                onChange={(event) => setEditingBody(event.target.value)}
-                                value={editingBody}
-                              />
-                              <div className="bible-reader-note-actions">
-                                <button
-                                  className="note-comment-card__button primary"
-                                  disabled={noteSaving}
-                                  onClick={() => void saveEditingNote(note)}
-                                  type="button"
-                                >
-                                  保存
-                                </button>
-                                <button
-                                  className="note-comment-card__button"
-                                  onClick={() => {
-                                    setEditingNoteId(null);
-                                    setEditingBody("");
-                                  }}
-                                  type="button"
-                                >
-                                  取消
-                                </button>
-                              </div>
-                            </>
-                          ) : (
-                            <>
-                              <p>{note.body}</p>
-                              <div className="bible-reader-note-actions">
-                                <button
-                                  className="note-comment-card__icon-button"
-                                  onClick={() => {
-                                    setSelectionTarget(null);
-                                    setComposerBody("");
-                                    setEditingNoteId(note.id);
-                                    setEditingBody(note.body);
-                                  }}
-                                  title="编辑笔记"
-                                  type="button"
-                                >
-                                  <Pencil size={13} />
-                                </button>
-                                <button
-                                  className="note-comment-card__icon-button"
-                                  onClick={() => void removeNote(note)}
-                                  title="删除笔记"
-                                  type="button"
-                                >
-                                  <Trash2 size={13} />
-                                </button>
-                              </div>
-                            </>
-                          )}
-                        </article>
-                      );
-                    })}
-
-                    {isSelected ? (
-                      <div className="bible-reader-composer">
-                        <div className="bible-reader-composer__head">
-                          <span>给选文写笔记</span>
-                          <button
-                            aria-label="关闭笔记输入"
-                            onClick={() => {
-                              setSelectionTarget(null);
-                              setComposerBody("");
-                            }}
-                            type="button"
-                          >
-                            <X size={13} />
-                          </button>
-                        </div>
-                        <blockquote className="bible-reader-composer__excerpt">
-                          {selectionTarget?.selectedText}
-                        </blockquote>
-                        <textarea
-                          onChange={(event) => setComposerBody(event.target.value)}
-                          placeholder="写下感触、问题、祷告或其他..."
-                          ref={composerRef}
-                          value={composerBody}
-                        />
-                        <button
-                          className="note-comment-card__button primary"
-                          disabled={noteSaving || !composerBody.trim()}
-                          onClick={() => void saveComposer()}
-                          type="button"
-                        >
-                          保存笔记
-                        </button>
-                      </div>
-                    ) : null}
+                    <span className="bible-reader-verse-ref">{formatBibleReference(verse)}</span>
+                    <strong
+                      className="bible-reader-verse-text"
+                      data-bible-verse-number={verse.verseNumber}
+                    >
+                      {renderBibleVerseContent(verse, verseNotes, activeNoteId, selectBibleNote)}
+                    </strong>
                   </div>
                 </article>
               );
             })}
+
+            <div
+              className={clsx(
+                "bible-reader-note-list",
+                orderedNoteListItems.length > 0 && "has-positioned-notes"
+              )}
+              style={
+                noteListLayout.listHeight > 0
+                  ? { minHeight: noteListLayout.listHeight }
+                  : undefined
+              }
+            >
+              {orderedNoteListItems.map((item) => {
+                const layout = noteListLayout.layouts.get(item.id);
+                const cardStyle = getBibleNoteCardStyle(layout);
+
+                if (item.kind === "draft") {
+                  return selectionTarget ? (
+                    <form
+                      className="bible-reader-composer is-draft"
+                      key={item.id}
+                      onSubmit={(event) => {
+                        event.preventDefault();
+                        void saveComposer();
+                      }}
+                      ref={(node) => {
+                        if (node) {
+                          noteCardRefs.current.set(item.id, node);
+                          return;
+                        }
+
+                        noteCardRefs.current.delete(item.id);
+                      }}
+                      style={cardStyle}
+                    >
+                      <div className="bible-reader-composer__head">
+                        <span>给选文写笔记</span>
+                        <button aria-label="关闭笔记输入" onClick={cancelComposer} type="button">
+                          <X size={13} />
+                        </button>
+                      </div>
+                      <blockquote className="bible-reader-composer__excerpt">
+                        {selectionTarget.selectedText}
+                      </blockquote>
+                      <textarea
+                        onChange={(event) => setComposerBody(event.target.value)}
+                        placeholder="写下感触、问题、祷告或其他..."
+                        ref={composerRef}
+                        value={composerBody}
+                      />
+                      <button
+                        className="note-comment-card__button primary"
+                        disabled={noteSaving || !composerBody.trim()}
+                        type="submit"
+                      >
+                        保存笔记
+                      </button>
+                    </form>
+                  ) : null;
+                }
+
+                const note = item.note;
+                const isEditing = editingNoteId === note.id;
+
+                return (
+                  <article
+                    className={clsx(
+                      "bible-reader-note-card",
+                      activeNoteId === note.id && "is-active"
+                    )}
+                    key={note.id}
+                    onClick={() => setActiveNoteId(note.id)}
+                    ref={(node) => {
+                      if (node) {
+                        noteCardRefs.current.set(note.id, node);
+                        return;
+                      }
+
+                      noteCardRefs.current.delete(note.id);
+                    }}
+                    style={cardStyle}
+                  >
+                    <div className="bible-reader-note-card__head">
+                      <span>笔记</span>
+                      <small>{formatBibleNoteTime(note.updatedAt)}</small>
+                    </div>
+                    {note.selectedText ? (
+                      <blockquote className="bible-reader-note-card__excerpt">
+                        {note.selectedText}
+                      </blockquote>
+                    ) : null}
+                    {isEditing ? (
+                      <>
+                        <textarea
+                          autoFocus
+                          onChange={(event) => setEditingBody(event.target.value)}
+                          value={editingBody}
+                        />
+                        <div className="bible-reader-note-actions">
+                          <button
+                            className="note-comment-card__button primary"
+                            disabled={noteSaving}
+                            onClick={() => void saveEditingNote(note)}
+                            type="button"
+                          >
+                            保存
+                          </button>
+                          <button
+                            className="note-comment-card__button"
+                            onClick={() => {
+                              setEditingNoteId(null);
+                              setEditingBody("");
+                            }}
+                            type="button"
+                          >
+                            取消
+                          </button>
+                        </div>
+                      </>
+                    ) : (
+                      <>
+                        <p>{note.body}</p>
+                        <div className="bible-reader-note-actions">
+                          <button
+                            className="note-comment-card__icon-button"
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              setSelectionTarget(null);
+                              setComposerBody("");
+                              setActiveNoteId(note.id);
+                              setEditingNoteId(note.id);
+                              setEditingBody(note.body);
+                            }}
+                            title="编辑笔记"
+                            type="button"
+                          >
+                            <Pencil size={13} />
+                          </button>
+                          <button
+                            className="note-comment-card__icon-button"
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              void removeNote(note);
+                            }}
+                            title="删除笔记"
+                            type="button"
+                          >
+                            <Trash2 size={13} />
+                          </button>
+                        </div>
+                      </>
+                    )}
+                  </article>
+                );
+              })}
+            </div>
           </div>
+
+          {selectionToolbar ? (
+            <div
+              className="bible-reader-selection-toolbar"
+              onMouseDown={(event) => event.preventDefault()}
+              style={{
+                left: selectionToolbar.left,
+                top: selectionToolbar.top
+              }}
+            >
+              <button onClick={() => void copySelectedBibleText()} type="button">
+                <Copy size={14} />
+                复制
+              </button>
+              <button onClick={openNoteFromSelection} type="button">
+                <MessageSquareText size={14} />
+                笔记
+              </button>
+            </div>
+          ) : null}
         </section>
       </div>
     </section>
   );
-}
-
-function groupNotesByVerse(notes: BibleNote[]): Map<number, BibleNote[]> {
-  const grouped = new Map<number, BibleNote[]>();
-  notes.forEach((note) => {
-    for (let verseNumber = note.verseStart; verseNumber <= note.verseEnd; verseNumber += 1) {
-      grouped.set(verseNumber, [...(grouped.get(verseNumber) ?? []), note]);
-    }
-  });
-
-  return grouped;
 }
 
 function sortBibleNotes(notes: BibleNote[]): BibleNote[] {
@@ -739,16 +973,364 @@ function formatBibleNoteTime(value: string): string {
   }).format(new Date(value));
 }
 
-function getBibleVerseNumberFromNode(node: Node | null): number | null {
-  const element = node instanceof Element ? node : node?.parentElement ?? null;
-  const verseElement = element?.closest<HTMLElement>("[data-bible-verse-number]");
-  const verseNumber = Number(verseElement?.dataset.bibleVerseNumber ?? 0);
-  return Number.isInteger(verseNumber) && verseNumber > 0 ? verseNumber : null;
+function getBibleNotesForVerse(notes: BibleNote[], verseNumber: number): BibleNote[] {
+  return notes.filter((note) => note.verseStart <= verseNumber && note.verseEnd >= verseNumber);
 }
 
-function areNumberRecordsEqual(
-  first: Record<number, number>,
-  second: Record<number, number>
+function renderBibleVerseContent(
+  verse: BibleVerse,
+  notes: BibleNote[],
+  activeNoteId: string | null,
+  onSelectNote: (noteId: string) => void
+): ReactNode[] {
+  const highlights = getBibleVerseHighlights(verse.content, notes, verse.verseNumber);
+  if (highlights.length === 0) {
+    return [verse.content];
+  }
+
+  const nodes: ReactNode[] = [];
+  let cursor = 0;
+  highlights.forEach((highlight, index) => {
+    if (highlight.start > cursor) {
+      nodes.push(verse.content.slice(cursor, highlight.start));
+    }
+
+    nodes.push(
+      <span
+        className={clsx("bible-note-mark", activeNoteId === highlight.note.id && "is-active")}
+        data-bible-note-id={highlight.note.id}
+        key={`${highlight.note.id}-${index}`}
+        onClick={(event) => {
+          event.stopPropagation();
+          onSelectNote(highlight.note.id);
+        }}
+        title={highlight.note.body || "笔记"}
+      >
+        {verse.content.slice(highlight.start, highlight.end)}
+      </span>
+    );
+    cursor = highlight.end;
+  });
+
+  if (cursor < verse.content.length) {
+    nodes.push(verse.content.slice(cursor));
+  }
+
+  return nodes;
+}
+
+function getBibleVerseHighlights(
+  content: string,
+  notes: BibleNote[],
+  verseNumber: number
+): Array<{ end: number; note: BibleNote; start: number }> {
+  const ranges: Array<{ end: number; note: BibleNote; start: number }> = [];
+
+  sortBibleNotes(notes).forEach((note) => {
+    const selectedText = getBibleNoteSelectedTextForVerse(note, verseNumber);
+    if (!selectedText) {
+      return;
+    }
+
+    const start = findSelectedTextIndex(content, selectedText, ranges);
+    if (start < 0) {
+      return;
+    }
+
+    ranges.push({
+      end: start + selectedText.length,
+      note,
+      start
+    });
+  });
+
+  return ranges.sort((first, second) => first.start - second.start || first.end - second.end);
+}
+
+function getBibleNoteSelectedTextForVerse(note: BibleNote, verseNumber: number): string {
+  const selectedVerse = note.selectedVerses.find((item) => item.verseNumber === verseNumber);
+  if (selectedVerse?.text) {
+    return selectedVerse.text;
+  }
+
+  if (note.verseStart === note.verseEnd && note.verseStart === verseNumber) {
+    return note.selectedText;
+  }
+
+  return "";
+}
+
+function findSelectedTextIndex(
+  content: string,
+  selectedText: string,
+  existingRanges: Array<{ end: number; start: number }>
+): number {
+  let start = content.indexOf(selectedText);
+  while (start >= 0) {
+    const end = start + selectedText.length;
+    const overlaps = existingRanges.some((range) => start < range.end && end > range.start);
+    if (!overlaps) {
+      return start;
+    }
+
+    start = content.indexOf(selectedText, start + 1);
+  }
+
+  return -1;
+}
+
+function collectBibleTextSelection(
+  root: HTMLElement,
+  range: Range
+): {
+  anchorRect: DOMRect;
+  selectedText: string;
+  selectedVerses: BibleSelectedVerse[];
+  toolbarRect: DOMRect;
+  verseEnd: number;
+  verseStart: number;
+} | null {
+  const selectedVerses: BibleSelectedVerse[] = [];
+  const rects: DOMRect[] = [];
+
+  root.querySelectorAll<HTMLElement>(".bible-reader-verse-text[data-bible-verse-number]").forEach(
+    (element) => {
+      const verseNumber = Number(element.dataset.bibleVerseNumber ?? 0);
+      if (!Number.isInteger(verseNumber) || verseNumber <= 0) {
+        return;
+      }
+
+      const intersection = getRangeIntersection(range, element);
+      if (!intersection) {
+        return;
+      }
+
+      const text = cleanSelectedBibleText(intersection.toString());
+      if (!text) {
+        return;
+      }
+
+      selectedVerses.push({
+        text,
+        verseNumber
+      });
+      rects.push(...Array.from(intersection.getClientRects()));
+      intersection.detach();
+    }
+  );
+
+  if (selectedVerses.length === 0) {
+    return null;
+  }
+
+  const anchorRect = getLastVisualRect(rects);
+  const toolbarRect = getFirstVisualRect(rects);
+  if (!anchorRect || !toolbarRect) {
+    return null;
+  }
+
+  const verseNumbers = selectedVerses.map((verse) => verse.verseNumber);
+  return {
+    anchorRect,
+    selectedText: selectedVerses.map((verse) => verse.text).join(" ").slice(0, 1200),
+    selectedVerses: selectedVerses.map((verse) => ({
+      text: verse.text.slice(0, 1200),
+      verseNumber: verse.verseNumber
+    })),
+    toolbarRect,
+    verseEnd: Math.max(...verseNumbers),
+    verseStart: Math.min(...verseNumbers)
+  };
+}
+
+function getRangeIntersection(range: Range, element: HTMLElement): Range | null {
+  const elementRange = document.createRange();
+  elementRange.selectNodeContents(element);
+
+  if (
+    range.compareBoundaryPoints(Range.END_TO_START, elementRange) <= 0 ||
+    range.compareBoundaryPoints(Range.START_TO_END, elementRange) >= 0
+  ) {
+    elementRange.detach();
+    return null;
+  }
+
+  const intersection = range.cloneRange();
+  if (intersection.compareBoundaryPoints(Range.START_TO_START, elementRange) < 0) {
+    intersection.setStart(elementRange.startContainer, elementRange.startOffset);
+  }
+  if (intersection.compareBoundaryPoints(Range.END_TO_END, elementRange) > 0) {
+    intersection.setEnd(elementRange.endContainer, elementRange.endOffset);
+  }
+
+  elementRange.detach();
+  return intersection;
+}
+
+function findMatchingBibleNote(
+  notes: BibleNote[],
+  target: BibleSelectionTarget
+): BibleNote | null {
+  const targetSelectedText = normalizeBibleSelectionText(target.selectedText);
+  const targetSelectedVerses = normalizeSelectedVerses(target.selectedVerses);
+
+  return (
+    notes.find((note) => {
+      if (
+        note.bookName !== target.bookName ||
+        note.chapterNumber !== target.chapterNumber ||
+        note.verseStart !== target.verseStart ||
+        note.verseEnd !== target.verseEnd
+      ) {
+        return false;
+      }
+
+      const noteSelectedVerses = normalizeSelectedVerses(note.selectedVerses);
+      if (noteSelectedVerses && targetSelectedVerses) {
+        return noteSelectedVerses === targetSelectedVerses;
+      }
+
+      return normalizeBibleSelectionText(note.selectedText) === targetSelectedText;
+    }) ?? null
+  );
+}
+
+function normalizeSelectedVerses(selectedVerses: BibleSelectedVerse[]): string {
+  return selectedVerses
+    .map((verse) => `${verse.verseNumber}:${normalizeBibleSelectionText(verse.text)}`)
+    .join("|");
+}
+
+function normalizeBibleSelectionText(value: string): string {
+  return cleanSelectedBibleText(value);
+}
+
+function cleanSelectedBibleText(value: string): string {
+  return value.replace(/\s+/g, " ").trim();
+}
+
+function getBibleNoteCardStyle(layout: BibleNoteCardLayout | undefined): BibleNoteCardStyle | undefined {
+  if (!layout) {
+    return undefined;
+  }
+
+  return {
+    "--bible-note-anchor-top": `${layout.anchorTop}px`,
+    "--bible-note-connector-top": `${layout.connectorTop}px`,
+    "--bible-note-connector-width": `${layout.connectorWidth}px`,
+    "--bible-note-diagonal-angle": `${layout.diagonalAngle}rad`,
+    "--bible-note-diagonal-length": `${layout.diagonalLength}px`,
+    "--bible-note-diagonal-run": `${layout.diagonalRun}px`,
+    "--bible-note-horizontal-width": `${layout.horizontalWidth}px`,
+    top: `${layout.top}px`
+  };
+}
+
+function createBibleNoteAnchorPosition(
+  anchorRect: BibleAnchorClientRect,
+  rootRect: DOMRect,
+  noteListRect: DOMRect
+): BibleNoteAnchorPosition {
+  return {
+    anchorLeft: anchorRect.left,
+    centerY: anchorRect.bottom - rootRect.top + BIBLE_NOTE_TEXT_CONNECTOR_OFFSET,
+    connectorWidth: Math.max(24, noteListRect.left - anchorRect.right)
+  };
+}
+
+function getBibleAnchorClientRect(element: HTMLElement | null): DOMRect | null {
+  if (!element) {
+    return null;
+  }
+
+  const lastRect = getLastVisualRect(Array.from(element.getClientRects()));
+  if (lastRect) {
+    return lastRect;
+  }
+
+  const rect = element.getBoundingClientRect();
+  return rect.width > 0 && rect.height > 0 ? rect : null;
+}
+
+function getFirstVisualRect(rects: DOMRect[]): DOMRect | null {
+  const usableRects = rects.filter((rect) => rect.width > 0 || rect.height > 0);
+  if (usableRects.length === 0) {
+    return null;
+  }
+
+  return usableRects.reduce((firstRect, rect) => {
+    const topDelta = rect.top - firstRect.top;
+    if (topDelta < -0.5) {
+      return rect;
+    }
+
+    if (Math.abs(topDelta) <= 0.5 && rect.left < firstRect.left) {
+      return rect;
+    }
+
+    return firstRect;
+  });
+}
+
+function getLastVisualRect(rects: DOMRect[]): DOMRect | null {
+  const usableRects = rects.filter((rect) => rect.width > 0 || rect.height > 0);
+  if (usableRects.length === 0) {
+    return null;
+  }
+
+  return usableRects.reduce((lastRect, rect) => {
+    const bottomDelta = rect.bottom - lastRect.bottom;
+    if (bottomDelta > 0.5) {
+      return rect;
+    }
+
+    if (Math.abs(bottomDelta) <= 0.5 && rect.right > lastRect.right) {
+      return rect;
+    }
+
+    return lastRect;
+  });
+}
+
+function orderBibleNoteListItemsByAnchorPosition(
+  items: BibleNoteListItem[],
+  anchors: BibleNoteAnchorPositions
+): BibleNoteListItem[] {
+  return items
+    .map((item, index) => ({
+      anchor: anchors[item.id],
+      index,
+      item
+    }))
+    .sort((first, second) => {
+      if (first.anchor && second.anchor) {
+        const lineDelta = first.anchor.centerY - second.anchor.centerY;
+        if (Math.abs(lineDelta) > BIBLE_NOTE_SAME_LINE_THRESHOLD) {
+          return lineDelta;
+        }
+
+        const horizontalDelta = first.anchor.anchorLeft - second.anchor.anchorLeft;
+        if (Math.abs(horizontalDelta) > 0.5) {
+          return horizontalDelta;
+        }
+      }
+
+      if (first.anchor && !second.anchor) {
+        return -1;
+      }
+
+      if (!first.anchor && second.anchor) {
+        return 1;
+      }
+
+      return first.index - second.index;
+    })
+    .map(({ item }) => item);
+}
+
+function areBibleNoteAnchorPositionsEqual(
+  first: BibleNoteAnchorPositions,
+  second: BibleNoteAnchorPositions
 ): boolean {
   const firstKeys = Object.keys(first);
   const secondKeys = Object.keys(second);
@@ -757,8 +1339,46 @@ function areNumberRecordsEqual(
   }
 
   return firstKeys.every((key) => {
-    const numericKey = Number(key);
-    return Math.abs((first[numericKey] ?? 0) - (second[numericKey] ?? 0)) < 0.5;
+    const firstPosition = first[key];
+    const secondPosition = second[key];
+    if (!secondPosition) {
+      return false;
+    }
+
+    return (
+      Math.abs(firstPosition.anchorLeft - secondPosition.anchorLeft) < 0.5 &&
+      Math.abs(firstPosition.centerY - secondPosition.centerY) < 0.5 &&
+      Math.abs(firstPosition.connectorWidth - secondPosition.connectorWidth) < 0.5
+    );
+  });
+}
+
+function areStringNumberRecordsEqual(first: Record<string, number>, second: Record<string, number>) {
+  const firstKeys = Object.keys(first);
+  const secondKeys = Object.keys(second);
+  if (firstKeys.length !== secondKeys.length) {
+    return false;
+  }
+
+  return firstKeys.every((key) => Math.abs((first[key] ?? 0) - (second[key] ?? 0)) < 0.5);
+}
+
+function getBibleNoteMarkerSelector(noteId: string): string {
+  return `.bible-note-mark[data-bible-note-id="${escapeAttributeSelectorValue(noteId)}"]`;
+}
+
+function escapeAttributeSelectorValue(value: string): string {
+  return value.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
+}
+
+function clearBrowserSelection() {
+  window.getSelection()?.removeAllRanges();
+}
+
+function scrollBibleNoteCardIntoView(cardRefs: Map<string, HTMLElement>, noteId: string) {
+  cardRefs.get(noteId)?.scrollIntoView({
+    behavior: "smooth",
+    block: "nearest"
   });
 }
 
