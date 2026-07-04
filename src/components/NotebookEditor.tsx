@@ -113,6 +113,7 @@ type PasteUploadAnchor = {
 };
 
 type CommentAnchorPosition = {
+  anchorLeft: number;
   centerY: number;
   connectorWidth: number;
 };
@@ -147,6 +148,7 @@ const COMMENT_CARD_LEFT_INSET = 18;
 const COMMENT_CARD_CONNECTOR_TOP = 28;
 const COMMENT_CONNECTOR_DIAGONAL_RUN = 28;
 const COMMENT_CONNECTOR_TOP = 22;
+const COMMENT_SAME_LINE_THRESHOLD = 8;
 
 export function NotebookEditor({
   findReplaceAnchorRef,
@@ -360,6 +362,7 @@ export function NotebookEditor({
       }
 
       nextPositions[comment.id] = {
+        anchorLeft: markerRect.left,
         centerY: markerRect.top - listRect.top + markerRect.height / 2,
         connectorWidth: Math.max(
           24,
@@ -1428,11 +1431,16 @@ function CommentsSidebar({
     return () => resizeObserver?.disconnect();
   }, [activeCommentId, comments, editingCommentBody, editingCommentId, readOnly]);
 
+  const orderedComments = useMemo(
+    () => orderCommentsByAnchorPosition(comments, commentAnchorPositions),
+    [commentAnchorPositions, comments]
+  );
+
   const commentCardLayout = useMemo(() => {
     const layouts = new Map<string, CommentCardLayout>();
     let previousBottom = 0;
 
-    comments.forEach((comment) => {
+    orderedComments.forEach((comment) => {
       const anchor = commentAnchorPositions[comment.id];
       const cardHeight = commentCardHeights[comment.id] ?? COMMENT_CARD_DEFAULT_HEIGHT;
       const desiredTop = anchor ? anchor.centerY - COMMENT_CONNECTOR_TOP : previousBottom;
@@ -1467,7 +1475,7 @@ function CommentsSidebar({
       listHeight: previousBottom,
       layouts
     };
-  }, [commentAnchorPositions, commentCardHeights, comments]);
+  }, [commentAnchorPositions, commentCardHeights, orderedComments]);
   const commentListStyle: CSSProperties | undefined =
     commentCardLayout.listHeight > 0
       ? { minHeight: `${commentCardLayout.listHeight}px` }
@@ -1577,7 +1585,7 @@ function CommentsSidebar({
           </div>
         ) : null}
 
-        {comments.map((comment) => {
+        {orderedComments.map((comment) => {
           const isActive = activeCommentId === comment.id;
           const isEditing = editingCommentId === comment.id;
           const statusLabel = comment.resolved ? "已解决" : "待处理";
@@ -2604,10 +2612,47 @@ function areCommentAnchorPositionsEqual(
     }
 
     return (
+      Math.abs(firstPosition.anchorLeft - secondPosition.anchorLeft) < 0.5 &&
       Math.abs(firstPosition.centerY - secondPosition.centerY) < 0.5 &&
       Math.abs(firstPosition.connectorWidth - secondPosition.connectorWidth) < 0.5
     );
   });
+}
+
+function orderCommentsByAnchorPosition(
+  comments: NoteCommentThread[],
+  anchors: CommentAnchorPositions
+): NoteCommentThread[] {
+  return comments
+    .map((comment, index) => ({
+      anchor: anchors[comment.id],
+      comment,
+      index
+    }))
+    .sort((first, second) => {
+      if (first.anchor && second.anchor) {
+        const lineDelta = first.anchor.centerY - second.anchor.centerY;
+        if (Math.abs(lineDelta) > COMMENT_SAME_LINE_THRESHOLD) {
+          return lineDelta;
+        }
+
+        const horizontalDelta = first.anchor.anchorLeft - second.anchor.anchorLeft;
+        if (Math.abs(horizontalDelta) > 0.5) {
+          return horizontalDelta;
+        }
+      }
+
+      if (first.anchor && !second.anchor) {
+        return -1;
+      }
+
+      if (!first.anchor && second.anchor) {
+        return 1;
+      }
+
+      return first.index - second.index;
+    })
+    .map(({ comment }) => comment);
 }
 
 function areNumberRecordsEqual(first: Record<string, number>, second: Record<string, number>) {
