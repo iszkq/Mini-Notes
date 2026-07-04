@@ -123,6 +123,7 @@ type CommentAnchorPosition = {
   anchorLeft: number;
   centerY: number;
   connectorWidth: number;
+  diagonalRun: number;
 };
 
 type CommentAnchorPositions = Record<string, CommentAnchorPosition>;
@@ -162,7 +163,6 @@ type CommentSidebarItem =
 const IMAGE_URL_EXTENSION_PATTERN = /\.(?:avif|gif|jpe?g|png|svg|webp)(?:$|[?#])/i;
 const COMMENT_CARD_DEFAULT_HEIGHT = 96;
 const COMMENT_CARD_GAP = 10;
-const COMMENT_CARD_LEFT_INSET = 18;
 const COMMENT_CARD_CONNECTOR_TOP = 28;
 const COMMENT_CONNECTOR_DIAGONAL_RUN = 28;
 const COMMENT_CONNECTOR_TOP = 22;
@@ -366,12 +366,15 @@ export function NotebookEditor({
 
     const root = editorShellRef.current;
     const commentList = root?.querySelector<HTMLElement>(".note-comment-list");
-    if (!root || !commentList) {
+    const commentSidebar = root?.querySelector<HTMLElement>(".note-comments-sidebar");
+    if (!root || !commentList || !commentSidebar) {
       setCommentAnchorPositions((current) => (Object.keys(current).length === 0 ? current : {}));
       return;
     }
 
     const listRect = commentList.getBoundingClientRect();
+    const sidebarRect = commentSidebar.getBoundingClientRect();
+    const diagonalRun = getCommentConnectorDiagonalRun(listRect, sidebarRect);
     const nextPositions: CommentAnchorPositions = {};
 
     visibleComments.forEach((comment) => {
@@ -384,10 +387,8 @@ export function NotebookEditor({
       nextPositions[comment.id] = {
         anchorLeft: markerRect.left,
         centerY: markerRect.bottom - listRect.top + COMMENT_TEXT_CONNECTOR_OFFSET,
-        connectorWidth: Math.max(
-          24,
-          listRect.left + COMMENT_CARD_LEFT_INSET - markerRect.right
-        )
+        connectorWidth: Math.max(diagonalRun, listRect.left - markerRect.right),
+        diagonalRun
       };
     });
 
@@ -1431,19 +1432,20 @@ function CommentsSidebar({
     }
 
     const commentList = document.querySelector<HTMLElement>(".note-comment-list");
-    if (!commentList) {
+    const commentSidebar = document.querySelector<HTMLElement>(".note-comments-sidebar");
+    if (!commentList || !commentSidebar) {
       return null;
     }
 
     const listRect = commentList.getBoundingClientRect();
+    const sidebarRect = commentSidebar.getBoundingClientRect();
+    const diagonalRun = getCommentConnectorDiagonalRun(listRect, sidebarRect);
     const anchorRect = commentComposer.anchorRect;
     return {
       anchorLeft: anchorRect.left,
       centerY: anchorRect.bottom - listRect.top + COMMENT_TEXT_CONNECTOR_OFFSET,
-      connectorWidth: Math.max(
-        24,
-        listRect.left + COMMENT_CARD_LEFT_INSET - anchorRect.right
-      )
+      connectorWidth: Math.max(diagonalRun, listRect.left - anchorRect.right),
+      diagonalRun
     };
   }, [commentComposer?.anchorRect]);
 
@@ -1528,10 +1530,7 @@ function CommentsSidebar({
         ? clamp(COMMENT_CARD_CONNECTOR_TOP, 14, Math.max(14, cardHeight - 14))
         : COMMENT_CONNECTOR_TOP;
       const connectorWidth = anchor?.connectorWidth ?? 0;
-      const diagonalRun =
-        connectorWidth > 0
-          ? clamp(connectorWidth * 0.36, 14, COMMENT_CONNECTOR_DIAGONAL_RUN)
-          : 0;
+      const diagonalRun = anchor ? Math.min(anchor.diagonalRun, connectorWidth) : 0;
       const diagonalRise = connectorTop - anchorTop;
       const diagonalLength = diagonalRun > 0 ? Math.hypot(diagonalRun, diagonalRise) : 0;
 
@@ -2748,9 +2747,18 @@ function areCommentAnchorPositionsEqual(
     return (
       Math.abs(firstPosition.anchorLeft - secondPosition.anchorLeft) < 0.5 &&
       Math.abs(firstPosition.centerY - secondPosition.centerY) < 0.5 &&
-      Math.abs(firstPosition.connectorWidth - secondPosition.connectorWidth) < 0.5
+      Math.abs(firstPosition.connectorWidth - secondPosition.connectorWidth) < 0.5 &&
+      Math.abs(firstPosition.diagonalRun - secondPosition.diagonalRun) < 0.5
     );
   });
+}
+
+function getCommentConnectorDiagonalRun(listRect: DOMRect, sidebarRect: DOMRect): number {
+  return clamp(
+    listRect.left - sidebarRect.left,
+    0,
+    COMMENT_CONNECTOR_DIAGONAL_RUN
+  );
 }
 
 function orderCommentSidebarItemsByAnchorPosition(
