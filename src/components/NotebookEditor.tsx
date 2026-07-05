@@ -17,9 +17,12 @@ import {
   CheckCircle2,
   ChevronDown,
   FileText,
+  GitCompareArrows,
+  ListChecks,
   MessageSquareText,
   Pencil,
   RotateCcw,
+  Timer,
   Trash2,
   X
 } from "lucide-react";
@@ -44,6 +47,9 @@ import {
 import {
   COLLAPSIBLE_CONTENT_DEFAULT_BODY,
   COLLAPSIBLE_CONTENT_DEFAULT_TITLE,
+  COMPARISON_DEFAULT_PAYLOAD,
+  STEPS_DEFAULT_PAYLOAD,
+  TIMELINE_DEFAULT_PAYLOAD,
   collapsibleEnterExtension,
   noteSchema
 } from "../editorSchema";
@@ -775,6 +781,56 @@ export function NotebookEditor({
     editor.focus();
   }, [editor, getCurrentBlockTextFromDom, getCurrentTextBlock]);
 
+  const insertContentWidgetBlock = useCallback(
+    (
+      blockType: "contentTimeline" | "contentSteps" | "contentComparison",
+      payload: string
+    ) => {
+      const currentBlock = getCurrentTextBlock();
+      const plainText = getCurrentBlockTextFromDom();
+      const widgetBlock = {
+        type: blockType,
+        props: {
+          payload
+        }
+      } as unknown as PartialBlock;
+      const spacerBlock = {
+        type: "paragraph",
+        content: []
+      } as PartialBlock;
+      const blocksToInsert = [widgetBlock, spacerBlock];
+
+      if (!plainText || plainText.startsWith("/")) {
+        const result = editor.replaceBlocks([currentBlock.id], blocksToInsert);
+        const cursorBlock = result.insertedBlocks[1] ?? result.insertedBlocks[0];
+        if (cursorBlock) {
+          editor.setTextCursorPosition(cursorBlock);
+        }
+      } else {
+        const insertedBlocks = editor.insertBlocks(blocksToInsert, currentBlock.id, "after");
+        const cursorBlock = insertedBlocks[1] ?? insertedBlocks[0];
+        if (cursorBlock) {
+          editor.setTextCursorPosition(cursorBlock);
+        }
+      }
+
+      editor.focus();
+    },
+    [editor, getCurrentBlockTextFromDom, getCurrentTextBlock]
+  );
+
+  const insertTimeline = useCallback(() => {
+    insertContentWidgetBlock("contentTimeline", TIMELINE_DEFAULT_PAYLOAD);
+  }, [insertContentWidgetBlock]);
+
+  const insertSteps = useCallback(() => {
+    insertContentWidgetBlock("contentSteps", STEPS_DEFAULT_PAYLOAD);
+  }, [insertContentWidgetBlock]);
+
+  const insertComparison = useCallback(() => {
+    insertContentWidgetBlock("contentComparison", COMPARISON_DEFAULT_PAYLOAD);
+  }, [insertContentWidgetBlock]);
+
   const insertSubPage = useCallback(async () => {
     if (!onCreateSubPage) {
       return;
@@ -1180,9 +1236,33 @@ export function NotebookEditor({
         title: "折叠内容",
         subtext: "可自定义标题和正文的折叠区块",
         aliases: ["折叠", "折叠内容", "收起", "collapse", "accordion"],
-        group: "基础",
+        group: "高级功能",
         icon: <ChevronDown size={18} />,
         onItemClick: insertCollapsibleContent
+      };
+      const timelineItem: DefaultReactSuggestionItem = {
+        title: "时间轴",
+        subtext: "按时间顺序展示事件",
+        aliases: ["时间线", "时间轴", "时间", "timeline", "time"],
+        group: "高级功能",
+        icon: <Timer size={18} />,
+        onItemClick: insertTimeline
+      };
+      const stepsItem: DefaultReactSuggestionItem = {
+        title: "步骤",
+        subtext: "展示流程步骤",
+        aliases: ["步骤", "流程", "step", "steps", "process"],
+        group: "高级功能",
+        icon: <ListChecks size={18} />,
+        onItemClick: insertSteps
+      };
+      const comparisonItem: DefaultReactSuggestionItem = {
+        title: "对比",
+        subtext: "并排展示多个项目的差异",
+        aliases: ["对比", "比较", "compare", "comparison", "diff"],
+        group: "高级功能",
+        icon: <GitCompareArrows size={18} />,
+        onItemClick: insertComparison
       };
       const bibleItem: DefaultReactSuggestionItem = {
         title: "圣经",
@@ -1210,14 +1290,22 @@ export function NotebookEditor({
         onItemClick: () => setEmojiPickerOpen(true)
       };
       const items = [...defaultItems];
-      items.splice(toggleListIndex >= 0 ? toggleListIndex + 1 : 0, 0, collapsibleItem);
-      items.splice(toggleListIndex >= 0 ? toggleListIndex + 2 : 1, 0, subPageItem);
+      items.splice(toggleListIndex >= 0 ? toggleListIndex + 1 : 0, 0, subPageItem);
       items.splice(heading3Index >= 0 ? heading3Index + 1 : 0, 0, bibleItem);
+      items.push(collapsibleItem, timelineItem, stepsItem, comparisonItem);
       items.push(emojiItem);
 
       return filterSuggestionItems(items, query);
     },
-    [editor, insertCollapsibleContent, insertSubPage, openBibleInsertModal]
+    [
+      editor,
+      insertCollapsibleContent,
+      insertComparison,
+      insertSteps,
+      insertSubPage,
+      insertTimeline,
+      openBibleInsertModal
+    ]
   );
 
   const renderFormattingToolbar = useCallback(

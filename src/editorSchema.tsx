@@ -6,13 +6,44 @@ import {
   type BlockNoteEditor
 } from "@blocknote/core";
 import { createReactBlockSpec, createReactStyleSpec } from "@blocknote/react";
-import { ChevronDown, FileText } from "lucide-react";
+import { ChevronDown, FileText, Plus, Trash2 } from "lucide-react";
 import { formatBibleReference, parseBibleVersePayload } from "./bible";
 import { parseNoteComment } from "./comments";
 
 const FONT_SIZE_VALUES = new Set(["12px", "14px", "16px", "18px", "20px", "24px", "28px", "32px"]);
 export const COLLAPSIBLE_CONTENT_DEFAULT_TITLE = "这是标题可以自定义";
 export const COLLAPSIBLE_CONTENT_DEFAULT_BODY = "这是内容。。。。";
+
+export const TIMELINE_DEFAULT_PAYLOAD = JSON.stringify([
+  { content: "开始准备。", id: "timeline-1", time: "09:00" },
+  { content: "完成关键节点。", id: "timeline-2", time: "10:30" }
+]);
+export const STEPS_DEFAULT_PAYLOAD = JSON.stringify([
+  { body: "说明第一步要做什么。", id: "step-1", title: "第一步" },
+  { body: "说明第二步要做什么。", id: "step-2", title: "第二步" }
+]);
+export const COMPARISON_DEFAULT_PAYLOAD = JSON.stringify([
+  { body: "之前的内容", id: "compare-1", title: "之前" },
+  { body: "之后的内容", id: "compare-2", title: "之后" }
+]);
+
+type TimelineItem = {
+  content: string;
+  id: string;
+  time: string;
+};
+
+type StepItem = {
+  body: string;
+  id: string;
+  title: string;
+};
+
+type ComparisonItem = {
+  body: string;
+  id: string;
+  title: string;
+};
 
 const fontSize = createReactStyleSpec(
   {
@@ -333,6 +364,396 @@ const bibleVerseCard = createReactBlockSpec(
   }
 )();
 
+const timelineBlock = createReactBlockSpec(
+  {
+    type: "contentTimeline",
+    propSchema: {
+      payload: {
+        default: TIMELINE_DEFAULT_PAYLOAD
+      }
+    },
+    content: "none"
+  },
+  {
+    render: ({ block, editor }) => {
+      const items = parseTimelineItems(block.props.payload);
+      const updateItems = (nextItems: TimelineItem[]) => {
+        if (!editor.isEditable) {
+          return;
+        }
+
+        editor.updateBlock(block, {
+          props: {
+            payload: serializeWidgetItems(nextItems)
+          }
+        });
+      };
+
+      return (
+        <section className="content-widget-block content-widget-timeline" contentEditable={false}>
+          <ol className="content-widget-timeline__list">
+            {items.map((item, index) => (
+              <li className="content-widget-timeline__item" key={item.id}>
+                <span className="content-widget-timeline__dot" aria-hidden="true" />
+                <div className="content-widget-timeline__card">
+                  <input
+                    aria-label={`时间轴第 ${index + 1} 项时间`}
+                    className="content-widget-input content-widget-timeline__time"
+                    onChange={(event) =>
+                      updateItems(
+                        items.map((current) =>
+                          current.id === item.id ? { ...current, time: event.target.value } : current
+                        )
+                      )
+                    }
+                    onKeyDown={stopWidgetEditorEvent}
+                    onMouseDown={stopWidgetEditorEvent}
+                    readOnly={!editor.isEditable}
+                    value={item.time}
+                  />
+                  <textarea
+                    aria-label={`时间轴第 ${index + 1} 项内容`}
+                    className="content-widget-textarea content-widget-timeline__content"
+                    onChange={(event) =>
+                      updateItems(
+                        items.map((current) =>
+                          current.id === item.id
+                            ? { ...current, content: event.target.value }
+                            : current
+                        )
+                      )
+                    }
+                    onKeyDown={stopWidgetEditorEvent}
+                    onMouseDown={stopWidgetEditorEvent}
+                    readOnly={!editor.isEditable}
+                    rows={1}
+                    value={item.content}
+                  />
+                  {editor.isEditable ? (
+                    <button
+                      aria-label={`删除时间轴第 ${index + 1} 项`}
+                      className="content-widget-icon-button"
+                      disabled={items.length <= 1}
+                      onClick={() => updateItems(items.filter((current) => current.id !== item.id))}
+                      onMouseDown={stopWidgetEditorEvent}
+                      type="button"
+                    >
+                      <Trash2 size={14} />
+                    </button>
+                  ) : null}
+                </div>
+              </li>
+            ))}
+          </ol>
+          {editor.isEditable ? (
+            <button
+              className="content-widget-add-button"
+              onClick={() =>
+                updateItems([
+                  ...items,
+                  {
+                    content: "新的时间事件。",
+                    id: createWidgetItemId("timeline"),
+                    time: "12:00"
+                  }
+                ])
+              }
+              onMouseDown={stopWidgetEditorEvent}
+              type="button"
+            >
+              <Plus size={14} />
+              添加时间点
+            </button>
+          ) : null}
+        </section>
+      );
+    },
+    toExternalHTML: ({ block }) => {
+      const items = parseTimelineItems(block.props.payload);
+
+      return (
+        <section className="content-widget-block content-widget-timeline">
+          <ol className="content-widget-timeline__list">
+            {items.map((item) => (
+              <li className="content-widget-timeline__item" key={item.id}>
+                <span className="content-widget-timeline__dot" aria-hidden="true" />
+                <div className="content-widget-timeline__card">
+                  <time className="content-widget-timeline__time">{item.time}</time>
+                  <div className="content-widget-timeline__content">{item.content}</div>
+                </div>
+              </li>
+            ))}
+          </ol>
+        </section>
+      );
+    }
+  }
+)();
+
+const stepsBlock = createReactBlockSpec(
+  {
+    type: "contentSteps",
+    propSchema: {
+      payload: {
+        default: STEPS_DEFAULT_PAYLOAD
+      }
+    },
+    content: "none"
+  },
+  {
+    render: ({ block, editor }) => {
+      const items = parseStepItems(block.props.payload);
+      const updateItems = (nextItems: StepItem[]) => {
+        if (!editor.isEditable) {
+          return;
+        }
+
+        editor.updateBlock(block, {
+          props: {
+            payload: serializeWidgetItems(nextItems)
+          }
+        });
+      };
+
+      return (
+        <section className="content-widget-block content-widget-steps" contentEditable={false}>
+          <ol className="content-widget-steps__list">
+            {items.map((item, index) => (
+              <li className="content-widget-steps__item" key={item.id}>
+                <span className="content-widget-steps__marker">{index + 1}</span>
+                <div className="content-widget-steps__content">
+                  <input
+                    aria-label={`步骤 ${index + 1} 标题`}
+                    className="content-widget-input content-widget-steps__title"
+                    onChange={(event) =>
+                      updateItems(
+                        items.map((current) =>
+                          current.id === item.id ? { ...current, title: event.target.value } : current
+                        )
+                      )
+                    }
+                    onKeyDown={stopWidgetEditorEvent}
+                    onMouseDown={stopWidgetEditorEvent}
+                    readOnly={!editor.isEditable}
+                    value={item.title}
+                  />
+                  <textarea
+                    aria-label={`步骤 ${index + 1} 说明`}
+                    className="content-widget-textarea content-widget-steps__body"
+                    onChange={(event) =>
+                      updateItems(
+                        items.map((current) =>
+                          current.id === item.id ? { ...current, body: event.target.value } : current
+                        )
+                      )
+                    }
+                    onKeyDown={stopWidgetEditorEvent}
+                    onMouseDown={stopWidgetEditorEvent}
+                    readOnly={!editor.isEditable}
+                    rows={1}
+                    value={item.body}
+                  />
+                </div>
+                {editor.isEditable ? (
+                  <button
+                    aria-label={`删除步骤 ${index + 1}`}
+                    className="content-widget-icon-button"
+                    disabled={items.length <= 1}
+                    onClick={() => updateItems(items.filter((current) => current.id !== item.id))}
+                    onMouseDown={stopWidgetEditorEvent}
+                    type="button"
+                  >
+                    <Trash2 size={14} />
+                  </button>
+                ) : null}
+              </li>
+            ))}
+          </ol>
+          {editor.isEditable ? (
+            <button
+              className="content-widget-add-button"
+              onClick={() =>
+                updateItems([
+                  ...items,
+                  {
+                    body: "说明下一步要做什么。",
+                    id: createWidgetItemId("step"),
+                    title: `第${items.length + 1}步`
+                  }
+                ])
+              }
+              onMouseDown={stopWidgetEditorEvent}
+              type="button"
+            >
+              <Plus size={14} />
+              添加步骤
+            </button>
+          ) : null}
+        </section>
+      );
+    },
+    toExternalHTML: ({ block }) => {
+      const items = parseStepItems(block.props.payload);
+
+      return (
+        <section className="content-widget-block content-widget-steps">
+          <ol className="content-widget-steps__list">
+            {items.map((item, index) => (
+              <li className="content-widget-steps__item" key={item.id}>
+                <span className="content-widget-steps__marker">{index + 1}</span>
+                <div className="content-widget-steps__content">
+                  <div className="content-widget-steps__title">{item.title}</div>
+                  <div className="content-widget-steps__body">{item.body}</div>
+                </div>
+              </li>
+            ))}
+          </ol>
+        </section>
+      );
+    }
+  }
+)();
+
+const comparisonBlock = createReactBlockSpec(
+  {
+    type: "contentComparison",
+    propSchema: {
+      payload: {
+        default: COMPARISON_DEFAULT_PAYLOAD
+      }
+    },
+    content: "none"
+  },
+  {
+    render: ({ block, editor }) => {
+      const items = parseComparisonItems(block.props.payload);
+      const updateItems = (nextItems: ComparisonItem[]) => {
+        if (!editor.isEditable) {
+          return;
+        }
+
+        editor.updateBlock(block, {
+          props: {
+            payload: serializeWidgetItems(nextItems)
+          }
+        });
+      };
+
+      return (
+        <section className="content-widget-block content-widget-comparison" contentEditable={false}>
+          <div
+            className="content-widget-comparison__grid"
+            style={{ gridTemplateColumns: `repeat(${items.length}, minmax(220px, 1fr))` }}
+          >
+            {items.map((item, index) => (
+              <article
+                className={getClassName(
+                  "content-widget-comparison__panel",
+                  index === 1 ? "is-accent" : undefined
+                )}
+                key={item.id}
+              >
+                <div className="content-widget-comparison__head">
+                  <input
+                    aria-label={`对比项 ${index + 1} 标题`}
+                    className="content-widget-input content-widget-comparison__title"
+                    onChange={(event) =>
+                      updateItems(
+                        items.map((current) =>
+                          current.id === item.id ? { ...current, title: event.target.value } : current
+                        )
+                      )
+                    }
+                    onKeyDown={stopWidgetEditorEvent}
+                    onMouseDown={stopWidgetEditorEvent}
+                    readOnly={!editor.isEditable}
+                    value={item.title}
+                  />
+                  {editor.isEditable ? (
+                    <button
+                      aria-label={`删除对比项 ${index + 1}`}
+                      className="content-widget-icon-button"
+                      disabled={items.length <= 2}
+                      onClick={() => updateItems(items.filter((current) => current.id !== item.id))}
+                      onMouseDown={stopWidgetEditorEvent}
+                      type="button"
+                    >
+                      <Trash2 size={14} />
+                    </button>
+                  ) : null}
+                </div>
+                <textarea
+                  aria-label={`对比项 ${index + 1} 内容`}
+                  className="content-widget-textarea content-widget-comparison__body"
+                  onChange={(event) =>
+                    updateItems(
+                      items.map((current) =>
+                        current.id === item.id ? { ...current, body: event.target.value } : current
+                      )
+                    )
+                  }
+                  onKeyDown={stopWidgetEditorEvent}
+                  onMouseDown={stopWidgetEditorEvent}
+                  readOnly={!editor.isEditable}
+                  rows={2}
+                  value={item.body}
+                />
+              </article>
+            ))}
+          </div>
+          {editor.isEditable ? (
+            <button
+              className="content-widget-add-button"
+              onClick={() =>
+                updateItems([
+                  ...items,
+                  {
+                    body: "新的对比内容",
+                    id: createWidgetItemId("compare"),
+                    title: `对比项 ${items.length + 1}`
+                  }
+                ])
+              }
+              onMouseDown={stopWidgetEditorEvent}
+              type="button"
+            >
+              <Plus size={14} />
+              添加对比项
+            </button>
+          ) : null}
+        </section>
+      );
+    },
+    toExternalHTML: ({ block }) => {
+      const items = parseComparisonItems(block.props.payload);
+
+      return (
+        <section className="content-widget-block content-widget-comparison">
+          <div
+            className="content-widget-comparison__grid"
+            style={{ gridTemplateColumns: `repeat(${items.length}, minmax(220px, 1fr))` }}
+          >
+            {items.map((item, index) => (
+              <article
+                className={getClassName(
+                  "content-widget-comparison__panel",
+                  index === 1 ? "is-accent" : undefined
+                )}
+                key={item.id}
+              >
+                <div className="content-widget-comparison__head">
+                  <div className="content-widget-comparison__title">{item.title}</div>
+                </div>
+                <div className="content-widget-comparison__body">{item.body}</div>
+              </article>
+            ))}
+          </div>
+        </section>
+      );
+    }
+  }
+)();
+
 const pageLinkBlock = createReactBlockSpec(
   {
     type: "pageLink",
@@ -444,11 +865,110 @@ function getBibleCardTitle(
   return titleEdited ? title : title.trim() || getBibleCardDefaultTitle(count, verseCount);
 }
 
+function parseTimelineItems(value: unknown): TimelineItem[] {
+  return normalizeTimelineItems(parseWidgetItems(value, TIMELINE_DEFAULT_PAYLOAD));
+}
+
+function parseStepItems(value: unknown): StepItem[] {
+  return normalizeStepItems(parseWidgetItems(value, STEPS_DEFAULT_PAYLOAD));
+}
+
+function parseComparisonItems(value: unknown): ComparisonItem[] {
+  const items = normalizeComparisonItems(parseWidgetItems(value, COMPARISON_DEFAULT_PAYLOAD));
+  while (items.length < 2) {
+    items.push({
+      body: items.length === 0 ? "之前的内容" : "之后的内容",
+      id: createWidgetItemId("compare"),
+      title: items.length === 0 ? "之前" : "之后"
+    });
+  }
+
+  return items;
+}
+
+function parseWidgetItems(value: unknown, fallbackPayload: string): Array<Record<string, unknown>> {
+  const source = typeof value === "string" && value.trim() ? value : fallbackPayload;
+
+  try {
+    const parsed = JSON.parse(source);
+    return Array.isArray(parsed) ? parsed.filter(isRecord) : [];
+  } catch {
+    try {
+      const parsed = JSON.parse(fallbackPayload);
+      return Array.isArray(parsed) ? parsed.filter(isRecord) : [];
+    } catch {
+      return [];
+    }
+  }
+}
+
+function normalizeTimelineItems(items: Array<Record<string, unknown>>): TimelineItem[] {
+  const nextItems = items
+    .map((item, index) => ({
+      content: cleanWidgetText(item.content, index === 0 ? "开始准备。" : "完成关键节点。"),
+      id: cleanWidgetText(item.id, createWidgetItemId("timeline")),
+      time: cleanWidgetText(item.time, index === 0 ? "09:00" : "10:30")
+    }));
+
+  return nextItems.length > 0
+    ? nextItems
+    : normalizeTimelineItems(parseWidgetItems(TIMELINE_DEFAULT_PAYLOAD, TIMELINE_DEFAULT_PAYLOAD));
+}
+
+function normalizeStepItems(items: Array<Record<string, unknown>>): StepItem[] {
+  const nextItems = items
+    .map((item, index) => ({
+      body: cleanWidgetText(item.body, index === 0 ? "说明第一步要做什么。" : "说明第二步要做什么。"),
+      id: cleanWidgetText(item.id, createWidgetItemId("step")),
+      title: cleanWidgetText(item.title, index === 0 ? "第一步" : "第二步")
+    }));
+
+  return nextItems.length > 0
+    ? nextItems
+    : normalizeStepItems(parseWidgetItems(STEPS_DEFAULT_PAYLOAD, STEPS_DEFAULT_PAYLOAD));
+}
+
+function normalizeComparisonItems(items: Array<Record<string, unknown>>): ComparisonItem[] {
+  const nextItems = items
+    .map((item, index) => ({
+      body: cleanWidgetText(item.body, index === 0 ? "之前的内容" : "之后的内容"),
+      id: cleanWidgetText(item.id, createWidgetItemId("compare")),
+      title: cleanWidgetText(item.title, index === 0 ? "之前" : "之后")
+    }));
+
+  return nextItems.length > 0
+    ? nextItems
+    : normalizeComparisonItems(parseWidgetItems(COMPARISON_DEFAULT_PAYLOAD, COMPARISON_DEFAULT_PAYLOAD));
+}
+
+function serializeWidgetItems(items: Array<TimelineItem | StepItem | ComparisonItem>): string {
+  return JSON.stringify(items);
+}
+
+function cleanWidgetText(value: unknown, fallback: string): string {
+  return typeof value === "string" ? value : fallback;
+}
+
+function createWidgetItemId(prefix: string): string {
+  return `${prefix}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+}
+
+function stopWidgetEditorEvent(event: { stopPropagation: () => void }) {
+  event.stopPropagation();
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value && typeof value === "object" && !Array.isArray(value));
+}
+
 export const noteSchema = BlockNoteSchema.create({
   blockSpecs: {
     ...defaultBlockSpecs,
     collapsibleContent,
     bibleVerseCard,
+    contentTimeline: timelineBlock,
+    contentSteps: stepsBlock,
+    contentComparison: comparisonBlock,
     pageLink: pageLinkBlock
   },
   styleSpecs: {
