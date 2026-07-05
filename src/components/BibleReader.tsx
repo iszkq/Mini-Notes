@@ -113,6 +113,23 @@ type BibleNoteCardStyle = CSSProperties & {
   "--bible-note-horizontal-width"?: string;
 };
 
+type BibleVerseHighlight = {
+  end: number;
+  notes: BibleNote[];
+  start: number;
+};
+
+type BibleVerseMatchedRange = {
+  end: number;
+  note: BibleNote;
+  start: number;
+};
+
+type BibleTextRange = {
+  end: number;
+  start: number;
+};
+
 const BIBLE_NOTE_CARD_DEFAULT_HEIGHT = 96;
 const BIBLE_NOTE_CARD_GAP = 8;
 const BIBLE_NOTE_CONNECTOR_TOP = 22;
@@ -295,9 +312,11 @@ export function BibleReader({ onError }: BibleReaderProps) {
       notes.forEach((note) => {
         const marker =
           root.querySelector<HTMLElement>(getBibleNoteMarkerSelector(note.id)) ??
-          verseRowRefs.current.get(note.verseStart) ??
           null;
-        const markerRect = getBibleAnchorClientRect(marker);
+        const markerRect =
+          getBibleAnchorClientRect(marker) ??
+          getBibleNoteAnchorRect(root, note) ??
+          getBibleAnchorClientRect(verseRowRefs.current.get(note.verseStart) ?? null);
         if (!markerRect) {
           return;
         }
@@ -1026,16 +1045,24 @@ function renderBibleVerseContent(
       nodes.push(verse.content.slice(cursor, highlight.start));
     }
 
+    const activeNote = highlight.notes.find((note) => note.id === activeNoteId);
+    const primaryNote = activeNote ?? highlight.notes[0];
+    const title = highlight.notes
+      .map((note) => note.body)
+      .filter(Boolean)
+      .join("\n");
+
     nodes.push(
       <span
-        className={clsx("bible-note-mark", activeNoteId === highlight.note.id && "is-active")}
-        data-bible-note-id={highlight.note.id}
-        key={`${highlight.note.id}-${index}`}
+        className={clsx("bible-note-mark", activeNote && "is-active")}
+        data-bible-note-id={highlight.notes.length === 1 ? primaryNote.id : undefined}
+        data-bible-note-ids={highlight.notes.map((note) => note.id).join(" ")}
+        key={`${highlight.notes.map((note) => note.id).join("-")}-${index}`}
         onClick={(event) => {
           event.stopPropagation();
-          onSelectNote(highlight.note.id);
+          onSelectNote(primaryNote.id);
         }}
-        title={highlight.note.body || "笔记"}
+        title={title || "笔记"}
       >
         {verse.content.slice(highlight.start, highlight.end)}
       </span>
@@ -1054,8 +1081,8 @@ function getBibleVerseHighlights(
   content: string,
   notes: BibleNote[],
   verseNumber: number
-): Array<{ end: number; note: BibleNote; start: number }> {
-  const ranges: Array<{ end: number; note: BibleNote; start: number }> = [];
+): BibleVerseHighlight[] {
+  const ranges: BibleVerseMatchedRange[] = [];
 
   sortBibleNotes(notes).forEach((note) => {
     const selectedText = getBibleNoteSelectedTextForVerse(note, verseNumber);
@@ -1063,19 +1090,19 @@ function getBibleVerseHighlights(
       return;
     }
 
-    const start = findSelectedTextIndex(content, selectedText, ranges);
-    if (start < 0) {
+    const range = findSelectedTextRange(content, selectedText);
+    if (!range) {
       return;
     }
 
     ranges.push({
-      end: start + selectedText.length,
+      end: range.end,
       note,
-      start
+      start: range.start
     });
   });
 
-  return ranges.sort((first, second) => first.start - second.start || first.end - second.end);
+  return mergeBibleVerseHighlightRanges(ranges);
 }
 
 function getBibleNoteSelectedTextForVerse(note: BibleNote, verseNumber: number): string {
@@ -1091,23 +1118,77 @@ function getBibleNoteSelectedTextForVerse(note: BibleNote, verseNumber: number):
   return "";
 }
 
-function findSelectedTextIndex(
-  content: string,
-  selectedText: string,
-  existingRanges: Array<{ end: number; start: number }>
-): number {
-  let start = content.indexOf(selectedText);
-  while (start >= 0) {
-    const end = start + selectedText.length;
-    const overlaps = existingRanges.some((range) => start < range.end && end > range.start);
-    if (!overlaps) {
-      return start;
-    }
-
-    start = content.indexOf(selectedText, start + 1);
+function findSelectedTextRange(content: string, selectedText: string): BibleTextRange | null {
+  const cleanedText = cleanSelectedBibleText(selectedText);
+  if (!cleanedText) {
+    return null;
   }
 
-  return -1;
+  const exactStart = content.indexOf(cleanedText);
+  if (exactStart >= 0) {
+    return {
+      end: exactStart + cleanedText.length,
+      start: exactStart
+    };
+  }
+
+  const normalizedContent = normalizeBibleTextForMatch(content);
+  const normalizedText = normalizeBibleTextForMatch(cleanedText);
+  if (!normalizedText.text) {
+    return null;
+  }
+
+  const normalizedStart = normalizedContent.text.indexOf(normalizedText.text);
+  if (normalizedStart < 0) {
+    return null;
+  }
+
+  const normalizedEnd = normalizedStart + normalizedText.text.length - 1;
+  return {
+    end: normalizedContent.indexes[normalizedEnd] + 1,
+    start: normalizedContent.indexes[normalizedStart]
+  };
+}
+
+function mergeBibleVerseHighlightRanges(ranges: BibleVerseMatchedRange[]): BibleVerseHighlight[] {
+  const highlights: BibleVerseHighlight[] = [];
+
+  ranges
+    .filter((range) => range.end > range.start)
+    .sort((first, second) => first.start - second.start || second.end - first.end)
+    .forEach((range) => {
+      const previous = highlights[highlights.length - 1];
+      if (previous && range.start < previous.end) {
+        previous.end = Math.max(previous.end, range.end);
+        previous.notes.push(range.note);
+        return;
+      }
+
+      highlights.push({
+        end: range.end,
+        notes: [range.note],
+        start: range.start
+      });
+    });
+
+  return highlights;
+}
+
+function normalizeBibleTextForMatch(value: string): { indexes: number[]; text: string } {
+  const indexes: number[] = [];
+  let text = "";
+
+  for (let index = 0; index < value.length; index += 1) {
+    const character = value[index];
+    if (/\s/.test(character)) {
+      continue;
+    }
+
+    indexes.push(index);
+    text += character;
+  }
+
+  return { indexes, text };
 }
 
 function collectBibleTextSelection(
@@ -1314,14 +1395,38 @@ function getBibleSelectionTargetAnchorRect(
   return getLastVisualRect(rects);
 }
 
+function getBibleNoteAnchorRect(root: HTMLElement, note: BibleNote): BibleAnchorClientRect | null {
+  const rects: DOMRect[] = [];
+
+  const selectedVerses =
+    note.selectedVerses.length > 0
+      ? note.selectedVerses
+      : note.verseStart === note.verseEnd
+        ? [{ text: note.selectedText, verseNumber: note.verseStart }]
+        : [];
+
+  selectedVerses.forEach((selectedVerse) => {
+    const verseText = root.querySelector<HTMLElement>(
+      `.bible-reader-verse-text[data-bible-verse-number="${selectedVerse.verseNumber}"]`
+    );
+    if (!verseText) {
+      return;
+    }
+
+    rects.push(...getTextMatchClientRects(verseText, selectedVerse.text));
+  });
+
+  return getLastVisualRect(rects);
+}
+
 function getTextMatchClientRects(element: HTMLElement, text: string): DOMRect[] {
   const content = element.textContent ?? "";
-  const start = content.indexOf(text);
-  if (start < 0) {
+  const rangeMatch = findSelectedTextRange(content, text);
+  if (!rangeMatch) {
     return [];
   }
 
-  const range = createTextOffsetRange(element, start, start + text.length);
+  const range = createTextOffsetRange(element, rangeMatch.start, rangeMatch.end);
   if (!range) {
     return [];
   }
