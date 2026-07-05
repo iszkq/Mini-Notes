@@ -306,8 +306,10 @@ export function BibleReader({ onError }: BibleReaderProps) {
       });
 
       if (selectionTarget) {
+        const draftAnchorRect =
+          getBibleSelectionTargetAnchorRect(root, selectionTarget) ?? selectionTarget.anchorRect;
         nextAnchorPositions[BIBLE_NOTE_DRAFT_ID] = createBibleNoteAnchorPosition(
-          selectionTarget.anchorRect,
+          draftAnchorRect,
           rootRect,
           listRect
         );
@@ -1290,6 +1292,74 @@ function getBibleAnchorClientRect(element: HTMLElement | null): DOMRect | null {
 
   const rect = element.getBoundingClientRect();
   return rect.width > 0 && rect.height > 0 ? rect : null;
+}
+
+function getBibleSelectionTargetAnchorRect(
+  root: HTMLElement,
+  target: BibleSelectionTarget
+): BibleAnchorClientRect | null {
+  const rects: DOMRect[] = [];
+
+  target.selectedVerses.forEach((selectedVerse) => {
+    const verseText = root.querySelector<HTMLElement>(
+      `.bible-reader-verse-text[data-bible-verse-number="${selectedVerse.verseNumber}"]`
+    );
+    if (!verseText) {
+      return;
+    }
+
+    rects.push(...getTextMatchClientRects(verseText, selectedVerse.text));
+  });
+
+  return getLastVisualRect(rects);
+}
+
+function getTextMatchClientRects(element: HTMLElement, text: string): DOMRect[] {
+  const content = element.textContent ?? "";
+  const start = content.indexOf(text);
+  if (start < 0) {
+    return [];
+  }
+
+  const range = createTextOffsetRange(element, start, start + text.length);
+  if (!range) {
+    return [];
+  }
+
+  const rects = Array.from(range.getClientRects());
+  range.detach();
+  return rects;
+}
+
+function createTextOffsetRange(element: HTMLElement, start: number, end: number): Range | null {
+  const range = document.createRange();
+  const walker = document.createTreeWalker(element, NodeFilter.SHOW_TEXT);
+  let offset = 0;
+  let hasStart = false;
+  let node = walker.nextNode();
+
+  while (node) {
+    const textNode = node as Text;
+    const length = textNode.nodeValue?.length ?? 0;
+    const nodeStart = offset;
+    const nodeEnd = offset + length;
+
+    if (!hasStart && start >= nodeStart && start <= nodeEnd) {
+      range.setStart(textNode, clamp(start - nodeStart, 0, length));
+      hasStart = true;
+    }
+
+    if (hasStart && end >= nodeStart && end <= nodeEnd) {
+      range.setEnd(textNode, clamp(end - nodeStart, 0, length));
+      return range;
+    }
+
+    offset = nodeEnd;
+    node = walker.nextNode();
+  }
+
+  range.detach();
+  return null;
 }
 
 function getFirstVisualRect(rects: DOMRect[]): DOMRect | null {
