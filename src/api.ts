@@ -1,9 +1,11 @@
 import type {
   AdminUpload,
   AdminUploadUpdateInput,
+  AdminStorageSummary,
   AdminUser,
   AdminUserCreateInput,
   AdminUserUpdateInput,
+  AdminUsersResponse,
   BibleNote,
   BibleNoteCreateInput,
   BibleNoteUpdateInput,
@@ -149,8 +151,16 @@ export async function importImageAsset(url: string): Promise<UploadResult> {
   });
 }
 
-export async function listAdminUsers(): Promise<AdminUser[]> {
-  return apiRequest("/api/admin/users");
+export async function listAdminUsers(): Promise<AdminUsersResponse> {
+  const response = await apiRequest<AdminUsersResponse | AdminUser[]>("/api/admin/users");
+  if (Array.isArray(response)) {
+    return {
+      users: response,
+      storage: summarizeAdminStorage(response)
+    };
+  }
+
+  return response;
 }
 
 export async function createAdminUser(input: AdminUserCreateInput): Promise<AdminUser> {
@@ -243,6 +253,29 @@ function tryParseJson(value: string): unknown {
   } catch {
     return null;
   }
+}
+
+function summarizeAdminStorage(users: AdminUser[]): AdminStorageSummary {
+  const storage = users.reduce(
+    (total, user) => ({
+      bibleNoteContentBytes: total.bibleNoteContentBytes + Number(user.bibleNoteContentBytes ?? 0),
+      noteContentBytes: total.noteContentBytes + Number(user.noteContentBytes ?? 0),
+      totalBytes: total.totalBytes + Number(user.storageBytes ?? 0),
+      uploadBytes: total.uploadBytes + Number(user.uploadBytes ?? 0)
+    }),
+    {
+      bibleNoteContentBytes: 0,
+      noteContentBytes: 0,
+      totalBytes: 0,
+      uploadBytes: 0
+    }
+  );
+
+  return {
+    ...storage,
+    quotaBytes: null,
+    remainingBytes: null
+  };
 }
 
 function summarizeApiError(

@@ -111,6 +111,24 @@ export type AdminUser = {
   createdAt: string;
   noteCount: number;
   uploadCount: number;
+  storageBytes: number;
+  noteContentBytes: number;
+  bibleNoteContentBytes: number;
+  uploadBytes: number;
+};
+
+export type AdminStorageSummary = {
+  totalBytes: number;
+  noteContentBytes: number;
+  bibleNoteContentBytes: number;
+  uploadBytes: number;
+  quotaBytes: number | null;
+  remainingBytes: number | null;
+};
+
+export type AdminUsersResponse = {
+  users: AdminUser[];
+  storage: AdminStorageSummary;
 };
 
 export type AdminUserCreateInput = {

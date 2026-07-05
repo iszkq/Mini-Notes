@@ -1,6 +1,7 @@
 import type {
   AdminUpload,
   AdminUploadUpdateInput,
+  AdminStorageSummary,
   AdminUser,
   AdminUserCreateInput,
   AdminUserUpdateInput,
@@ -32,6 +33,7 @@ type Env = {
   ASSETS: Fetcher;
   FILES: R2Bucket;
   REGISTRATION_INVITE_CODE?: string;
+  R2_STORAGE_QUOTA_BYTES?: string;
 };
 
 type DbNoteRow = {
@@ -88,6 +90,10 @@ type DbAdminUserRow = {
   createdAt: string;
   noteCount: number | string;
   uploadCount: number | string;
+  noteContentBytes: number | string | null;
+  bibleNoteContentBytes: number | string | null;
+  uploadBytes: number | string | null;
+  storageBytes: number | string | null;
 };
 
 type DbBibleNoteRow = {
@@ -1757,12 +1763,50 @@ async function listAdminUsers(env: Env): Promise<Response> {
               SELECT COUNT(*)
               FROM uploads
               WHERE uploads.user_id = users.id
-            ) AS uploadCount
+            ) AS uploadCount,
+            (
+              SELECT COALESCE(SUM(content_size), 0)
+              FROM notes
+              WHERE notes.user_id = users.id
+                AND notes.content_key IS NOT NULL
+            ) AS noteContentBytes,
+            (
+              SELECT COALESCE(SUM(content_size), 0)
+              FROM bible_notes
+              WHERE bible_notes.user_id = users.id
+                AND bible_notes.content_key IS NOT NULL
+            ) AS bibleNoteContentBytes,
+            (
+              SELECT COALESCE(SUM(size), 0)
+              FROM uploads
+              WHERE uploads.user_id = users.id
+            ) AS uploadBytes,
+            (
+              SELECT COALESCE(SUM(content_size), 0)
+              FROM notes
+              WHERE notes.user_id = users.id
+                AND notes.content_key IS NOT NULL
+            ) +
+            (
+              SELECT COALESCE(SUM(content_size), 0)
+              FROM bible_notes
+              WHERE bible_notes.user_id = users.id
+                AND bible_notes.content_key IS NOT NULL
+            ) +
+            (
+              SELECT COALESCE(SUM(size), 0)
+              FROM uploads
+              WHERE uploads.user_id = users.id
+            ) AS storageBytes
      FROM users
      ORDER BY users.is_admin DESC, users.created_at ASC`
   ).all<DbAdminUserRow>();
+  const users = results.map(rowToAdminUser);
 
-  return json(results.map(rowToAdminUser));
+  return json({
+    users,
+    storage: summarizeAdminStorage(users, env)
+  });
 }
 
 async function createAdminUser(request: Request, env: Env): Promise<Response> {
@@ -2137,14 +2181,72 @@ async function rowToPublicNote(env: Env, row: DbNoteRow, shareToken: string): Pr
 }
 
 function rowToAdminUser(row: DbAdminUserRow): AdminUser {
+  const noteContentBytes = Number(row.noteContentBytes ?? 0);
+  const bibleNoteContentBytes = Number(row.bibleNoteContentBytes ?? 0);
+  const uploadBytes = Number(row.uploadBytes ?? 0);
+
   return {
     id: row.id,
     username: row.username,
     isAdmin: Boolean(row.isAdmin),
     createdAt: row.createdAt,
     noteCount: Number(row.noteCount ?? 0),
-    uploadCount: Number(row.uploadCount ?? 0)
+    uploadCount: Number(row.uploadCount ?? 0),
+    storageBytes: Number(row.storageBytes ?? noteContentBytes + bibleNoteContentBytes + uploadBytes),
+    noteContentBytes,
+    bibleNoteContentBytes,
+    uploadBytes
   };
+}
+
+function summarizeAdminStorage(users: AdminUser[], env: Env): AdminStorageSummary {
+  const storage = users.reduce(
+    (total, user) => ({
+      bibleNoteContentBytes: total.bibleNoteContentBytes + user.bibleNoteContentBytes,
+      noteContentBytes: total.noteContentBytes + user.noteContentBytes,
+      totalBytes: total.totalBytes + user.storageBytes,
+      uploadBytes: total.uploadBytes + user.uploadBytes
+    }),
+    {
+      bibleNoteContentBytes: 0,
+      noteContentBytes: 0,
+      totalBytes: 0,
+      uploadBytes: 0
+    }
+  );
+  const quotaBytes = parseStorageQuotaBytes(env.R2_STORAGE_QUOTA_BYTES);
+
+  return {
+    ...storage,
+    quotaBytes,
+    remainingBytes: quotaBytes === null ? null : Math.max(quotaBytes - storage.totalBytes, 0)
+  };
+}
+
+function parseStorageQuotaBytes(value: string | undefined): number | null {
+  const normalizedValue = value?.trim();
+  if (!normalizedValue) {
+    return null;
+  }
+
+  const quotaBytes = Number(normalizedValue);
+  if (Number.isFinite(quotaBytes) && quotaBytes > 0) {
+    return Math.floor(quotaBytes);
+  }
+
+  const match = normalizedValue.match(/^(\d+(?:\.\d+)?)\s*(B|KB|MB|GB|TB)$/i);
+  if (!match) {
+    return null;
+  }
+
+  const amount = Number(match[1]);
+  const unit = match[2].toUpperCase();
+  const exponent = ["B", "KB", "MB", "GB", "TB"].indexOf(unit);
+  if (!Number.isFinite(amount) || amount <= 0 || exponent < 0) {
+    return null;
+  }
+
+  return Math.floor(amount * 1024 ** exponent);
 }
 
 function rowToAdminUpload(row: DbUploadRow): AdminUpload {
@@ -3052,7 +3154,41 @@ async function getAdminUserById(env: Env, userId: string): Promise<AdminUser | n
               SELECT COUNT(*)
               FROM uploads
               WHERE uploads.user_id = users.id
-            ) AS uploadCount
+            ) AS uploadCount,
+            (
+              SELECT COALESCE(SUM(content_size), 0)
+              FROM notes
+              WHERE notes.user_id = users.id
+                AND notes.content_key IS NOT NULL
+            ) AS noteContentBytes,
+            (
+              SELECT COALESCE(SUM(content_size), 0)
+              FROM bible_notes
+              WHERE bible_notes.user_id = users.id
+                AND bible_notes.content_key IS NOT NULL
+            ) AS bibleNoteContentBytes,
+            (
+              SELECT COALESCE(SUM(size), 0)
+              FROM uploads
+              WHERE uploads.user_id = users.id
+            ) AS uploadBytes,
+            (
+              SELECT COALESCE(SUM(content_size), 0)
+              FROM notes
+              WHERE notes.user_id = users.id
+                AND notes.content_key IS NOT NULL
+            ) +
+            (
+              SELECT COALESCE(SUM(content_size), 0)
+              FROM bible_notes
+              WHERE bible_notes.user_id = users.id
+                AND bible_notes.content_key IS NOT NULL
+            ) +
+            (
+              SELECT COALESCE(SUM(size), 0)
+              FROM uploads
+              WHERE uploads.user_id = users.id
+            ) AS storageBytes
      FROM users
      WHERE users.id = ?`
   )
@@ -3284,10 +3420,23 @@ async function deleteAllUserResources(env: Env, userId: string): Promise<void> {
     .all<{ contentKey: string }>();
 
   await Promise.all(noteContentObjects.map((note) => env.FILES.delete(note.contentKey)));
+  const { results: bibleNoteContentObjects } = await env.DB.prepare(
+    `SELECT content_key AS contentKey
+     FROM bible_notes
+     WHERE user_id = ?
+       AND content_key IS NOT NULL`
+  )
+    .bind(userId)
+    .all<{ contentKey: string }>();
+
+  await Promise.all(bibleNoteContentObjects.map((note) => env.FILES.delete(note.contentKey)));
   await env.DB.prepare("DELETE FROM note_search WHERE user_id = ?")
     .bind(userId)
     .run();
   await env.DB.prepare("DELETE FROM note_upload_refs WHERE user_id = ?")
+    .bind(userId)
+    .run();
+  await env.DB.prepare("DELETE FROM bible_notes WHERE user_id = ?")
     .bind(userId)
     .run();
   await env.DB.prepare("DELETE FROM notes WHERE user_id = ?")

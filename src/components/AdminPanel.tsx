@@ -1,4 +1,6 @@
 import {
+  Cloud,
+  Database,
   ExternalLink,
   LoaderCircle,
   PencilLine,
@@ -23,7 +25,7 @@ import {
   updateAdminUpload,
   updateAdminUser
 } from "../api";
-import type { AdminUpload, AdminUser, AuthUser } from "../shared";
+import type { AdminStorageSummary, AdminUpload, AdminUser, AuthUser } from "../shared";
 
 type AdminPanelProps = {
   currentUser: AuthUser;
@@ -38,6 +40,7 @@ type UploadPreview = {
 
 export function AdminPanel({ currentUser, onSessionRefresh }: AdminPanelProps) {
   const [users, setUsers] = useState<AdminUser[]>([]);
+  const [storageSummary, setStorageSummary] = useState<AdminStorageSummary | null>(null);
   const [selectedUserId, setSelectedUserId] = useState<string | null>(currentUser.id);
   const [uploads, setUploads] = useState<AdminUpload[]>([]);
   const [query, setQuery] = useState("");
@@ -110,8 +113,10 @@ export function AdminPanel({ currentUser, onSessionRefresh }: AdminPanelProps) {
     setPanelError(null);
 
     try {
-      const nextUsers = await listAdminUsers();
+      const response = await listAdminUsers();
+      const nextUsers = response.users;
       setUsers(nextUsers);
+      setStorageSummary(response.storage);
       const nextSelectedId =
         preferredUserId && nextUsers.some((user) => user.id === preferredUserId)
           ? preferredUserId
@@ -358,6 +363,20 @@ export function AdminPanel({ currentUser, onSessionRefresh }: AdminPanelProps) {
           </span>
           <h1>用户与媒体管理</h1>
           <p>仅管理员可见。这里可以维护用户账号、重置密码，并管理每个用户的上传资源。</p>
+          {storageSummary ? (
+            <div className="admin-storage-overview">
+              <span>
+                <Cloud size={15} />
+                R2 已用 <strong>{formatBytes(storageSummary.totalBytes)}</strong>
+              </span>
+              <span>
+                R2 剩余 <strong>{formatStorageRemaining(storageSummary)}</strong>
+              </span>
+              <span>笔记正文 {formatBytes(storageSummary.noteContentBytes)}</span>
+              <span>读经笔记 {formatBytes(storageSummary.bibleNoteContentBytes)}</span>
+              <span>媒体 {formatBytes(storageSummary.uploadBytes)}</span>
+            </div>
+          ) : null}
         </div>
 
         <button
@@ -449,7 +468,9 @@ export function AdminPanel({ currentUser, onSessionRefresh }: AdminPanelProps) {
                       <strong>{user.username}</strong>
                       {user.isAdmin ? <span className="admin-mini-badge">管理员</span> : null}
                     </div>
-                    <small>{user.noteCount} 篇笔记 · {user.uploadCount} 个媒体</small>
+                    <small>
+                      {user.noteCount} 篇笔记 · {user.uploadCount} 个媒体 · R2 {formatBytes(user.storageBytes)}
+                    </small>
                   </button>
                 ))}
               </div>
@@ -474,7 +495,17 @@ export function AdminPanel({ currentUser, onSessionRefresh }: AdminPanelProps) {
                 <div className="admin-user-stats">
                   <span>{selectedUser.noteCount} 篇笔记</span>
                   <span>{selectedUser.uploadCount} 个媒体</span>
+                  <span>R2 {formatBytes(selectedUser.storageBytes)}</span>
                   <span>创建于 {formatDate(selectedUser.createdAt)}</span>
+                </div>
+
+                <div className="admin-storage-breakdown">
+                  <span>
+                    <Database size={14} />
+                    笔记正文 {formatBytes(selectedUser.noteContentBytes)}
+                  </span>
+                  <span>读经笔记 {formatBytes(selectedUser.bibleNoteContentBytes)}</span>
+                  <span>媒体 {formatBytes(selectedUser.uploadBytes)}</span>
                 </div>
 
                 <div className="admin-form-grid">
@@ -670,10 +701,14 @@ function formatBytes(value: number): string {
     return "0 B";
   }
 
-  const units = ["B", "KB", "MB", "GB"];
+  const units = ["B", "KB", "MB", "GB", "TB"];
   const exponent = Math.min(Math.floor(Math.log(value) / Math.log(1024)), units.length - 1);
   const amount = value / 1024 ** exponent;
   return `${amount.toFixed(amount >= 10 || exponent === 0 ? 0 : 1)} ${units[exponent]}`;
+}
+
+function formatStorageRemaining(summary: AdminStorageSummary): string {
+  return summary.remainingBytes === null ? "未设置容量上限" : formatBytes(summary.remainingBytes);
 }
 
 function formatDate(value: string): string {

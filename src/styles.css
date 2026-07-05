@@ -1830,6 +1830,40 @@ button:disabled {
   line-height: 1.7;
 }
 
+.admin-storage-overview,
+.admin-storage-breakdown {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.admin-storage-overview {
+  margin-top: 16px;
+}
+
+.admin-storage-overview span,
+.admin-storage-breakdown span {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 30px;
+  padding: 0 10px;
+  border: 1px solid #e5e7eb;
+  border-radius: 999px;
+  background: #f9fafb;
+  color: #4b5563;
+  font-size: 0.78rem;
+  font-weight: 750;
+}
+
+.admin-storage-overview strong {
+  color: #111827;
+}
+
+.admin-storage-breakdown {
+  padding-top: 2px;
+}
+
 .admin-alert {
   padding: 12px 14px;
   border-radius: 14px;
