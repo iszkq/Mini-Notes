@@ -41,6 +41,7 @@ export const COMPARISON_DEFAULT_PAYLOAD = JSON.stringify([
   { body: "现在的内容", id: "compare-2", title: "现在" }
 ]);
 const COMPARISON_MAX_ITEMS = 3;
+const CHINESE_STEP_NUMERALS = ["零", "一", "二", "三", "四", "五", "六", "七", "八", "九"];
 
 type TimelineItem = {
   content: string;
@@ -688,7 +689,7 @@ const stepsBlock = createReactBlockSpec(
                   {
                     body: "说明下一步要做什么。",
                     id: createWidgetItemId("step"),
-                    title: `第${items.length + 1}步`
+                    title: getStepDefaultTitle(items.length)
                   }
                 ])
               }
@@ -1041,7 +1042,7 @@ function normalizeStepItems(items: Array<Record<string, unknown>>): StepItem[] {
     .map((item, index) => ({
       body: cleanWidgetText(item.body, index === 0 ? "说明第一步要做什么。" : "说明第二步要做什么。"),
       id: cleanWidgetText(item.id, createWidgetItemId("step")),
-      title: cleanWidgetText(item.title, index === 0 ? "第一步" : "第二步")
+      title: normalizeStepTitle(cleanWidgetText(item.title, getStepDefaultTitle(index)))
     }));
 
   return nextItems.length > 0
@@ -1076,6 +1077,43 @@ function cleanWidgetBoolean(value: unknown, fallback: boolean): boolean {
 
 function getComparisonDefaultTitle(index: number): string {
   return index === 0 ? "之前" : index === 1 ? "现在" : "之后";
+}
+
+function getStepDefaultTitle(index: number): string {
+  return `第${formatChineseStepNumber(index + 1)}步`;
+}
+
+function formatChineseStepNumber(value: number): string {
+  if (!Number.isFinite(value) || value <= 0) {
+    return String(value);
+  }
+
+  const normalizedValue = Math.floor(value);
+  if (normalizedValue < 10) {
+    return CHINESE_STEP_NUMERALS[normalizedValue];
+  }
+
+  if (normalizedValue < 20) {
+    const ones = normalizedValue % 10;
+    return `十${ones === 0 ? "" : CHINESE_STEP_NUMERALS[ones]}`;
+  }
+
+  if (normalizedValue < 100) {
+    const tens = Math.floor(normalizedValue / 10);
+    const ones = normalizedValue % 10;
+    return `${CHINESE_STEP_NUMERALS[tens]}十${ones === 0 ? "" : CHINESE_STEP_NUMERALS[ones]}`;
+  }
+
+  return String(normalizedValue);
+}
+
+function normalizeStepTitle(title: string): string {
+  const generatedTitle = title.match(/^第(\d+)步$/);
+  if (generatedTitle) {
+    return `第${formatChineseStepNumber(Number(generatedTitle[1]))}步`;
+  }
+
+  return title;
 }
 
 function getComparisonDefaultBody(index: number): string {
