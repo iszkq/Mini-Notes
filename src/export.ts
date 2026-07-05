@@ -476,7 +476,7 @@ function buildExportDocument(notes: Array<ExportableNote & { html: string }>): s
         z-index: 1;
         width: 12px;
         height: 12px;
-        margin-top: 6px;
+        margin-top: 8px;
         margin-left: 5px;
         border: 2px solid #94a3b8;
         border-radius: 999px;
@@ -493,33 +493,33 @@ function buildExportDocument(notes: Array<ExportableNote & { html: string }>): s
       .content-widget-timeline__card {
         display: grid;
         grid-template-columns: minmax(0, 1fr);
-        gap: 4px;
+        gap: 5px;
         min-height: 0;
         padding: 0 0 2px;
         background: transparent;
       }
 
       .content-widget-timeline__time {
-        color: #64748b;
-        font-size: 0.82rem;
+        color: #475569;
+        font-size: 1.06rem;
         font-variant-numeric: tabular-nums;
-        font-weight: 700;
-        line-height: 1.45;
+        font-weight: 750;
+        line-height: 1.38;
         white-space: normal;
       }
 
       .content-widget-timeline__title {
         color: #111827;
-        font-size: 1rem;
-        font-weight: 850;
-        line-height: 1.55;
+        font-size: 1.22rem;
+        font-weight: 800;
+        line-height: 1.36;
       }
 
       .content-widget-timeline__content {
-        color: #475569;
-        font-size: 0.9rem;
-        font-weight: 500;
-        line-height: 1.85;
+        color: #334155;
+        font-size: 1rem;
+        font-weight: 400;
+        line-height: 1.78;
       }
 
       .content-widget-steps__item {
