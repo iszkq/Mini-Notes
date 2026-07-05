@@ -42,6 +42,7 @@ export const COMPARISON_DEFAULT_PAYLOAD = JSON.stringify([
 ]);
 const COMPARISON_MAX_ITEMS = 3;
 const COMPARISON_DEFAULT_TITLES = ["之前", "现在", "之后"] as const;
+const COMPARISON_DEFAULT_TONES = ["neutral", "accent", "danger"] as const;
 const CHINESE_STEP_NUMERALS = ["零", "一", "二", "三", "四", "五", "六", "七", "八", "九"];
 
 type TimelineItem = {
@@ -62,8 +63,11 @@ type StepItem = {
 type ComparisonItem = {
   body: string;
   id: string;
+  tone: ComparisonTone;
   title: string;
 };
+
+type ComparisonTone = (typeof COMPARISON_DEFAULT_TONES)[number];
 
 const fontSize = createReactStyleSpec(
   {
@@ -761,8 +765,7 @@ const comparisonBlock = createReactBlockSpec(
               <article
                 className={getClassName(
                   "content-widget-comparison__panel",
-                  index === 1 ? "is-accent" : undefined,
-                  index === 2 ? "is-danger" : undefined
+                  getComparisonToneClass(item.tone)
                 )}
                 key={item.id}
               >
@@ -831,6 +834,7 @@ const comparisonBlock = createReactBlockSpec(
                   {
                     body: getComparisonDefaultBody(defaultIndex),
                     id: createWidgetItemId("compare"),
+                    tone: getComparisonDefaultTone(defaultIndex),
                     title: getComparisonDefaultTitle(defaultIndex)
                   }
                 ]);
@@ -858,8 +862,7 @@ const comparisonBlock = createReactBlockSpec(
               <article
                 className={getClassName(
                   "content-widget-comparison__panel",
-                  index === 1 ? "is-accent" : undefined,
-                  index === 2 ? "is-danger" : undefined
+                  getComparisonToneClass(item.tone)
                 )}
                 key={item.id}
               >
@@ -1004,6 +1007,7 @@ function parseComparisonItems(value: unknown): ComparisonItem[] {
     items.push({
       body: items.length === 0 ? "之前的内容" : "现在的内容",
       id: createWidgetItemId("compare"),
+      tone: getComparisonDefaultTone(items.length),
       title: getComparisonDefaultTitle(items.length)
     });
   }
@@ -1064,6 +1068,7 @@ function normalizeComparisonItems(items: Array<Record<string, unknown>>): Compar
     .map((item, index) => ({
       body: cleanWidgetText(item.body, getComparisonDefaultBody(index)),
       id: cleanWidgetText(item.id, createWidgetItemId("compare")),
+      tone: cleanComparisonTone(item.tone, getComparisonDefaultTone(index)),
       title: normalizeComparisonTitle(cleanWidgetText(item.title, getComparisonDefaultTitle(index)), index)
     }));
 
@@ -1084,8 +1089,20 @@ function cleanWidgetBoolean(value: unknown, fallback: boolean): boolean {
   return typeof value === "boolean" ? value : fallback;
 }
 
+function cleanComparisonTone(value: unknown, fallback: ComparisonTone): ComparisonTone {
+  return value === "neutral" || value === "accent" || value === "danger" ? value : fallback;
+}
+
 function getComparisonDefaultTitle(index: number): string {
   return COMPARISON_DEFAULT_TITLES[index] ?? `对比项 ${index + 1}`;
+}
+
+function getComparisonDefaultTone(index: number): ComparisonTone {
+  return COMPARISON_DEFAULT_TONES[index] ?? "neutral";
+}
+
+function getComparisonToneClass(tone: ComparisonTone): string | undefined {
+  return tone === "accent" ? "is-accent" : tone === "danger" ? "is-danger" : undefined;
 }
 
 function getStepDefaultTitle(index: number): string {
