@@ -51,6 +51,7 @@ import type { Note, NoteBlock, NoteSummary } from "../shared";
 import { BibleInsertModal } from "./BibleInsertModal";
 import { EmojiPackPicker } from "./EmojiPackPicker";
 import type { EmojiItem } from "../emojiPacks";
+import { ConfirmDialog } from "./ConfirmDialog";
 import { EditorFindReplacePanel } from "./EditorFindReplacePanel";
 import { NotebookFormattingToolbar } from "./NotebookFormattingToolbar";
 import {
@@ -191,6 +192,7 @@ export function NotebookEditor({
   const [commentNotice, setCommentNotice] = useState<string | null>(null);
   const [editingCommentBody, setEditingCommentBody] = useState("");
   const [editingCommentId, setEditingCommentId] = useState<string | null>(null);
+  const [pendingDeleteCommentId, setPendingDeleteCommentId] = useState<string | null>(null);
   const [imageCropTarget, setImageCropTarget] = useState<EditorImageBlock | null>(null);
   const [pasteUploadAnchor, setPasteUploadAnchor] = useState<PasteUploadAnchor | null>(null);
   const [pastedImageUploadCount, setPastedImageUploadCount] = useState(0);
@@ -560,18 +562,26 @@ export function NotebookEditor({
 
   const deleteComment = useCallback(
     (commentId: string) => {
-      if (!window.confirm("删除这条批注？正文高亮也会一起移除。")) {
+      setPendingDeleteCommentId(commentId);
+    },
+    []
+  );
+
+  const confirmDeleteComment = useCallback(
+    () => {
+      if (!pendingDeleteCommentId) {
         return;
       }
 
-      replaceCommentInDocument(commentId, () => null);
-      setActiveCommentId((current) => (current === commentId ? null : current));
-      if (editingCommentId === commentId) {
+      replaceCommentInDocument(pendingDeleteCommentId, () => null);
+      setActiveCommentId((current) => (current === pendingDeleteCommentId ? null : current));
+      if (editingCommentId === pendingDeleteCommentId) {
         setEditingCommentId(null);
         setEditingCommentBody("");
       }
+      setPendingDeleteCommentId(null);
     },
-    [editingCommentId, replaceCommentInDocument]
+    [editingCommentId, pendingDeleteCommentId, replaceCommentInDocument]
   );
 
   const focusComment = useCallback(
@@ -1049,6 +1059,7 @@ export function NotebookEditor({
     setCommentComposer(null);
     setCommentFilter("open");
     setCommentNotice(null);
+    setPendingDeleteCommentId(null);
     setImageCropTarget(null);
     setComments(collectNoteComments(editor.document as NoteBlock[]));
     setEditingCommentId(null);
@@ -1350,6 +1361,16 @@ export function NotebookEditor({
           onSave={saveCroppedImage}
         />
       ) : null}
+
+      <ConfirmDialog
+        confirmLabel="删除"
+        danger
+        message="删除这条批注？正文高亮也会一起移除。"
+        onCancel={() => setPendingDeleteCommentId(null)}
+        onConfirm={confirmDeleteComment}
+        open={Boolean(pendingDeleteCommentId)}
+        title="删除批注"
+      />
     </>
   );
 }

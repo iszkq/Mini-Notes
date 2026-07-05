@@ -34,6 +34,7 @@ import {
   sortBibleVerses
 } from "../bible";
 import type { BibleNote } from "../shared";
+import { ConfirmDialog } from "./ConfirmDialog";
 
 type ChapterTarget = {
   book: string;
@@ -156,6 +157,7 @@ export function BibleReader({ onError }: BibleReaderProps) {
   const [composerBody, setComposerBody] = useState("");
   const [editingNoteId, setEditingNoteId] = useState<string | null>(null);
   const [editingBody, setEditingBody] = useState("");
+  const [pendingDeleteNoteId, setPendingDeleteNoteId] = useState<string | null>(null);
   const [noteAnchorPositions, setNoteAnchorPositions] = useState<BibleNoteAnchorPositions>({});
   const [noteCardHeights, setNoteCardHeights] = useState<Record<string, number>>({});
   const composerRef = useRef<HTMLTextAreaElement | null>(null);
@@ -248,6 +250,7 @@ export function BibleReader({ onError }: BibleReaderProps) {
     setSelectionTarget(null);
     setSelectionToolbar(null);
     setActiveNoteId(null);
+    setPendingDeleteNoteId(null);
     setNoteAnchorPositions({});
     setNoteCardHeights({});
 
@@ -656,19 +659,31 @@ export function BibleReader({ onError }: BibleReaderProps) {
     }
   };
 
-  const removeNote = async (note: BibleNote) => {
-    if (!window.confirm("删除这条读经笔记？")) {
+  const requestRemoveNote = useCallback((note: BibleNote) => {
+    setPendingDeleteNoteId(note.id);
+  }, []);
+
+  const confirmRemoveNote = async () => {
+    if (!pendingDeleteNoteId) {
       return;
     }
 
+    setNoteSaving(true);
     try {
-      await deleteBibleNote(note.id);
-      setNotes((current) => current.filter((item) => item.id !== note.id));
-      if (activeNoteId === note.id) {
+      await deleteBibleNote(pendingDeleteNoteId);
+      setNotes((current) => current.filter((item) => item.id !== pendingDeleteNoteId));
+      if (activeNoteId === pendingDeleteNoteId) {
         setActiveNoteId(null);
       }
+      if (editingNoteId === pendingDeleteNoteId) {
+        setEditingNoteId(null);
+        setEditingBody("");
+      }
+      setPendingDeleteNoteId(null);
     } catch (error) {
       onError?.(error instanceof Error ? error.message : "删除读经笔记失败。");
+    } finally {
+      setNoteSaving(false);
     }
   };
 
@@ -963,7 +978,7 @@ export function BibleReader({ onError }: BibleReaderProps) {
                             className="note-comment-card__icon-button"
                             onClick={(event) => {
                               event.stopPropagation();
-                              void removeNote(note);
+                              requestRemoveNote(note);
                             }}
                             title="删除笔记"
                             type="button"
@@ -1000,6 +1015,16 @@ export function BibleReader({ onError }: BibleReaderProps) {
           ) : null}
         </section>
       </div>
+      <ConfirmDialog
+        confirmLabel="删除"
+        danger
+        disabled={noteSaving}
+        message="删除这条读经笔记？"
+        onCancel={() => setPendingDeleteNoteId(null)}
+        onConfirm={() => void confirmRemoveNote()}
+        open={Boolean(pendingDeleteNoteId)}
+        title="删除读经笔记"
+      />
     </section>
   );
 }
