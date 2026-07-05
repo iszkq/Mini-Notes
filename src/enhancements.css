@@ -1734,6 +1734,10 @@ button.collapsible-content-block__toggle:hover {
   field-sizing: content;
 }
 
+.note-editor-layout.is-readonly .content-widget-textarea {
+  resize: none;
+}
+
 .content-widget-input:focus,
 .content-widget-textarea:focus {
   border-radius: 6px;
