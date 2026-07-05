@@ -1222,12 +1222,17 @@ export function NotebookEditor({
 
   const getSlashMenuItems = useCallback(
     async (query: string): Promise<DefaultReactSuggestionItem[]> => {
-      const defaultItems = getDefaultReactSlashMenuItems(editor).filter(
-        (item) =>
-          !item.title.includes("表情") &&
-          !item.subtext?.includes("表情") &&
-          !item.aliases?.some((alias) => ["emoji", "emoticon"].includes(alias.toLowerCase()))
-      );
+      const defaultItems: DefaultReactSuggestionItem[] = getDefaultReactSlashMenuItems(editor)
+        .filter(
+          (item) =>
+            !item.title.includes("表情") &&
+            !item.subtext?.includes("表情") &&
+            !item.aliases?.some((alias) => ["emoji", "emoticon"].includes(alias.toLowerCase()))
+        )
+        .map((item) => ({
+          ...item,
+          group: item.group === "基础区块" ? "基本块" : item.group
+        }));
       const heading3Title = editor.dictionary.slash_menu.heading_3.title;
       const heading3Index = defaultItems.findIndex((item) => item.title === heading3Title);
       const toggleListTitle = editor.dictionary.slash_menu.toggle_list.title;
@@ -1292,7 +1297,12 @@ export function NotebookEditor({
       const items = [...defaultItems];
       items.splice(toggleListIndex >= 0 ? toggleListIndex + 1 : 0, 0, subPageItem);
       items.splice(heading3Index >= 0 ? heading3Index + 1 : 0, 0, bibleItem);
-      items.push(collapsibleItem, timelineItem, stepsItem, comparisonItem);
+      insertSuggestionItemsInGroup(items, "高级功能", [
+        collapsibleItem,
+        timelineItem,
+        stepsItem,
+        comparisonItem
+      ]);
       items.push(emojiItem);
 
       return filterSuggestionItems(items, query);
@@ -2735,6 +2745,31 @@ function getBlockIdentifiers(blocks: NoteBlock[]): Array<{ id: string }> {
     .map((block) => block.id)
     .filter((id): id is string => typeof id === "string")
     .map((id) => ({ id }));
+}
+
+function insertSuggestionItemsInGroup(
+  items: DefaultReactSuggestionItem[],
+  group: string,
+  insertedItems: DefaultReactSuggestionItem[]
+) {
+  const lastGroupIndex = findLastIndex(items, (item) => item.group === group);
+
+  if (lastGroupIndex >= 0) {
+    items.splice(lastGroupIndex + 1, 0, ...insertedItems);
+    return;
+  }
+
+  items.push(...insertedItems);
+}
+
+function findLastIndex<T>(items: T[], predicate: (item: T) => boolean): number {
+  for (let index = items.length - 1; index >= 0; index -= 1) {
+    if (predicate(items[index])) {
+      return index;
+    }
+  }
+
+  return -1;
 }
 
 function getEditorTextSelectionRange(

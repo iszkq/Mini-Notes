@@ -600,6 +600,16 @@ function buildExportDocument(notes: Array<ExportableNote & { html: string }>): s
         color: #2563eb;
       }
 
+      .content-widget-comparison__panel.is-danger {
+        border-color: #fecaca;
+      }
+
+      .content-widget-comparison__panel.is-danger .content-widget-comparison__head {
+        border-bottom-color: #fecaca;
+        background: #fee2e2;
+        color: #dc2626;
+      }
+
       .content-widget-comparison__title {
         flex: 1;
         min-width: 0;

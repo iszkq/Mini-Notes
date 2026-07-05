@@ -26,6 +26,7 @@ export const COMPARISON_DEFAULT_PAYLOAD = JSON.stringify([
   { body: "之前的内容", id: "compare-1", title: "之前" },
   { body: "之后的内容", id: "compare-2", title: "之后" }
 ]);
+const COMPARISON_MAX_ITEMS = 3;
 
 type TimelineItem = {
   content: string;
@@ -649,7 +650,8 @@ const comparisonBlock = createReactBlockSpec(
               <article
                 className={getClassName(
                   "content-widget-comparison__panel",
-                  index === 1 ? "is-accent" : undefined
+                  index === 1 ? "is-accent" : undefined,
+                  index === 2 ? "is-danger" : undefined
                 )}
                 key={item.id}
               >
@@ -701,7 +703,7 @@ const comparisonBlock = createReactBlockSpec(
               </article>
             ))}
           </div>
-          {editor.isEditable ? (
+          {editor.isEditable && items.length < COMPARISON_MAX_ITEMS ? (
             <button
               className="content-widget-add-button"
               onClick={() =>
@@ -737,7 +739,8 @@ const comparisonBlock = createReactBlockSpec(
               <article
                 className={getClassName(
                   "content-widget-comparison__panel",
-                  index === 1 ? "is-accent" : undefined
+                  index === 1 ? "is-accent" : undefined,
+                  index === 2 ? "is-danger" : undefined
                 )}
                 key={item.id}
               >
@@ -874,7 +877,10 @@ function parseStepItems(value: unknown): StepItem[] {
 }
 
 function parseComparisonItems(value: unknown): ComparisonItem[] {
-  const items = normalizeComparisonItems(parseWidgetItems(value, COMPARISON_DEFAULT_PAYLOAD));
+  const items = normalizeComparisonItems(parseWidgetItems(value, COMPARISON_DEFAULT_PAYLOAD)).slice(
+    0,
+    COMPARISON_MAX_ITEMS
+  );
   while (items.length < 2) {
     items.push({
       body: items.length === 0 ? "之前的内容" : "之后的内容",

@@ -1954,6 +1954,16 @@ button.collapsible-content-block__toggle:hover {
   color: #2563eb;
 }
 
+.content-widget-comparison__panel.is-danger {
+  border-color: #fecaca;
+}
+
+.content-widget-comparison__panel.is-danger .content-widget-comparison__head {
+  border-bottom-color: #fecaca;
+  background: #fee2e2;
+  color: #dc2626;
+}
+
 .content-widget-comparison__title {
   flex: 1;
   min-width: 0;
@@ -1967,6 +1977,12 @@ button.collapsible-content-block__toggle:hover {
   padding: 12px 14px;
   color: #111827;
   line-height: 1.75;
+}
+
+.bn-side-menu[data-block-type="contentTimeline"] [data-test="dragHandleAdd"],
+.bn-side-menu[data-block-type="contentSteps"] [data-test="dragHandleAdd"],
+.bn-side-menu[data-block-type="contentComparison"] [data-test="dragHandleAdd"] {
+  display: none;
 }
 
 .page-link-block {

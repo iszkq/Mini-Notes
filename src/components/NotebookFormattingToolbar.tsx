@@ -69,6 +69,8 @@ type NotebookFormattingToolbarProps = FormattingToolbarProps & {
   onCropImage?: (block: EditorImageBlock) => void;
 };
 
+const CONTENT_WIDGET_BLOCK_TYPES = new Set(["contentTimeline", "contentSteps", "contentComparison"]);
+
 export function NotebookFormattingToolbar(props: NotebookFormattingToolbarProps) {
   return (
     <FormattingToolbar>
@@ -181,6 +183,13 @@ function CommentButton({ onAddComment }: { onAddComment?: () => void }) {
     on: "selection",
     selector: ({ editor }) => {
       if (!editor.isEditable || !onAddComment || getSelectedImageBlock(editor)) {
+        return false;
+      }
+
+      const selectedBlocks = editor.getSelection?.()?.blocks || [
+        editor.getTextCursorPosition().block
+      ];
+      if (selectedBlocks.some((block) => CONTENT_WIDGET_BLOCK_TYPES.has(String(block.type)))) {
         return false;
       }
 
