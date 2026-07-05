@@ -445,25 +445,30 @@ function buildExportDocument(notes: Array<ExportableNote & { html: string }>): s
       }
 
       .content-widget-timeline__list {
-        gap: 12px;
+        gap: 0;
       }
 
       .content-widget-timeline__list::before {
         content: "";
         position: absolute;
-        top: 14px;
-        bottom: 14px;
+        top: 12px;
+        bottom: 12px;
         left: 10px;
         width: 2px;
         border-radius: 999px;
-        background: linear-gradient(180deg, #dbeafe 0%, rgba(219, 234, 254, 0) 100%);
+        background: #e2e8f0;
       }
 
       .content-widget-timeline__item {
         position: relative;
         display: grid;
         grid-template-columns: 22px minmax(0, 1fr);
-        gap: 12px;
+        gap: 16px;
+        padding-bottom: 28px;
+      }
+
+      .content-widget-timeline__item:last-child {
+        padding-bottom: 0;
       }
 
       .content-widget-timeline__dot {
@@ -471,40 +476,50 @@ function buildExportDocument(notes: Array<ExportableNote & { html: string }>): s
         z-index: 1;
         width: 12px;
         height: 12px;
-        margin-top: 18px;
+        margin-top: 6px;
         margin-left: 5px;
-        border: 3px solid #eff6ff;
+        border: 2px solid #94a3b8;
         border-radius: 999px;
+        background: #ffffff;
+        box-shadow: 0 0 0 3px #ffffff;
+      }
+
+      .content-widget-timeline__item.is-milestone .content-widget-timeline__dot {
+        border-color: #3b82f6;
         background: #3b82f6;
-        box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.12);
+        box-shadow: 0 0 0 4px rgba(59, 130, 246, 0.14);
       }
 
       .content-widget-timeline__card {
         display: grid;
-        grid-template-columns: minmax(72px, max-content) minmax(0, 1fr);
-        align-items: start;
-        gap: 14px;
-        min-height: 42px;
-        padding: 9px 12px;
-        border: 1px solid #e5e7eb;
-        border-radius: 8px;
-        background: #ffffff;
-        box-shadow: 0 2px 8px rgba(15, 23, 42, 0.04);
+        grid-template-columns: minmax(0, 1fr);
+        gap: 4px;
+        min-height: 0;
+        padding: 0 0 2px;
+        background: transparent;
       }
 
       .content-widget-timeline__time {
         color: #64748b;
         font-size: 0.82rem;
         font-variant-numeric: tabular-nums;
-        font-weight: 800;
-        line-height: 1.7;
-        white-space: nowrap;
+        font-weight: 700;
+        line-height: 1.45;
+        white-space: normal;
+      }
+
+      .content-widget-timeline__title {
+        color: #111827;
+        font-size: 1rem;
+        font-weight: 850;
+        line-height: 1.55;
       }
 
       .content-widget-timeline__content {
-        color: #1f2937;
-        font-weight: 650;
-        line-height: 1.7;
+        color: #475569;
+        font-size: 0.9rem;
+        font-weight: 500;
+        line-height: 1.85;
       }
 
       .content-widget-steps__item {
@@ -653,7 +668,6 @@ function buildExportDocument(notes: Array<ExportableNote & { html: string }>): s
         }
 
         .content-widget-timeline__card {
-          grid-template-columns: 1fr;
           gap: 4px;
         }
 

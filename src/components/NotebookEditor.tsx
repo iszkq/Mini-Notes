@@ -1228,15 +1228,10 @@ export function NotebookEditor({
             !item.title.includes("表情") &&
             !item.subtext?.includes("表情") &&
             !item.aliases?.some((alias) => ["emoji", "emoticon"].includes(alias.toLowerCase()))
-        )
-        .map((item) => ({
-          ...item,
-          group: item.group === "基础区块" ? "基本块" : item.group
-        }));
+        );
       const heading3Title = editor.dictionary.slash_menu.heading_3.title;
-      const heading3Index = defaultItems.findIndex((item) => item.title === heading3Title);
       const toggleListTitle = editor.dictionary.slash_menu.toggle_list.title;
-      const toggleListIndex = defaultItems.findIndex((item) => item.title === toggleListTitle);
+      const dividerTitle = editor.dictionary.slash_menu.divider.title;
       const collapsibleItem: DefaultReactSuggestionItem = {
         title: "折叠内容",
         subtext: "可自定义标题和正文的折叠区块",
@@ -1295,6 +1290,9 @@ export function NotebookEditor({
         onItemClick: () => setEmojiPickerOpen(true)
       };
       const items = [...defaultItems];
+      moveSuggestionItemToGroup(items, dividerTitle, "基本块");
+      const heading3Index = items.findIndex((item) => item.title === heading3Title);
+      const toggleListIndex = items.findIndex((item) => item.title === toggleListTitle);
       items.splice(toggleListIndex >= 0 ? toggleListIndex + 1 : 0, 0, subPageItem);
       items.splice(heading3Index >= 0 ? heading3Index + 1 : 0, 0, bibleItem);
       insertSuggestionItemsInGroup(items, "高级功能", [
@@ -2760,6 +2758,36 @@ function insertSuggestionItemsInGroup(
   }
 
   items.push(...insertedItems);
+}
+
+function moveSuggestionItemToGroup(
+  items: DefaultReactSuggestionItem[],
+  title: string,
+  targetGroup: string
+) {
+  const currentIndex = items.findIndex((item) => item.title === title);
+  if (currentIndex < 0) {
+    return;
+  }
+
+  const [item] = items.splice(currentIndex, 1);
+  const movedItem = {
+    ...item,
+    group: targetGroup
+  };
+  const firstGroupIndex = items.findIndex((candidate) => candidate.group === targetGroup);
+
+  if (firstGroupIndex < 0) {
+    items.push(movedItem);
+    return;
+  }
+
+  let insertIndex = firstGroupIndex + 1;
+  while (insertIndex < items.length && items[insertIndex].group === targetGroup) {
+    insertIndex += 1;
+  }
+
+  items.splice(insertIndex, 0, movedItem);
 }
 
 function findLastIndex<T>(items: T[], predicate: (item: T) => boolean): number {

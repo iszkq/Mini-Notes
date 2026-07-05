@@ -6,7 +6,7 @@ import {
   type BlockNoteEditor
 } from "@blocknote/core";
 import { createReactBlockSpec, createReactStyleSpec } from "@blocknote/react";
-import { ChevronDown, FileText, Plus, Trash2 } from "lucide-react";
+import { ChevronDown, CircleDot, FileText, Heading, Plus, Trash2 } from "lucide-react";
 import { formatBibleReference, parseBibleVersePayload } from "./bible";
 import { parseNoteComment } from "./comments";
 
@@ -15,8 +15,22 @@ export const COLLAPSIBLE_CONTENT_DEFAULT_TITLE = "这是标题可以自定义";
 export const COLLAPSIBLE_CONTENT_DEFAULT_BODY = "这是内容。。。。";
 
 export const TIMELINE_DEFAULT_PAYLOAD = JSON.stringify([
-  { content: "开始准备。", id: "timeline-1", time: "09:00" },
-  { content: "完成关键节点。", id: "timeline-2", time: "10:30" }
+  {
+    content: "说明这个阶段发生的事情。",
+    id: "timeline-1",
+    milestone: false,
+    showTitle: true,
+    time: "2022 年-2024 年",
+    title: "阶段标题"
+  },
+  {
+    content: "记录关键节点的结果或变化。",
+    id: "timeline-2",
+    milestone: true,
+    showTitle: true,
+    time: "2024 年 3 月",
+    title: "关键节点"
+  }
 ]);
 export const STEPS_DEFAULT_PAYLOAD = JSON.stringify([
   { body: "说明第一步要做什么。", id: "step-1", title: "第一步" },
@@ -24,14 +38,17 @@ export const STEPS_DEFAULT_PAYLOAD = JSON.stringify([
 ]);
 export const COMPARISON_DEFAULT_PAYLOAD = JSON.stringify([
   { body: "之前的内容", id: "compare-1", title: "之前" },
-  { body: "之后的内容", id: "compare-2", title: "之后" }
+  { body: "现在的内容", id: "compare-2", title: "现在" }
 ]);
 const COMPARISON_MAX_ITEMS = 3;
 
 type TimelineItem = {
   content: string;
   id: string;
+  milestone: boolean;
+  showTitle: boolean;
   time: string;
+  title: string;
 };
 
 type StepItem = {
@@ -394,7 +411,13 @@ const timelineBlock = createReactBlockSpec(
         <section className="content-widget-block content-widget-timeline" contentEditable={false}>
           <ol className="content-widget-timeline__list">
             {items.map((item, index) => (
-              <li className="content-widget-timeline__item" key={item.id}>
+              <li
+                className={getClassName(
+                  "content-widget-timeline__item",
+                  item.milestone ? "is-milestone" : undefined
+                )}
+                key={item.id}
+              >
                 <span className="content-widget-timeline__dot" aria-hidden="true" />
                 <div className="content-widget-timeline__card">
                   <input
@@ -412,6 +435,26 @@ const timelineBlock = createReactBlockSpec(
                     readOnly={!editor.isEditable}
                     value={item.time}
                   />
+                  {item.showTitle ? (
+                    <input
+                      aria-label={`时间轴第 ${index + 1} 项标题`}
+                      className="content-widget-input content-widget-timeline__title"
+                      onChange={(event) =>
+                        updateItems(
+                          items.map((current) =>
+                            current.id === item.id
+                              ? { ...current, title: event.target.value }
+                              : current
+                          )
+                        )
+                      }
+                      onKeyDown={stopWidgetEditorEvent}
+                      onMouseDown={stopWidgetEditorEvent}
+                      placeholder="标题"
+                      readOnly={!editor.isEditable}
+                      value={item.title}
+                    />
+                  ) : null}
                   <textarea
                     aria-label={`时间轴第 ${index + 1} 项内容`}
                     className="content-widget-textarea content-widget-timeline__content"
@@ -431,16 +474,70 @@ const timelineBlock = createReactBlockSpec(
                     value={item.content}
                   />
                   {editor.isEditable ? (
-                    <button
-                      aria-label={`删除时间轴第 ${index + 1} 项`}
-                      className="content-widget-icon-button"
-                      disabled={items.length <= 1}
-                      onClick={() => updateItems(items.filter((current) => current.id !== item.id))}
-                      onMouseDown={stopWidgetEditorEvent}
-                      type="button"
-                    >
-                      <Trash2 size={14} />
-                    </button>
+                    <div className="content-widget-timeline__controls">
+                      <button
+                        aria-label={
+                          item.milestone
+                            ? `取消时间轴第 ${index + 1} 项关键节点`
+                            : `设为时间轴第 ${index + 1} 项关键节点`
+                        }
+                        aria-pressed={item.milestone}
+                        className={getClassName(
+                          "content-widget-toggle-button",
+                          item.milestone ? "is-active" : undefined
+                        )}
+                        onClick={() =>
+                          updateItems(
+                            items.map((current) =>
+                              current.id === item.id
+                                ? { ...current, milestone: !current.milestone }
+                                : current
+                            )
+                          )
+                        }
+                        onMouseDown={stopWidgetEditorEvent}
+                        type="button"
+                      >
+                        <CircleDot size={14} />
+                        关键节点
+                      </button>
+                      <button
+                        aria-label={
+                          item.showTitle
+                            ? `隐藏时间轴第 ${index + 1} 项标题`
+                            : `显示时间轴第 ${index + 1} 项标题`
+                        }
+                        aria-pressed={item.showTitle}
+                        className={getClassName(
+                          "content-widget-toggle-button",
+                          item.showTitle ? "is-active" : undefined
+                        )}
+                        onClick={() =>
+                          updateItems(
+                            items.map((current) =>
+                              current.id === item.id
+                                ? { ...current, showTitle: !current.showTitle }
+                                : current
+                            )
+                          )
+                        }
+                        onMouseDown={stopWidgetEditorEvent}
+                        type="button"
+                      >
+                        <Heading size={14} />
+                        标题
+                      </button>
+                      <button
+                        aria-label={`删除时间轴第 ${index + 1} 项`}
+                        className="content-widget-icon-button"
+                        disabled={items.length <= 1}
+                        onClick={() => updateItems(items.filter((current) => current.id !== item.id))}
+                        onMouseDown={stopWidgetEditorEvent}
+                        type="button"
+                      >
+                        <Trash2 size={14} />
+                      </button>
+                    </div>
                   ) : null}
                 </div>
               </li>
@@ -455,7 +552,10 @@ const timelineBlock = createReactBlockSpec(
                   {
                     content: "新的时间事件。",
                     id: createWidgetItemId("timeline"),
-                    time: "12:00"
+                    milestone: false,
+                    showTitle: false,
+                    time: "新的时间",
+                    title: "新的标题"
                   }
                 ])
               }
@@ -476,10 +576,19 @@ const timelineBlock = createReactBlockSpec(
         <section className="content-widget-block content-widget-timeline">
           <ol className="content-widget-timeline__list">
             {items.map((item) => (
-              <li className="content-widget-timeline__item" key={item.id}>
+              <li
+                className={getClassName(
+                  "content-widget-timeline__item",
+                  item.milestone ? "is-milestone" : undefined
+                )}
+                key={item.id}
+              >
                 <span className="content-widget-timeline__dot" aria-hidden="true" />
                 <div className="content-widget-timeline__card">
                   <time className="content-widget-timeline__time">{item.time}</time>
+                  {item.showTitle ? (
+                    <div className="content-widget-timeline__title">{item.title}</div>
+                  ) : null}
                   <div className="content-widget-timeline__content">{item.content}</div>
                 </div>
               </li>
@@ -710,9 +819,9 @@ const comparisonBlock = createReactBlockSpec(
                 updateItems([
                   ...items,
                   {
-                    body: "新的对比内容",
+                    body: getComparisonDefaultBody(items.length),
                     id: createWidgetItemId("compare"),
-                    title: `对比项 ${items.length + 1}`
+                    title: getComparisonDefaultTitle(items.length)
                   }
                 ])
               }
@@ -883,9 +992,9 @@ function parseComparisonItems(value: unknown): ComparisonItem[] {
   );
   while (items.length < 2) {
     items.push({
-      body: items.length === 0 ? "之前的内容" : "之后的内容",
+      body: items.length === 0 ? "之前的内容" : "现在的内容",
       id: createWidgetItemId("compare"),
-      title: items.length === 0 ? "之前" : "之后"
+      title: getComparisonDefaultTitle(items.length)
     });
   }
 
@@ -911,9 +1020,15 @@ function parseWidgetItems(value: unknown, fallbackPayload: string): Array<Record
 function normalizeTimelineItems(items: Array<Record<string, unknown>>): TimelineItem[] {
   const nextItems = items
     .map((item, index) => ({
-      content: cleanWidgetText(item.content, index === 0 ? "开始准备。" : "完成关键节点。"),
+      content: cleanWidgetText(
+        item.content,
+        index === 0 ? "说明这个阶段发生的事情。" : "记录关键节点的结果或变化。"
+      ),
       id: cleanWidgetText(item.id, createWidgetItemId("timeline")),
-      time: cleanWidgetText(item.time, index === 0 ? "09:00" : "10:30")
+      milestone: cleanWidgetBoolean(item.milestone, index === 1),
+      showTitle: cleanWidgetBoolean(item.showTitle, typeof item.title === "string" && item.title.trim() !== ""),
+      time: cleanWidgetText(item.time, index === 0 ? "2022 年-2024 年" : "2024 年 3 月"),
+      title: cleanWidgetText(item.title, index === 0 ? "阶段标题" : "关键节点")
     }));
 
   return nextItems.length > 0
@@ -937,9 +1052,9 @@ function normalizeStepItems(items: Array<Record<string, unknown>>): StepItem[] {
 function normalizeComparisonItems(items: Array<Record<string, unknown>>): ComparisonItem[] {
   const nextItems = items
     .map((item, index) => ({
-      body: cleanWidgetText(item.body, index === 0 ? "之前的内容" : "之后的内容"),
+      body: cleanWidgetText(item.body, getComparisonDefaultBody(index)),
       id: cleanWidgetText(item.id, createWidgetItemId("compare")),
-      title: cleanWidgetText(item.title, index === 0 ? "之前" : "之后")
+      title: normalizeComparisonTitle(cleanWidgetText(item.title, getComparisonDefaultTitle(index)), index)
     }));
 
   return nextItems.length > 0
@@ -953,6 +1068,26 @@ function serializeWidgetItems(items: Array<TimelineItem | StepItem | ComparisonI
 
 function cleanWidgetText(value: unknown, fallback: string): string {
   return typeof value === "string" ? value : fallback;
+}
+
+function cleanWidgetBoolean(value: unknown, fallback: boolean): boolean {
+  return typeof value === "boolean" ? value : fallback;
+}
+
+function getComparisonDefaultTitle(index: number): string {
+  return index === 0 ? "之前" : index === 1 ? "现在" : "之后";
+}
+
+function getComparisonDefaultBody(index: number): string {
+  return index === 0 ? "之前的内容" : index === 1 ? "现在的内容" : "之后的内容";
+}
+
+function normalizeComparisonTitle(title: string, index: number): string {
+  if ((index === 1 && title === "之后") || (index === 2 && /^对比项\s*\d+$/.test(title))) {
+    return getComparisonDefaultTitle(index);
+  }
+
+  return title;
 }
 
 function createWidgetItemId(prefix: string): string {
