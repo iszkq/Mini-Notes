@@ -41,6 +41,7 @@ export const COMPARISON_DEFAULT_PAYLOAD = JSON.stringify([
   { body: "现在的内容", id: "compare-2", title: "现在" }
 ]);
 const COMPARISON_MAX_ITEMS = 3;
+const COMPARISON_DEFAULT_TITLES = ["之前", "现在", "之后"] as const;
 const CHINESE_STEP_NUMERALS = ["零", "一", "二", "三", "四", "五", "六", "七", "八", "九"];
 
 type TimelineItem = {
@@ -783,10 +784,16 @@ const comparisonBlock = createReactBlockSpec(
                   />
                   {editor.isEditable ? (
                     <button
-                      aria-label={`删除对比项 ${index + 1}`}
+                      aria-label={`删除对比项 ${item.title || index + 1}`}
                       className="content-widget-icon-button"
                       disabled={items.length <= 2}
-                      onClick={() => updateItems(items.filter((current) => current.id !== item.id))}
+                      onClick={() => {
+                        if (items.length <= 2) {
+                          return;
+                        }
+
+                        updateItems(items.filter((current) => current.id !== item.id));
+                      }}
                       onMouseDown={stopWidgetEditorEvent}
                       type="button"
                     >
@@ -816,16 +823,18 @@ const comparisonBlock = createReactBlockSpec(
           {editor.isEditable && items.length < COMPARISON_MAX_ITEMS ? (
             <button
               className="content-widget-add-button"
-              onClick={() =>
+              onClick={() => {
+                const defaultIndex = getNextComparisonDefaultIndex(items);
+
                 updateItems([
                   ...items,
                   {
-                    body: getComparisonDefaultBody(items.length),
+                    body: getComparisonDefaultBody(defaultIndex),
                     id: createWidgetItemId("compare"),
-                    title: getComparisonDefaultTitle(items.length)
+                    title: getComparisonDefaultTitle(defaultIndex)
                   }
-                ])
-              }
+                ]);
+              }}
               onMouseDown={stopWidgetEditorEvent}
               type="button"
             >
@@ -1076,7 +1085,7 @@ function cleanWidgetBoolean(value: unknown, fallback: boolean): boolean {
 }
 
 function getComparisonDefaultTitle(index: number): string {
-  return index === 0 ? "之前" : index === 1 ? "现在" : "之后";
+  return COMPARISON_DEFAULT_TITLES[index] ?? `对比项 ${index + 1}`;
 }
 
 function getStepDefaultTitle(index: number): string {
@@ -1121,11 +1130,17 @@ function getComparisonDefaultBody(index: number): string {
 }
 
 function normalizeComparisonTitle(title: string, index: number): string {
-  if ((index === 1 && title === "之后") || (index === 2 && /^对比项\s*\d+$/.test(title))) {
+  if (index === 2 && /^对比项\s*\d+$/.test(title)) {
     return getComparisonDefaultTitle(index);
   }
 
   return title;
+}
+
+function getNextComparisonDefaultIndex(items: ComparisonItem[]): number {
+  const usedTitles = new Set(items.map((item) => item.title));
+  const missingIndex = COMPARISON_DEFAULT_TITLES.findIndex((title) => !usedTitles.has(title));
+  return missingIndex >= 0 ? missingIndex : Math.min(items.length, COMPARISON_MAX_ITEMS - 1);
 }
 
 function createWidgetItemId(prefix: string): string {
