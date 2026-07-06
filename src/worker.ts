@@ -16,6 +16,7 @@ import type {
   NoteCreateInput,
   NoteKind,
   NoteSummary,
+  NoteTitleSize,
   NoteUpdateInput,
   RegisterInput,
   SessionStatus,
@@ -41,6 +42,7 @@ type DbNoteRow = {
   title: string;
   icon: string;
   kind: NoteKind;
+  titleSize: NoteTitleSize;
   parentId: string | null;
   isArchived: number;
   shareToken: string | null;
@@ -131,9 +133,9 @@ type UploadedFormFile = Blob & {
 };
 
 const NOTE_COLUMNS =
-  "id, title, icon, kind, parent_id AS parentId, is_archived AS isArchived, share_token AS shareToken, shared_at AS sharedAt, sort_order AS sortOrder, summary, created_at AS createdAt, updated_at AS updatedAt, content_key AS contentKey, content_size AS contentSize";
+  "id, title, icon, kind, title_size AS titleSize, parent_id AS parentId, is_archived AS isArchived, share_token AS shareToken, shared_at AS sharedAt, sort_order AS sortOrder, summary, created_at AS createdAt, updated_at AS updatedAt, content_key AS contentKey, content_size AS contentSize";
 const QUALIFIED_NOTE_COLUMNS =
-  "notes.id, notes.title, notes.icon, notes.kind, notes.parent_id AS parentId, notes.is_archived AS isArchived, notes.share_token AS shareToken, notes.shared_at AS sharedAt, notes.sort_order AS sortOrder, notes.summary, notes.created_at AS createdAt, notes.updated_at AS updatedAt, notes.content_key AS contentKey, notes.content_size AS contentSize";
+  "notes.id, notes.title, notes.icon, notes.kind, notes.title_size AS titleSize, notes.parent_id AS parentId, notes.is_archived AS isArchived, notes.share_token AS shareToken, notes.shared_at AS sharedAt, notes.sort_order AS sortOrder, notes.summary, notes.created_at AS createdAt, notes.updated_at AS updatedAt, notes.content_key AS contentKey, notes.content_size AS contentSize";
 
 let bibleDataPromise: Promise<BibleData> | null = null;
 let emojiIndexPromise: Promise<string> | null = null;
@@ -1281,6 +1283,7 @@ async function createNote(
     title: cleanTitle(body.title, kind),
     icon: cleanIcon(body.icon, kind),
     kind,
+    titleSize: cleanTitleSize(body.titleSize),
     parentId: await resolveParentIdForUser(env, userId, kind, body.parentId),
     isArchived: false,
     shareToken: null,
@@ -1293,8 +1296,8 @@ async function createNote(
 
   await env.DB.prepare(
     `INSERT INTO notes
-       (id, user_id, title, icon, kind, parent_id, content, content_key, content_size, summary, is_archived, sort_order, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?)`
+       (id, user_id, title, icon, kind, title_size, parent_id, content, content_key, content_size, summary, is_archived, sort_order, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?)`
   )
     .bind(
       note.id,
@@ -1302,6 +1305,7 @@ async function createNote(
       note.title,
       note.icon,
       note.kind,
+      note.titleSize,
       note.parentId,
       storedContent.dbContent,
       storedContent.contentKey,
@@ -1348,6 +1352,10 @@ async function updateNote(
       body.icon === undefined
         ? current.icon
         : cleanIcon(body.icon, cleanNoteKind(current.kind)),
+    titleSize:
+      body.titleSize === undefined
+        ? cleanTitleSize(current.titleSize)
+        : cleanTitleSize(body.titleSize),
     parentId:
       body.parentId === undefined
         ? current.parentId
@@ -1387,6 +1395,7 @@ async function updateNote(
     `UPDATE notes
      SET title = ?,
          icon = ?,
+         title_size = ?,
          parent_id = ?,
          content = ?,
          content_key = ?,
@@ -1400,6 +1409,7 @@ async function updateNote(
     .bind(
       next.title,
       next.icon,
+      next.titleSize,
       next.parentId,
       storedContent.dbContent,
       storedContent.contentKey,
@@ -2145,6 +2155,7 @@ function rowToSummary(row: DbNoteRow): NoteSummary {
     title: row.title,
     icon: row.icon,
     kind: cleanNoteKind(row.kind),
+    titleSize: cleanTitleSize(row.titleSize),
     parentId: row.parentId,
     isArchived: Boolean(row.isArchived),
     shareToken: row.shareToken ?? null,
@@ -2875,6 +2886,10 @@ function cleanIcon(value: unknown, kind: NoteKind = "page"): string {
 
 function cleanNoteKind(value: unknown): NoteKind {
   return value === "category" ? "category" : "page";
+}
+
+function cleanTitleSize(value: unknown): NoteTitleSize {
+  return value === "h2" || value === "h3" ? value : "h1";
 }
 
 function cleanParentId(value: unknown): string | null {

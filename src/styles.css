@@ -255,6 +255,7 @@ button:disabled {
 .note-row {
   display: grid;
   grid-template-columns: 28px minmax(0, 1fr);
+  align-items: start;
   gap: 8px;
   width: 100%;
   min-height: 46px;
@@ -300,9 +301,14 @@ button:disabled {
 }
 
 .note-row strong {
+  overflow: visible;
+  text-overflow: clip;
+  white-space: normal;
+  overflow-wrap: anywhere;
   color: #2b2a27;
   font-size: 0.9rem;
   font-weight: 700;
+  line-height: 1.35;
 }
 
 .note-row small {
@@ -876,6 +882,15 @@ button:disabled {
   font-size: 3.8rem;
   font-weight: 800;
   line-height: 1.05;
+}
+
+.title-input.title-size-h2 {
+  font-size: 2.85rem;
+}
+
+.title-input.title-size-h3 {
+  font-size: 2.15rem;
+  line-height: 1.12;
 }
 
 .title-input::placeholder {
@@ -2222,8 +2237,17 @@ button:disabled {
 .public-note-copy h1 {
   margin: 14px 0 10px;
   color: #1f1f1a;
-  font-size: clamp(2.4rem, 5vw, 4rem);
+  font-size: 3.8rem;
   line-height: 1.04;
+}
+
+.public-note-copy h1.title-size-h2 {
+  font-size: 2.85rem;
+}
+
+.public-note-copy h1.title-size-h3 {
+  font-size: 2.15rem;
+  line-height: 1.12;
 }
 
 .public-empty {
@@ -2916,6 +2940,14 @@ button:disabled {
     font-size: 2.6rem;
   }
 
+  .title-input.title-size-h2 {
+    font-size: 2.1rem;
+  }
+
+  .title-input.title-size-h3 {
+    font-size: 1.7rem;
+  }
+
   .workspace-empty {
     padding: 18px 14px 32px;
   }
@@ -3064,5 +3096,13 @@ button:disabled {
 
   .public-note-copy h1 {
     font-size: 2.35rem;
+  }
+
+  .public-note-copy h1.title-size-h2 {
+    font-size: 2rem;
+  }
+
+  .public-note-copy h1.title-size-h3 {
+    font-size: 1.65rem;
   }
 }

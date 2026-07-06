@@ -1,9 +1,9 @@
 import { BlockNoteEditor } from "@blocknote/core";
 import { isImageIcon } from "./emojiPacks";
 import { noteSchema } from "./editorSchema";
-import type { Note } from "./shared";
+import type { Note, NoteTitleSize } from "./shared";
 
-type ExportableNote = Pick<Note, "content" | "icon" | "title" | "updatedAt">;
+type ExportableNote = Pick<Note, "content" | "icon" | "title" | "titleSize" | "updatedAt">;
 type ExportEditor = BlockNoteEditor<any, any, any>;
 
 let exportEditor: ExportEditor | null = null;
@@ -127,7 +127,7 @@ function buildExportDocument(notes: Array<ExportableNote & { html: string }>): s
           <section class="note-export-title">
             <span class="note-export-icon">${renderExportIcon(note.icon)}</span>
             <div>
-              <h1>${escapeHtml(note.title || "未命名")}</h1>
+              <h1 class="title-size-${normalizeTitleSize(note.titleSize)}">${escapeHtml(note.title || "未命名")}</h1>
             </div>
           </section>
 
@@ -248,6 +248,14 @@ function buildExportDocument(notes: Array<ExportableNote & { html: string }>): s
         color: #111827;
         font-size: 2rem;
         line-height: 1.16;
+      }
+
+      .note-export-title h1.title-size-h2 {
+        font-size: 1.65rem;
+      }
+
+      .note-export-title h1.title-size-h3 {
+        font-size: 1.35rem;
       }
 
       .note-export-content {
@@ -710,6 +718,10 @@ function escapeHtml(value: string): string {
     .replaceAll(">", "&gt;")
     .replaceAll('"', "&quot;")
     .replaceAll("'", "&#39;");
+}
+
+function normalizeTitleSize(value: unknown): NoteTitleSize {
+  return value === "h2" || value === "h3" ? value : "h1";
 }
 
 function formatDateTime(value: string): string {

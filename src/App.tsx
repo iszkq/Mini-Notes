@@ -68,7 +68,7 @@ import { NoteIcon } from "./components/NoteIcon";
 import { NotebookEditor } from "./components/NotebookEditor";
 import { isImageIcon, type EmojiItem } from "./emojiPacks";
 import { openExportWindow, renderNotesToExportWindow } from "./export";
-import type { AuthUser, Note, NoteBlock, NoteSummary } from "./shared";
+import type { AuthUser, Note, NoteBlock, NoteSummary, NoteTitleSize } from "./shared";
 
 type SaveStatus = "idle" | "saving" | "saved" | "error";
 type AuthMode = "login" | "register";
@@ -96,7 +96,7 @@ type NoteDropTarget = {
   beforeId: string | null;
 };
 
-type PageSnapshot = Pick<Note, "title" | "icon" | "parentId" | "content">;
+type PageSnapshot = Pick<Note, "title" | "icon" | "titleSize" | "parentId" | "content">;
 
 type PageHistoryState = {
   noteId: string | null;
@@ -121,6 +121,12 @@ const UNCATEGORIZED_GROUP_KEY = "__uncategorized__";
 const SIDEBAR_COLLAPSED_STORAGE_KEY = "mini-notes-sidebar-collapsed";
 const PAGE_HISTORY_LIMIT = 80;
 const DROP_TARGET_EDGE_RATIO = 0.34;
+const DEFAULT_TITLE_SIZE: NoteTitleSize = "h1";
+const PAGE_TITLE_SIZE_OPTIONS: Array<{ label: string; value: NoteTitleSize }> = [
+  { label: "一级标题", value: "h1" },
+  { label: "二级标题", value: "h2" },
+  { label: "三级标题", value: "h3" }
+];
 
 /*
 const PAGE_PRESETS: PagePreset[] = [
@@ -792,6 +798,7 @@ function App() {
           await updateNote(snapshot.id, {
             title: snapshot.title,
             icon: snapshot.icon,
+            titleSize: snapshot.titleSize,
             parentId: snapshot.parentId,
             content: snapshot.content
           })
@@ -877,7 +884,12 @@ function App() {
       setSaveStatus("saving");
       setDraft(nextDraft);
 
-      if (patch.title !== undefined || patch.icon !== undefined || patch.parentId !== undefined) {
+      if (
+        patch.title !== undefined ||
+        patch.icon !== undefined ||
+        patch.titleSize !== undefined ||
+        patch.parentId !== undefined
+      ) {
         setNotes((current) =>
           current.map((note) =>
             note.id === selectedIdRef.current
@@ -885,6 +897,7 @@ function App() {
                   ...note,
                   title: nextDraft.title,
                   icon: nextDraft.icon,
+                  titleSize: nextDraft.titleSize,
                   parentId: nextDraft.parentId
                 }
               : note
@@ -893,6 +906,73 @@ function App() {
       }
     },
     [pushPageHistorySnapshot]
+  );
+
+  const syncParentPageLink = useCallback(
+    async (parentId: string | null, child: NoteSummary, mode: "add" | "remove") => {
+      if (!parentId) {
+        return;
+      }
+
+      const parent = notes.find((note) => note.id === parentId && note.kind === "page");
+      if (!parent) {
+        return;
+      }
+
+      const transform =
+        mode === "add"
+          ? (blocks: NoteBlock[]) => addChildPageLinkBlock(blocks, child)
+          : (blocks: NoteBlock[]) => removeChildPageLinkBlocks(blocks, child.id);
+      const currentDraft = draftRef.current;
+
+      if (currentDraft?.id === parentId) {
+        const result = transform(currentDraft.content);
+        if (result.changed) {
+          editDraft({ content: result.blocks });
+          setEditorDocumentVersion((current) => current + 1);
+        }
+        return;
+      }
+
+      const parentNote = normalizeNote(await getNote(parentId));
+      const result = transform(parentNote.content);
+      if (!result.changed) {
+        return;
+      }
+
+      const savedParent = normalizeNote(await updateNote(parentId, { content: result.blocks }));
+      setNotes((current) => updateSummary(current, savedParent));
+    },
+    [editDraft, notes]
+  );
+
+  const syncChildPageLinks = useCallback(
+    async (
+      child: NoteSummary,
+      previousParentId: string | null,
+      nextParentId: string | null
+    ) => {
+      if (previousParentId === nextParentId) {
+        return;
+      }
+
+      await syncParentPageLink(previousParentId, child, "remove");
+      await syncParentPageLink(nextParentId, child, "add");
+    },
+    [syncParentPageLink]
+  );
+
+  const reportPageLinkSyncError = useCallback(
+    (error: unknown) => {
+      if (error instanceof ApiError && error.status === 401) {
+        handleLoggedOut(hasUsers);
+        setAppError("登录状态已失效，请重新登录。");
+        return;
+      }
+
+      setAppError(error instanceof ApiError ? error.message : "子页面关联同步失败。");
+    },
+    [handleLoggedOut, hasUsers]
   );
 
   const applyPageSnapshot = useCallback((snapshot: PageSnapshot) => {
@@ -1123,10 +1203,20 @@ function App() {
       }
 
       try {
-        await updateNote(draggedId, {
-          parentId,
-          sortOrder: nextSortOrder
-        });
+        const saved = normalizeNote(
+          await updateNote(draggedId, {
+            parentId,
+            sortOrder: nextSortOrder
+          })
+        );
+        const savedSummary = normalizeNoteSummary(toSummary(saved));
+
+        setNotes((current) => updateSummary(current, saved));
+        try {
+          await syncChildPageLinks(savedSummary, draggedNote.parentId ?? null, saved.parentId ?? null);
+        } catch (syncError) {
+          reportPageLinkSyncError(syncError);
+        }
       } catch (error) {
         setNotes(previousSnapshot);
         if (selectedIdRef.current === draggedId) {
@@ -1152,7 +1242,18 @@ function App() {
         }
       }
     },
-    [calculateDropSortOrder, clearDragExpandTimer, draggedNoteId, handleLoggedOut, hasUsers, isDescendantPage, notes, updateDropTarget]
+    [
+      calculateDropSortOrder,
+      clearDragExpandTimer,
+      draggedNoteId,
+      handleLoggedOut,
+      hasUsers,
+      isDescendantPage,
+      notes,
+      reportPageLinkSyncError,
+      syncChildPageLinks,
+      updateDropTarget
+    ]
   );
 
   const getNoteDropTarget = useCallback(
@@ -1332,6 +1433,7 @@ function App() {
           title: "未命名",
           icon: "📝",
           kind: "page",
+          titleSize: DEFAULT_TITLE_SIZE,
           parentId,
           content: []
         })
@@ -1359,6 +1461,7 @@ function App() {
             title: "未命名",
             icon: "📝",
             kind: "page",
+            titleSize: DEFAULT_TITLE_SIZE,
             parentId,
             content: []
           })
@@ -1426,9 +1529,14 @@ function App() {
       return;
     }
 
+    const archivedSummary = normalizeNoteSummary(toSummary(draft));
+    const previousParentId = draft.parentId ?? null;
+
     try {
       await deleteNote(draft.id);
-      const remaining = notes.filter((note) => note.id !== draft.id);
+      const remaining = notes
+        .filter((note) => note.id !== draft.id)
+        .map((note) => (note.parentId === draft.id ? { ...note, parentId: null } : note));
       setNotes(remaining);
       draftRef.current = null;
       lastPageSnapshotRef.current = null;
@@ -1445,6 +1553,12 @@ function App() {
         setDirty(false);
         setSaveStatus("idle");
       }
+
+      try {
+        await syncParentPageLink(previousParentId, archivedSummary, "remove");
+      } catch (syncError) {
+        reportPageLinkSyncError(syncError);
+      }
     } catch (error) {
       if (error instanceof ApiError && error.status === 401) {
         handleLoggedOut(hasUsers);
@@ -1453,7 +1567,15 @@ function App() {
         setAppError("归档失败。");
       }
     }
-  }, [createNewNote, draft, handleLoggedOut, hasUsers, loadNote, notes]);
+  }, [
+    draft,
+    handleLoggedOut,
+    hasUsers,
+    loadNote,
+    notes,
+    reportPageLinkSyncError,
+    syncParentPageLink
+  ]);
 
   const archiveCategory = useCallback(
     async (category: NoteSummary) => {
@@ -1832,13 +1954,35 @@ function App() {
     setPageActionMenu(null);
 
     if (draft?.id === noteId) {
+      const previousParentId = draft.parentId ?? null;
       editDraft({ parentId });
+
+      try {
+        await syncChildPageLinks(
+          normalizeNoteSummary({ ...toSummary(draft), parentId }),
+          previousParentId,
+          parentId
+        );
+      } catch (error) {
+        reportPageLinkSyncError(error);
+      }
       return;
     }
+
+    const previousNote = notes.find((note) => note.id === noteId) ?? null;
 
     try {
       const saved = normalizeNote(await updateNote(noteId, { parentId }));
       setNotes((current) => updateSummary(current, saved));
+      try {
+        await syncChildPageLinks(
+          normalizeNoteSummary(toSummary(saved)),
+          previousNote?.parentId ?? null,
+          saved.parentId ?? null
+        );
+      } catch (syncError) {
+        reportPageLinkSyncError(syncError);
+      }
     } catch (error) {
       if (error instanceof ApiError && error.status === 401) {
         handleLoggedOut(hasUsers);
@@ -1884,7 +2028,9 @@ function App() {
 
     try {
       await deleteNote(note.id);
-      const remaining = notes.filter((item) => item.id !== note.id);
+      const remaining = notes
+        .filter((item) => item.id !== note.id)
+        .map((item) => (item.parentId === note.id ? { ...item, parentId: null } : item));
       setNotes(remaining);
 
       if (selectedIdRef.current === note.id) {
@@ -1900,6 +2046,12 @@ function App() {
         if (nextId) {
           await loadNote(nextId);
         }
+      }
+
+      try {
+        await syncParentPageLink(note.parentId ?? null, note, "remove");
+      } catch (syncError) {
+        reportPageLinkSyncError(syncError);
       }
     } catch (error) {
       if (error instanceof ApiError && error.status === 401) {
@@ -2455,7 +2607,7 @@ function App() {
             <div className="public-note-head">
               <NoteIcon className="public-note-icon" icon={normalizePageIcon(publicNote.icon)} />
               <div className="public-note-copy">
-                <h1>{publicNote.title}</h1>
+                <h1 className={`title-size-${publicNote.titleSize}`}>{publicNote.title}</h1>
               </div>
             </div>
 
@@ -2969,7 +3121,7 @@ function App() {
                         <button
                           className={clsx("topbar-category-menu__item", !draft.parentId && "active")}
                           onClick={() => {
-                            editDraft({ parentId: null });
+                            void movePageToCategory(draft.id, null);
                             setCategoryMenuOpen(false);
                           }}
                           role="menuitem"
@@ -2987,7 +3139,7 @@ function App() {
                             key={category.id}
                             style={{ "--category-option-offset": `${depth * 14}px` } as CSSProperties}
                             onClick={() => {
-                              editDraft({ parentId: category.id });
+                              void movePageToCategory(draft.id, category.id);
                               setCategoryMenuOpen(false);
                             }}
                             role="menuitem"
@@ -3085,19 +3237,41 @@ function App() {
             <div className="page-heading-layout">
               <div className="page-heading-main">
                 <div className="page-meta">
-                  <span className="page-meta-label">页面图标</span>
-                  <button
-                    className="page-icon-picker-button"
-                    onClick={() => setPageIconPickerTargetId(draft.id)}
-                    type="button"
-                  >
-                    <NoteIcon className="page-icon-picker-button__icon" icon={normalizePageIcon(draft.icon)} />
-                    <span>更换图标</span>
-                  </button>
+                  <div className="page-meta-field">
+                    <span className="page-meta-label">页面图标</span>
+                    <button
+                      className="page-icon-picker-button"
+                      onClick={() => setPageIconPickerTargetId(draft.id)}
+                      type="button"
+                    >
+                      <NoteIcon className="page-icon-picker-button__icon" icon={normalizePageIcon(draft.icon)} />
+                      <span>更换图标</span>
+                    </button>
+                  </div>
+
+                  <div className="page-meta-field">
+                    <span className="page-meta-label">标题大小</span>
+                    <div className="page-title-size-options" role="group" aria-label="标题大小">
+                      {PAGE_TITLE_SIZE_OPTIONS.map((option) => (
+                        <button
+                          aria-pressed={draft.titleSize === option.value}
+                          className={clsx(
+                            "page-title-size-option",
+                            draft.titleSize === option.value && "active"
+                          )}
+                          key={option.value}
+                          onClick={() => editDraft({ titleSize: option.value })}
+                          type="button"
+                        >
+                          {option.label}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
                 </div>
 
                 <input
-                  className="title-input"
+                  className={clsx("title-input", `title-size-${draft.titleSize}`)}
                   onChange={(event) => editDraft({ title: event.target.value })}
                   onKeyDown={(event) => {
                     if (event.key !== "Enter" || event.nativeEvent.isComposing) {
@@ -3169,10 +3343,11 @@ function createEmptyPageHistory(noteId: string | null): PageHistoryState {
   };
 }
 
-function clonePageSnapshot(note: Pick<Note, "title" | "icon" | "parentId" | "content">): PageSnapshot {
+function clonePageSnapshot(note: Pick<Note, "title" | "icon" | "titleSize" | "parentId" | "content">): PageSnapshot {
   return {
     title: note.title,
     icon: note.icon,
+    titleSize: normalizeTitleSize(note.titleSize),
     parentId: note.parentId,
     content: cloneNoteBlocks(note.content)
   };
@@ -3183,6 +3358,7 @@ function applyPageSnapshotToNote(note: Note, snapshot: PageSnapshot): Note {
     ...note,
     title: snapshot.title,
     icon: snapshot.icon,
+    titleSize: snapshot.titleSize,
     parentId: snapshot.parentId,
     content: cloneNoteBlocks(snapshot.content)
   };
@@ -3192,10 +3368,110 @@ function cloneNoteBlocks(blocks: NoteBlock[]): NoteBlock[] {
   return JSON.parse(JSON.stringify(blocks)) as NoteBlock[];
 }
 
+function addChildPageLinkBlock(
+  blocks: NoteBlock[],
+  child: Pick<NoteSummary, "id" | "title" | "icon">
+): { blocks: NoteBlock[]; changed: boolean } {
+  if (hasPageLinkBlock(blocks, child.id)) {
+    return { blocks, changed: false };
+  }
+
+  return {
+    blocks: [...cloneNoteBlocks(blocks), createPageLinkBlock(child)],
+    changed: true
+  };
+}
+
+function removeChildPageLinkBlocks(
+  blocks: NoteBlock[],
+  noteId: string
+): { blocks: NoteBlock[]; changed: boolean } {
+  const [nextValue, changed] = removePageLinkBlocksFromValue(blocks, noteId);
+  return {
+    blocks: Array.isArray(nextValue) ? (nextValue as NoteBlock[]) : blocks,
+    changed
+  };
+}
+
+function createPageLinkBlock(child: Pick<NoteSummary, "id" | "title" | "icon">): NoteBlock {
+  return {
+    type: "pageLink",
+    props: {
+      icon: normalizePageIcon(child.icon),
+      noteId: child.id,
+      title: child.title || "未命名"
+    }
+  };
+}
+
+function hasPageLinkBlock(value: unknown, noteId: string): boolean {
+  if (Array.isArray(value)) {
+    return value.some((item) => hasPageLinkBlock(item, noteId));
+  }
+
+  if (!isPlainRecord(value)) {
+    return false;
+  }
+
+  if (isPageLinkBlockForNote(value, noteId)) {
+    return true;
+  }
+
+  return Object.values(value).some((nestedValue) => hasPageLinkBlock(nestedValue, noteId));
+}
+
+function removePageLinkBlocksFromValue(value: unknown, noteId: string): [unknown, boolean] {
+  if (Array.isArray(value)) {
+    let changed = false;
+    const nextItems: unknown[] = [];
+
+    value.forEach((item) => {
+      if (isPageLinkBlockForNote(item, noteId)) {
+        changed = true;
+        return;
+      }
+
+      const [nextItem, itemChanged] = removePageLinkBlocksFromValue(item, noteId);
+      changed = changed || itemChanged;
+      nextItems.push(nextItem);
+    });
+
+    return [changed ? nextItems : value, changed];
+  }
+
+  if (!isPlainRecord(value)) {
+    return [value, false];
+  }
+
+  let changed = false;
+  const nextValue: Record<string, unknown> = {};
+
+  Object.entries(value).forEach(([key, nestedValue]) => {
+    const [nextNestedValue, nestedChanged] = removePageLinkBlocksFromValue(nestedValue, noteId);
+    changed = changed || nestedChanged;
+    nextValue[key] = nextNestedValue;
+  });
+
+  return [changed ? nextValue : value, changed];
+}
+
+function isPageLinkBlockForNote(value: unknown, noteId: string): boolean {
+  if (!isPlainRecord(value) || value.type !== "pageLink" || !isPlainRecord(value.props)) {
+    return false;
+  }
+
+  return value.props.noteId === noteId;
+}
+
+function isPlainRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null;
+}
+
 function arePageSnapshotsEqual(first: PageSnapshot, second: PageSnapshot): boolean {
   return (
     first.title === second.title &&
     first.icon === second.icon &&
+    first.titleSize === second.titleSize &&
     first.parentId === second.parentId &&
     JSON.stringify(first.content) === JSON.stringify(second.content)
   );
@@ -3218,7 +3494,8 @@ function normalizeNoteSummary(note: NoteSummary): NoteSummary {
     ...note,
     kind: note.kind === "category" ? "category" : "page",
     title: normalizeLegacyTitle(note.title),
-    icon: normalizePageIcon(note.icon)
+    icon: normalizePageIcon(note.icon),
+    titleSize: normalizeTitleSize(note.titleSize)
   };
 }
 
@@ -3227,8 +3504,13 @@ function normalizeNote(note: Note): Note {
     ...note,
     kind: note.kind === "category" ? "category" : "page",
     title: normalizeLegacyTitle(note.title),
-    icon: normalizePageIcon(note.icon)
+    icon: normalizePageIcon(note.icon),
+    titleSize: normalizeTitleSize(note.titleSize)
   };
+}
+
+function normalizeTitleSize(value: unknown): NoteTitleSize {
+  return value === "h2" || value === "h3" ? value : DEFAULT_TITLE_SIZE;
 }
 
 function toSummary(note: Note): NoteSummary {
