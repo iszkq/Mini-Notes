@@ -66,13 +66,14 @@ import { EmojiPackPicker } from "./components/EmojiPackPicker";
 import { ExportPanel } from "./components/ExportPanel";
 import { NoteIcon } from "./components/NoteIcon";
 import { NotebookEditor } from "./components/NotebookEditor";
+import { TenMinuteReader } from "./components/TenMinuteReader";
 import { isImageIcon, type EmojiItem } from "./emojiPacks";
 import { openExportWindow, renderNotesToExportWindow } from "./export";
 import type { AuthUser, Note, NoteBlock, NoteSummary, NoteTitleSize } from "./shared";
 
 type SaveStatus = "idle" | "saving" | "saved" | "error";
 type AuthMode = "login" | "register";
-type WorkspaceView = "notes" | "bible" | "admin";
+type WorkspaceView = "notes" | "bible" | "ten-minute" | "admin";
 
 type PagePreset = {
   value: string;
@@ -242,6 +243,7 @@ function App() {
   const [sidebarSearchLimit, setSidebarSearchLimit] = useState(SIDEBAR_SEARCH_PAGE_SIZE);
   const isAdminView = workspaceView === "admin" && Boolean(sessionUser?.isAdmin);
   const isBibleView = workspaceView === "bible";
+  const isTenMinuteView = workspaceView === "ten-minute";
 
   useEffect(() => {
     selectedIdRef.current = selectedId;
@@ -2955,6 +2957,15 @@ function App() {
             <BookOpen size={15} />
             读经
           </button>
+          <button
+            className={clsx("toolbar-button sidebar-view-button", workspaceView === "ten-minute" && "active")}
+            onClick={() => setWorkspaceView("ten-minute")}
+            title="10分钟"
+            type="button"
+          >
+            <Clock3 size={15} />
+            10分钟
+          </button>
           {sessionUser?.isAdmin ? (
             <button
               className={clsx("toolbar-button sidebar-view-button", workspaceView === "admin" && "active")}
@@ -3049,6 +3060,8 @@ function App() {
               <ShieldCheck size={17} />
             ) : isBibleView ? (
               <BookOpen size={17} />
+            ) : isTenMinuteView ? (
+              <Clock3 size={17} />
             ) : (
               <FileText size={17} />
             )}
@@ -3057,7 +3070,9 @@ function App() {
                 ? "管理员后台"
                 : isBibleView
                   ? "读经"
-                : draft?.title ?? (noteCount > 0 ? "选择页面" : "还没有页面")}
+                  : isTenMinuteView
+                    ? "10分钟"
+                    : draft?.title ?? (noteCount > 0 ? "选择页面" : "还没有页面")}
             </span>
           </div>
 
@@ -3073,7 +3088,7 @@ function App() {
                   返回笔记
                 </button>
               </>
-            ) : isBibleView ? (
+            ) : isBibleView || isTenMinuteView ? (
               <>
                 <button
                   className="toolbar-button"
@@ -3277,6 +3292,8 @@ function App() {
           <AdminPanel currentUser={sessionUser} onSessionRefresh={bootstrap} />
         ) : isBibleView ? (
           <BibleReader onError={setAppError} />
+        ) : isTenMinuteView ? (
+          <TenMinuteReader />
         ) : draft && !isLoadingNote ? (
           <article className={clsx("page", draftCommentCount > 0 && "has-comments")}>
             <div className="page-heading-layout">

@@ -28,6 +28,7 @@
     "src/main.tsx",
     "src/export.ts",
     "src/shared.ts",
+    "src/tenMinuteData.ts",
     "src/vite-env.d.ts",
     "src/components/**/*.tsx"
   ]

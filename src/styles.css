@@ -232,15 +232,19 @@ button:disabled {
 }
 
 .sidebar-view-toggle {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(0, 1fr));
-  gap: 8px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
 }
 
 .sidebar-view-button {
-  width: 100%;
+  flex: 1 1 74px;
+  min-width: 74px;
+  gap: 6px;
   min-height: 38px;
-  padding-inline: 10px;
+  padding-inline: 6px;
+  white-space: nowrap;
+  word-break: keep-all;
 }
 
 .note-list {
@@ -1551,9 +1555,67 @@ button:disabled {
   line-height: 1.72;
 }
 
+.ten-minute-name-list {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.ten-minute-name-list button {
+  width: 100%;
+  min-width: 0;
+  padding: 0 8px;
+}
+
+.ten-minute-sections {
+  gap: 20px;
+  padding-right: 0;
+}
+
+.ten-minute-section {
+  display: grid;
+  gap: 10px;
+}
+
+.ten-minute-section-title {
+  margin: 0;
+  padding: 0 2px;
+  color: #214f52;
+  font-size: 1rem;
+  font-weight: 850;
+  line-height: 1.35;
+}
+
+.ten-minute-section-body {
+  display: grid;
+  gap: 6px;
+}
+
+.ten-minute-paragraph {
+  grid-template-columns: minmax(0, 1fr);
+  min-height: 34px;
+  padding: 4px 2px;
+  background: transparent;
+}
+
+.ten-minute-text {
+  display: block;
+  color: #171a1f;
+  font-size: 0.96rem;
+  font-weight: 400;
+  line-height: 1.85;
+}
+
+.ten-minute-text.is-paragraph-start {
+  text-indent: 2em;
+}
+
 .bible-reader-verse-row.is-selected .bible-reader-verse-button,
 .bible-reader-verse-button:hover {
   background: #f3f7f5;
+}
+
+.ten-minute-row .bible-reader-verse-button:hover {
+  background: transparent;
 }
 
 .bible-note-mark {
