@@ -25,6 +25,7 @@ import {
   Search,
   ShieldCheck,
   Sparkles,
+  Timer,
   Trash2,
   Undo2,
   UploadCloud,
@@ -2963,7 +2964,7 @@ function App() {
             title="10分钟"
             type="button"
           >
-            <Clock3 size={15} />
+            <Timer size={17} strokeWidth={2.2} />
             10分钟
           </button>
           {sessionUser?.isAdmin ? (
@@ -3061,7 +3062,7 @@ function App() {
             ) : isBibleView ? (
               <BookOpen size={17} />
             ) : isTenMinuteView ? (
-              <Clock3 size={17} />
+              <Timer size={17} />
             ) : (
               <FileText size={17} />
             )}

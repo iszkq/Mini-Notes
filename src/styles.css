@@ -247,6 +247,10 @@ button:disabled {
   word-break: keep-all;
 }
 
+.sidebar-view-button svg {
+  flex: 0 0 auto;
+}
+
 .note-list {
   display: flex;
   flex: 1;
@@ -1587,13 +1591,13 @@ button:disabled {
 
 .ten-minute-section-body {
   display: grid;
-  gap: 6px;
+  gap: 8px;
 }
 
 .ten-minute-paragraph {
   grid-template-columns: minmax(0, 1fr);
-  min-height: 34px;
-  padding: 4px 2px;
+  min-height: 0;
+  padding: 2px;
   background: transparent;
 }
 
@@ -1603,9 +1607,6 @@ button:disabled {
   font-size: 0.96rem;
   font-weight: 400;
   line-height: 1.85;
-}
-
-.ten-minute-text.is-paragraph-start {
   text-indent: 2em;
 }
 

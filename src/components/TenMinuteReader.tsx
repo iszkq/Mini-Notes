@@ -1,12 +1,12 @@
 import clsx from "clsx";
-import { ChevronLeft, ChevronRight, Clock3 } from "lucide-react";
+import { ChevronLeft, ChevronRight, Timer } from "lucide-react";
 import { useMemo, useState } from "react";
-import { tenMinuteLessons } from "../tenMinuteData";
+import { tenMinuteLessons, type TenMinuteSection } from "../tenMinuteData";
 
-type TenMinuteSentenceLine = {
+type TenMinuteDisplaySection = {
   id: string;
-  isParagraphStart: boolean;
-  text: string;
+  paragraphs: string[];
+  title: string;
 };
 
 export function TenMinuteReader() {
@@ -26,6 +26,10 @@ export function TenMinuteReader() {
       : null;
   const paragraphCount =
     selectedLesson?.sections.reduce((total, section) => total + section.paragraphs.length, 0) ?? 0;
+  const displaySections = useMemo(
+    () => (selectedLesson ? createTenMinuteDisplaySections(selectedLesson.sections) : []),
+    [selectedLesson]
+  );
 
   if (!selectedLesson) {
     return (
@@ -40,7 +44,7 @@ export function TenMinuteReader() {
       <header className="bible-reader-hero">
         <div>
           <span className="bible-reader-eyebrow">
-            <Clock3 size={15} />
+            <Timer size={16} strokeWidth={2.2} />
             10分钟
           </span>
           <h1>{selectedLesson.title}</h1>
@@ -82,7 +86,7 @@ export function TenMinuteReader() {
               上一篇
             </button>
             <span>
-              {selectedLesson.sections.length} 类 · {paragraphCount} 段内容
+              {displaySections.length} 类 · {paragraphCount} 段内容
             </span>
             <button
               className="toolbar-button"
@@ -96,21 +100,14 @@ export function TenMinuteReader() {
           </div>
 
           <div className="bible-reader-verses ten-minute-sections">
-            {selectedLesson.sections.map((section) => (
-              <section className="ten-minute-section" key={section.title}>
+            {displaySections.map((section) => (
+              <section className="ten-minute-section" key={section.id}>
                 <h2 className="ten-minute-section-title">{section.title}</h2>
                 <div className="ten-minute-section-body">
-                  {section.paragraphs.flatMap(splitTenMinuteParagraph).map((line) => (
-                    <article className="bible-reader-verse-row ten-minute-row" key={line.id}>
+                  {section.paragraphs.map((paragraph, index) => (
+                    <article className="bible-reader-verse-row ten-minute-row" key={index}>
                       <div className="bible-reader-verse-button ten-minute-paragraph">
-                        <span
-                          className={clsx(
-                            "bible-reader-verse-text ten-minute-text",
-                            line.isParagraphStart && "is-paragraph-start"
-                          )}
-                        >
-                          {line.text}
-                        </span>
+                        <span className="bible-reader-verse-text ten-minute-text">{paragraph}</span>
                       </div>
                     </article>
                   ))}
@@ -124,66 +121,40 @@ export function TenMinuteReader() {
   );
 }
 
-function splitTenMinuteParagraph(paragraph: string, paragraphIndex: number): TenMinuteSentenceLine[] {
-  const text = removeTenMinuteListMarker(paragraph.trim());
-  if (!text) {
-    return [];
-  }
-
-  const lines: string[] = [];
-  let current = "";
-  for (let index = 0; index < text.length; index += 1) {
-    current += text[index];
-
-    if (!isTenMinuteSentenceBreak(text, index)) {
-      continue;
+function createTenMinuteDisplaySections(sections: TenMinuteSection[]): TenMinuteDisplaySection[] {
+  return sections.flatMap((section, sectionIndex) => {
+    const paragraphs = section.paragraphs.map(cleanTenMinuteParagraph).filter(Boolean);
+    if (section.title !== "本论") {
+      return [
+        {
+          id: `${sectionIndex}-${section.title}`,
+          paragraphs,
+          title: section.title
+        }
+      ];
     }
 
-    while (index + 1 < text.length && isClosingPunctuation(text[index + 1])) {
-      index += 1;
-      current += text[index];
-    }
-
-    const line = current.trim();
-    if (line) {
-      lines.push(line);
-    }
-    current = "";
-  }
-
-  const remaining = current.trim();
-  if (remaining) {
-    lines.push(remaining);
-  }
-
-  return lines.map((line, lineIndex) => ({
-    id: `${paragraphIndex}-${lineIndex}`,
-    isParagraphStart: lineIndex === 0,
-    text: line
-  }));
+    return paragraphs.map((paragraph, paragraphIndex) => ({
+      id: `${sectionIndex}-${section.title}-${paragraphIndex}`,
+      paragraphs: [paragraph],
+      title: `本论${formatChineseNumber(paragraphIndex + 1)}`
+    }));
+  });
 }
 
-function isTenMinuteSentenceBreak(text: string, index: number): boolean {
-  const char = text[index];
-  if ("。！？；".includes(char)) {
-    return true;
-  }
-  if ("!?;".includes(char)) {
-    return true;
-  }
-  if (char !== ".") {
-    return false;
-  }
-
-  const previous = text[index - 1] ?? "";
-  const next = text[index + 1] ?? "";
-  return !/\d/.test(previous) && !/\d/.test(next);
-}
-
-function isClosingPunctuation(char: string): boolean {
-  return "”’）】》」』".includes(char);
-}
-
-function removeTenMinuteListMarker(text: string): string {
+function cleanTenMinuteParagraph(text: string): string {
   return text.replace(/^\s*(?:[（(]?\d+[）)]?\s*|[一二三四五六七八九十]+[、.．])\s*[.．、]?\s*/, "");
+}
+
+function formatChineseNumber(value: number): string {
+  const digits = ["零", "一", "二", "三", "四", "五", "六", "七", "八", "九"];
+  if (value <= 10) {
+    return value === 10 ? "十" : digits[value];
+  }
+  if (value < 20) {
+    return `十${digits[value - 10]}`;
+  }
+  const tens = Math.floor(value / 10);
+  const ones = value % 10;
+  return `${digits[tens]}十${ones ? digits[ones] : ""}`;
 }
