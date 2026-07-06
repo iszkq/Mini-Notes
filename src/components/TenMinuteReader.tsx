@@ -123,7 +123,8 @@ export function TenMinuteReader() {
 
 function createTenMinuteDisplaySections(sections: TenMinuteSection[]): TenMinuteDisplaySection[] {
   return sections.flatMap((section, sectionIndex) => {
-    const paragraphs = section.paragraphs.map(cleanTenMinuteParagraph).filter(Boolean);
+    const sourceParagraphs = section.paragraphs.map((paragraph) => paragraph.trim()).filter(Boolean);
+    const paragraphs = sourceParagraphs.map(cleanTenMinuteParagraph).filter(Boolean);
     if (section.title !== "本论") {
       return [
         {
@@ -134,16 +135,49 @@ function createTenMinuteDisplaySections(sections: TenMinuteSection[]): TenMinute
       ];
     }
 
-    return paragraphs.map((paragraph, paragraphIndex) => ({
-      id: `${sectionIndex}-${section.title}-${paragraphIndex}`,
-      paragraphs: [paragraph],
-      title: `本论${formatChineseNumber(paragraphIndex + 1)}`
-    }));
+    const displaySections: TenMinuteDisplaySection[] = [];
+    sourceParagraphs.forEach((paragraph) => {
+      const cleanedParagraph = cleanTenMinuteParagraph(paragraph);
+      if (!cleanedParagraph) {
+        return;
+      }
+
+      if (isTenMinuteBodyStart(paragraph) || displaySections.length === 0) {
+        displaySections.push({
+          id: `${sectionIndex}-${section.title}-${displaySections.length}`,
+          paragraphs: [cleanedParagraph],
+          title: `本论${formatChineseNumber(displaySections.length + 1)}`
+        });
+        return;
+      }
+
+      displaySections[displaySections.length - 1].paragraphs.push(cleanedParagraph);
+    });
+
+    return displaySections;
   });
 }
 
 function cleanTenMinuteParagraph(text: string): string {
-  return text.replace(/^\s*(?:[（(]?\d+[）)]?\s*|[一二三四五六七八九十]+[、.．])\s*[.．、]?\s*/, "");
+  return text.replace(TEN_MINUTE_LIST_MARKER_PATTERN, "");
+}
+
+const TEN_MINUTE_LIST_MARKER_PATTERN =
+  /^\s*(?:[（(]?\d+[）)]?\s*|[一二三四五六七八九十]+[、.．])\s*[.．、]?\s*/;
+
+function hasTenMinuteListMarker(text: string): boolean {
+  return TEN_MINUTE_LIST_MARKER_PATTERN.test(text);
+}
+
+function isTenMinuteBodyStart(text: string): boolean {
+  if (hasTenMinuteListMarker(text)) {
+    return true;
+  }
+
+  const cleanedText = text.trim();
+  return /^(?:首先|接下来|紧接着|接着|下面|最后|现在|那么|此外|然后|让我们|我们来|启\s*\d+(?::|：|章|节|-|—|~|～)|在启\s*\d+)/.test(
+    cleanedText
+  );
 }
 
 function formatChineseNumber(value: number): string {
