@@ -12,9 +12,9 @@ import {
   FormattingToolbar,
   FormattingToolbarController,
   NestBlockButton,
-  TextAlignButton,
   type FormattingToolbarProps,
   UnnestBlockButton,
+  useComponentsContext,
   useCreateBlockNote
 } from "@blocknote/react";
 import {
@@ -22,6 +22,7 @@ import {
   ChevronRight,
   Eye,
   EyeOff,
+  MessageSquarePlus,
   Timer
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -426,19 +427,34 @@ function TenMinuteLessonEditor({ blocks, onChange }: TenMinuteLessonEditorProps)
 function TenMinuteFormattingToolbar(props: FormattingToolbarProps) {
   return (
     <FormattingToolbar>
-      <BlockTypeSelect items={props.blockTypeSelectItems} />
       <BasicTextStyleButton basicTextStyle="bold" />
       <BasicTextStyleButton basicTextStyle="italic" />
       <BasicTextStyleButton basicTextStyle="underline" />
       <BasicTextStyleButton basicTextStyle="strike" />
-      <TextAlignButton textAlignment="left" />
-      <TextAlignButton textAlignment="center" />
-      <TextAlignButton textAlignment="right" />
       <ColorStyleButton />
+      <BlockTypeSelect items={props.blockTypeSelectItems} />
       <NestBlockButton />
       <UnnestBlockButton />
       <CreateLinkButton />
+      <TenMinuteCommentButton />
     </FormattingToolbar>
+  );
+}
+
+function TenMinuteCommentButton() {
+  const Components = useComponentsContext();
+  if (!Components) {
+    return null;
+  }
+
+  return (
+    <Components.FormattingToolbar.Button
+      className="bn-button"
+      icon={<MessageSquarePlus size={18} />}
+      isDisabled
+      label="添加批注"
+      mainTooltip="10分钟正文暂不支持批注"
+    />
   );
 }
 

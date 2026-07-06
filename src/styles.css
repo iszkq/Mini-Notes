@@ -1756,7 +1756,17 @@ button:disabled {
 
 .ten-minute-editor .bn-block-content[data-content-type="heading"] {
   color: #214f52;
+  font-size: 1rem;
   font-weight: 850;
+  line-height: 1.35;
+}
+
+.ten-minute-editor .bn-block-content[data-content-type="heading"] :where(h1, h2, h3) {
+  margin: 0;
+  color: inherit;
+  font-size: 1rem;
+  font-weight: inherit;
+  line-height: inherit;
 }
 
 .ten-minute-editor .bn-block-content[data-content-type="paragraph"] {
