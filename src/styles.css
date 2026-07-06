@@ -1389,6 +1389,10 @@ button:disabled {
   align-items: start;
 }
 
+.ten-minute-layout.is-name-hidden {
+  grid-template-columns: minmax(0, 1fr);
+}
+
 .bible-reader-sidebar,
 .bible-reader-content {
   min-width: 0;
@@ -1450,6 +1454,35 @@ button:disabled {
   font-weight: 850;
 }
 
+.ten-minute-picker-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.ten-minute-picker-head > span {
+  color: #5f6773;
+  font-size: 0.75rem;
+  font-weight: 850;
+}
+
+.ten-minute-picker-head button {
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border: 0;
+  border-radius: 6px;
+  color: #52616c;
+  background: #f7f7f4;
+}
+
+.ten-minute-picker-head button:hover {
+  color: #214f52;
+  background: #e8f3f1;
+}
+
 .bible-reader-pill-list,
 .bible-reader-chapter-grid {
   display: flex;
@@ -1506,6 +1539,64 @@ button:disabled {
   color: #6b7280;
   font-size: 0.82rem;
   font-weight: 800;
+}
+
+.ten-minute-toolbar {
+  flex-wrap: wrap;
+}
+
+.ten-minute-toolbar-actions {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.ten-minute-text-toolbar {
+  display: inline-flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  min-height: 36px;
+  padding: 3px;
+  border: 1px solid #ddd7ca;
+  border-radius: 8px;
+  background: #ffffff;
+}
+
+.ten-minute-tool-group {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.ten-minute-tool-group + .ten-minute-tool-group {
+  padding-left: 6px;
+  border-left: 1px solid #ece6dc;
+}
+
+.ten-minute-text-toolbar button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
+  min-width: 30px;
+  height: 28px;
+  padding: 0 6px;
+  border: 0;
+  border-radius: 6px;
+  color: #5f6773;
+  background: transparent;
+  font-size: 0.74rem;
+  font-weight: 800;
+  white-space: nowrap;
+}
+
+.ten-minute-text-toolbar button:hover,
+.ten-minute-text-toolbar button.active {
+  color: #214f52;
+  background: #e8f3f1;
 }
 
 .bible-reader-verses {
@@ -1604,9 +1695,10 @@ button:disabled {
 .ten-minute-text {
   display: block;
   color: #171a1f;
-  font-size: 0.96rem;
-  font-weight: 400;
-  line-height: 1.85;
+  font-size: var(--ten-minute-text-size, 0.96rem);
+  font-weight: var(--ten-minute-text-weight, 400);
+  line-height: var(--ten-minute-text-line-height, 1.85);
+  text-align: var(--ten-minute-text-align, left);
   text-indent: 2em;
 }
 
