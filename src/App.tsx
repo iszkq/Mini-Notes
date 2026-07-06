@@ -975,6 +975,51 @@ function App() {
     [handleLoggedOut, hasUsers]
   );
 
+  const syncSidebarFromPageLinks = useCallback(
+    async (parentId: string, previousContent: NoteBlock[], nextContent: NoteBlock[]) => {
+      const previousLinkIds = collectPageLinkNoteIds(previousContent);
+      const nextLinkIds = collectPageLinkNoteIds(nextContent);
+      const removedLinkIds = Array.from(previousLinkIds).filter((id) => !nextLinkIds.has(id));
+
+      if (removedLinkIds.length === 0) {
+        return;
+      }
+
+      const currentNotes = notes.filter((note) => note.kind === "page");
+
+      for (const noteId of removedLinkIds) {
+        const child = currentNotes.find((note) => note.id === noteId);
+        if (!child || child.parentId !== parentId) {
+          continue;
+        }
+
+        await deleteNote(child.id);
+        setNotes((current) =>
+          current
+            .filter((note) => note.id !== child.id)
+            .map((note) => (note.parentId === child.id ? { ...note, parentId: null } : note))
+        );
+      }
+    },
+    [notes]
+  );
+
+  const handleEditorContentChange = useCallback(
+    (content: NoteBlock[]) => {
+      const currentDraft = draftRef.current;
+      if (!currentDraft) {
+        return;
+      }
+
+      const previousContent = currentDraft.content;
+      editDraft({ content });
+      void syncSidebarFromPageLinks(currentDraft.id, previousContent, content).catch(
+        reportPageLinkSyncError
+      );
+    },
+    [editDraft, reportPageLinkSyncError, syncSidebarFromPageLinks]
+  );
+
   const applyPageSnapshot = useCallback((snapshot: PageSnapshot) => {
     const currentDraft = draftRef.current;
     if (!currentDraft) {
@@ -3296,7 +3341,7 @@ function App() {
               onError={setAppError}
               onCreateSubPage={createSubPage}
               onFindReplaceClose={() => setFindReplaceOpen(false)}
-              onChange={(content) => editDraft({ content })}
+              onChange={handleEditorContentChange}
             />
           </article>
         ) : noteCount === 0 && !isLoadingNote ? (
@@ -3418,6 +3463,27 @@ function hasPageLinkBlock(value: unknown, noteId: string): boolean {
   }
 
   return Object.values(value).some((nestedValue) => hasPageLinkBlock(nestedValue, noteId));
+}
+
+function collectPageLinkNoteIds(value: unknown, noteIds = new Set<string>()): Set<string> {
+  if (Array.isArray(value)) {
+    value.forEach((item) => collectPageLinkNoteIds(item, noteIds));
+    return noteIds;
+  }
+
+  if (!isPlainRecord(value)) {
+    return noteIds;
+  }
+
+  if (value.type === "pageLink" && isPlainRecord(value.props)) {
+    const noteId = value.props.noteId;
+    if (typeof noteId === "string" && noteId.trim()) {
+      noteIds.add(noteId.trim());
+    }
+  }
+
+  Object.values(value).forEach((nestedValue) => collectPageLinkNoteIds(nestedValue, noteIds));
+  return noteIds;
 }
 
 function removePageLinkBlocksFromValue(value: unknown, noteId: string): [unknown, boolean] {
