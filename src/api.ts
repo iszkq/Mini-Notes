@@ -29,6 +29,8 @@ import type {
   SessionStatus,
   TenMinuteReaderData,
   TenMinuteReaderSettings,
+  TenMinuteLessonDocument,
+  TenMinuteLessonDocumentUpdateInput,
   UploadResult
 } from "./shared";
 
@@ -157,6 +159,20 @@ export async function updateTenMinuteReaderSettings(
   return apiRequest("/api/ten-minute/settings", {
     method: "PATCH",
     body: JSON.stringify(settings)
+  });
+}
+
+export async function getTenMinuteLessonDocument(lessonId: string): Promise<TenMinuteLessonDocument> {
+  return apiRequest(`/api/ten-minute/lessons/${encodeURIComponent(lessonId)}/document`);
+}
+
+export async function updateTenMinuteLessonDocument(
+  lessonId: string,
+  input: TenMinuteLessonDocumentUpdateInput
+): Promise<TenMinuteLessonDocument> {
+  return apiRequest(`/api/ten-minute/lessons/${encodeURIComponent(lessonId)}/document`, {
+    method: "PATCH",
+    body: JSON.stringify(input)
   });
 }
 

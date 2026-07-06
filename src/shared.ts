@@ -114,6 +114,15 @@ export type TenMinuteReaderData = {
   settings: TenMinuteReaderSettings;
 };
 
+export type TenMinuteLessonDocument = {
+  blocks: NoteBlock[];
+  updatedAt: string | null;
+};
+
+export type TenMinuteLessonDocumentUpdateInput = {
+  blocks: NoteBlock[];
+};
+
 export type RevelationQaPrimaryCategory = {
   id: string;
   name: string;

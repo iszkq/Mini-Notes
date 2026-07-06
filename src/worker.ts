@@ -30,6 +30,8 @@ import type {
   RevelationQaSecondaryCategoryCreateInput,
   RevelationQaSecondaryCategoryUpdateInput,
   SessionStatus,
+  TenMinuteLessonDocument,
+  TenMinuteLessonDocumentUpdateInput,
   TenMinuteLesson,
   TenMinuteReaderData,
   TenMinuteReaderSettings,
@@ -354,6 +356,26 @@ async function handleApi(
 
     if (segments[0] === "ten-minute" && segments[1] === "settings" && request.method === "PATCH") {
       return updateTenMinuteReaderSettings(request, env, user.id);
+    }
+
+    if (
+      segments[0] === "ten-minute" &&
+      segments[1] === "lessons" &&
+      segments[2] &&
+      segments[3] === "document" &&
+      request.method === "GET"
+    ) {
+      return getTenMinuteLessonDocument(env, user.id, segments[2]);
+    }
+
+    if (
+      segments[0] === "ten-minute" &&
+      segments[1] === "lessons" &&
+      segments[2] &&
+      segments[3] === "document" &&
+      request.method === "PATCH"
+    ) {
+      return updateTenMinuteLessonDocument(request, env, user.id, segments[2]);
     }
 
     if (segments[0] === "revelation-qa" && request.method === "GET" && !segments[1]) {
@@ -844,6 +866,78 @@ async function updateTenMinuteReaderSettings(
   return json(settings);
 }
 
+async function getTenMinuteLessonDocument(
+  env: Env,
+  userId: string,
+  lessonId: string
+): Promise<Response> {
+  const lesson = await findTenMinuteLesson(env, lessonId);
+  if (!lesson) {
+    return error("10分钟篇章不存在。", 404);
+  }
+
+  const object = await env.FILES.get(getTenMinuteLessonDocumentObjectKey(userId, lesson.id));
+  if (!object) {
+    return json({
+      blocks: [],
+      updatedAt: null
+    } satisfies TenMinuteLessonDocument);
+  }
+
+  try {
+    const parsed = JSON.parse(await object.text()) as Partial<TenMinuteLessonDocument>;
+    return json({
+      blocks: normalizeBlocks(parsed.blocks),
+      updatedAt: object.uploaded?.toISOString?.() ?? parsed.updatedAt ?? null
+    } satisfies TenMinuteLessonDocument);
+  } catch (cause) {
+    console.error("读取 10 分钟用户格式化文档失败。", {
+      cause,
+      lessonId: lesson.id,
+      userId
+    });
+    return json({
+      blocks: [],
+      updatedAt: null
+    } satisfies TenMinuteLessonDocument);
+  }
+}
+
+async function updateTenMinuteLessonDocument(
+  request: Request,
+  env: Env,
+  userId: string,
+  lessonId: string
+): Promise<Response> {
+  const lesson = await findTenMinuteLesson(env, lessonId);
+  if (!lesson) {
+    return error("10分钟篇章不存在。", 404);
+  }
+
+  const body = await readJson<TenMinuteLessonDocumentUpdateInput>(request);
+  const blocks = normalizeBlocks(body.blocks);
+  if (blocks.length === 0) {
+    return error("10分钟正文内容不能为空。", 400);
+  }
+
+  const document: TenMinuteLessonDocument = {
+    blocks,
+    updatedAt: new Date().toISOString()
+  };
+
+  await env.FILES.put(
+    getTenMinuteLessonDocumentObjectKey(userId, lesson.id),
+    JSON.stringify(document),
+    {
+      httpMetadata: {
+        contentType: "application/json; charset=utf-8"
+      }
+    }
+  );
+
+  return json(document);
+}
+
 async function readTenMinuteLessonsFromR2(env: Env): Promise<TenMinuteLesson[]> {
   const object = await env.FILES.get(TEN_MINUTE_CONTENT_OBJECT_KEY);
   if (object) {
@@ -868,6 +962,23 @@ async function readTenMinuteLessonsFromR2(env: Env): Promise<TenMinuteLesson[]> 
   }
 
   return lessons;
+}
+
+async function findTenMinuteLesson(
+  env: Env,
+  lessonId: string
+): Promise<TenMinuteLesson | null> {
+  const id = cleanRevelationQaId(lessonId);
+  if (!id) {
+    return null;
+  }
+
+  const lessons = await readTenMinuteLessonsFromR2(env);
+  return lessons.find((lesson) => lesson.id === id) ?? null;
+}
+
+function getTenMinuteLessonDocumentObjectKey(userId: string, lessonId: string): string {
+  return `ten-minute/users/${userId}/lessons/${lessonId}.json`;
 }
 
 async function readTenMinuteReaderSettings(

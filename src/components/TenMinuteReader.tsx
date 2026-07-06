@@ -1,29 +1,43 @@
 import clsx from "clsx";
+import type { PartialBlock } from "@blocknote/core";
+import "@blocknote/core/fonts/inter.css";
+import { zh } from "@blocknote/core/locales";
+import { BlockNoteView } from "@blocknote/mantine";
+import "@blocknote/mantine/style.css";
 import {
-  AlignJustify,
-  AlignLeft,
-  Bold,
+  BasicTextStyleButton,
+  BlockTypeSelect,
+  ColorStyleButton,
+  CreateLinkButton,
+  FormattingToolbar,
+  FormattingToolbarController,
+  NestBlockButton,
+  TextAlignButton,
+  type FormattingToolbarProps,
+  UnnestBlockButton,
+  useCreateBlockNote
+} from "@blocknote/react";
+import {
   ChevronLeft,
   ChevronRight,
   Eye,
   EyeOff,
-  Rows3,
-  Timer,
-  Type
+  Timer
 } from "lucide-react";
-import { useEffect, useMemo, useState, type CSSProperties } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ApiError,
+  getTenMinuteLessonDocument,
   getTenMinuteReaderData,
+  updateTenMinuteLessonDocument,
   updateTenMinuteReaderSettings
 } from "../api";
+import { noteSchema } from "../editorSchema";
 import type {
-  TenMinuteLineSpacing,
   TenMinuteLesson,
-  TenMinuteTextSize,
-  TenMinuteTextWeight,
   TenMinuteReaderSettings,
-  TenMinuteSection
+  TenMinuteSection,
+  NoteBlock
 } from "../shared";
 
 type TenMinuteDisplaySection = {
@@ -44,30 +58,20 @@ const TEN_MINUTE_DEFAULT_SETTINGS: TenMinuteReaderSettings = {
   textWeight: "regular"
 };
 
-const TEN_MINUTE_TEXT_SIZE_VALUES: Record<TenMinuteTextSize, string> = {
-  small: "0.9rem",
-  normal: "0.96rem",
-  large: "1.06rem"
-};
-
-const TEN_MINUTE_LINE_SPACING_VALUES: Record<TenMinuteLineSpacing, string> = {
-  compact: "1.65",
-  normal: "1.85",
-  loose: "2.08"
-};
-
-const TEN_MINUTE_TEXT_WEIGHT_VALUES: Record<TenMinuteTextWeight, string> = {
-  regular: "400",
-  medium: "560"
-};
+const TEN_MINUTE_SAVE_DELAY_MS = 520;
 
 export function TenMinuteReader({ onError }: TenMinuteReaderProps) {
+  const saveTimeoutRef = useRef<number | null>(null);
   const [lessons, setLessons] = useState<TenMinuteLesson[]>([]);
   const [selectedLessonId, setSelectedLessonId] = useState("");
   const [readerSettings, setReaderSettings] = useState<TenMinuteReaderSettings>(
     TEN_MINUTE_DEFAULT_SETTINGS
   );
   const [isLoading, setIsLoading] = useState(true);
+  const [documentBlocks, setDocumentBlocks] = useState<NoteBlock[] | null>(null);
+  const [documentVersion, setDocumentVersion] = useState(0);
+  const [isDocumentLoading, setIsDocumentLoading] = useState(false);
+  const [saveStatus, setSaveStatus] = useState<"idle" | "saving" | "saved" | "error">("idle");
   const [settingsLoaded, setSettingsLoaded] = useState(false);
   const [localError, setLocalError] = useState<string | null>(null);
 
@@ -88,16 +92,6 @@ export function TenMinuteReader({ onError }: TenMinuteReaderProps) {
   const displaySections = useMemo(
     () => (selectedLesson ? createTenMinuteDisplaySections(selectedLesson.sections) : []),
     [selectedLesson]
-  );
-  const textStyle = useMemo(
-    () =>
-      ({
-        "--ten-minute-text-align": readerSettings.textAlign,
-        "--ten-minute-text-line-height": TEN_MINUTE_LINE_SPACING_VALUES[readerSettings.lineSpacing],
-        "--ten-minute-text-size": TEN_MINUTE_TEXT_SIZE_VALUES[readerSettings.textSize],
-        "--ten-minute-text-weight": TEN_MINUTE_TEXT_WEIGHT_VALUES[readerSettings.textWeight]
-      }) as CSSProperties,
-    [readerSettings]
   );
 
   useEffect(() => {
@@ -156,6 +150,89 @@ export function TenMinuteReader({ onError }: TenMinuteReaderProps) {
     return () => window.clearTimeout(timeoutId);
   }, [onError, readerSettings, settingsLoaded]);
 
+  useEffect(() => {
+    if (!selectedLesson) {
+      setDocumentBlocks(null);
+      return;
+    }
+
+    let cancelled = false;
+    setIsDocumentLoading(true);
+    setSaveStatus("idle");
+    setDocumentBlocks(null);
+
+    async function loadLessonDocument(lesson: TenMinuteLesson) {
+      try {
+        const document = await getTenMinuteLessonDocument(lesson.id);
+        if (cancelled) {
+          return;
+        }
+
+        const nextBlocks =
+          document.blocks.length > 0 ? document.blocks : createTenMinuteEditorBlocks(lesson);
+        setDocumentBlocks(nextBlocks);
+        setDocumentVersion((current) => current + 1);
+        setLocalError(null);
+      } catch (cause) {
+        if (!cancelled) {
+          const message = cause instanceof ApiError ? cause.message : "10分钟正文加载失败。";
+          setDocumentBlocks(createTenMinuteEditorBlocks(lesson));
+          setDocumentVersion((current) => current + 1);
+          setLocalError(message);
+          onError?.(message);
+        }
+      } finally {
+        if (!cancelled) {
+          setIsDocumentLoading(false);
+        }
+      }
+    }
+
+    void loadLessonDocument(selectedLesson);
+
+    return () => {
+      cancelled = true;
+    };
+  }, [onError, selectedLesson]);
+
+  const handleDocumentChange = useCallback(
+    (blocks: NoteBlock[]) => {
+      if (!selectedLesson) {
+        return;
+      }
+
+      if (saveTimeoutRef.current !== null) {
+        window.clearTimeout(saveTimeoutRef.current);
+      }
+
+      setSaveStatus("saving");
+      saveTimeoutRef.current = window.setTimeout(() => {
+        saveTimeoutRef.current = null;
+        void updateTenMinuteLessonDocument(selectedLesson.id, { blocks })
+          .then(() => {
+            setSaveStatus("saved");
+            setLocalError(null);
+          })
+          .catch((cause) => {
+            const message = cause instanceof ApiError ? cause.message : "10分钟正文格式保存失败。";
+            setSaveStatus("error");
+            setLocalError(message);
+            onError?.(message);
+          });
+      }, TEN_MINUTE_SAVE_DELAY_MS);
+    },
+    [onError, selectedLesson]
+  );
+
+  useEffect(
+    () => () => {
+      if (saveTimeoutRef.current !== null) {
+        window.clearTimeout(saveTimeoutRef.current);
+      }
+    },
+    []
+  );
+
   if (isLoading) {
     return (
       <section className="bible-reader-page ten-minute-page">
@@ -193,7 +270,6 @@ export function TenMinuteReader({ onError }: TenMinuteReaderProps) {
           "bible-reader-layout ten-minute-layout",
           !readerSettings.nameSidebarVisible && "is-name-hidden"
         )}
-        style={textStyle}
       >
         {readerSettings.nameSidebarVisible ? (
           <aside className="bible-reader-sidebar" aria-label="10分钟名称">
@@ -260,98 +336,17 @@ export function TenMinuteReader({ onError }: TenMinuteReaderProps) {
                   名称
                 </button>
               ) : null}
-              <div className="ten-minute-text-toolbar" aria-label="文本样式">
-                <div className="ten-minute-tool-group" role="group" aria-label="字号">
-                  {(["small", "normal", "large"] as const).map((size) => (
-                    <button
-                      aria-pressed={readerSettings.textSize === size}
-                      className={clsx(readerSettings.textSize === size && "active")}
-                      key={size}
-                      onClick={() =>
-                        setReaderSettings((current) => ({
-                          ...current,
-                          textSize: size
-                        }))
-                      }
-                      title={size === "small" ? "小字号" : size === "large" ? "大字号" : "默认字号"}
-                      type="button"
-                    >
-                      <Type size={size === "large" ? 16 : 14} />
-                      <span>{size === "small" ? "小" : size === "large" ? "大" : "中"}</span>
-                    </button>
-                  ))}
-                </div>
-                <div className="ten-minute-tool-group" role="group" aria-label="行距">
-                  {(["compact", "normal", "loose"] as const).map((lineSpacing) => (
-                    <button
-                      aria-pressed={readerSettings.lineSpacing === lineSpacing}
-                      className={clsx(readerSettings.lineSpacing === lineSpacing && "active")}
-                      key={lineSpacing}
-                      onClick={() =>
-                        setReaderSettings((current) => ({
-                          ...current,
-                          lineSpacing
-                        }))
-                      }
-                      title={
-                        lineSpacing === "compact"
-                          ? "紧凑行距"
-                          : lineSpacing === "loose"
-                            ? "宽松行距"
-                            : "默认行距"
-                      }
-                      type="button"
-                    >
-                      <Rows3 size={14} />
-                      <span>{lineSpacing === "compact" ? "紧" : lineSpacing === "loose" ? "松" : "常"}</span>
-                    </button>
-                  ))}
-                </div>
-                <div className="ten-minute-tool-group" role="group" aria-label="字重和对齐">
-                  <button
-                    aria-pressed={readerSettings.textWeight === "medium"}
-                    className={clsx(readerSettings.textWeight === "medium" && "active")}
-                    onClick={() =>
-                      setReaderSettings((current) => ({
-                        ...current,
-                        textWeight: current.textWeight === "medium" ? "regular" : "medium"
-                      }))
-                    }
-                    title="字重"
-                    type="button"
-                  >
-                    <Bold size={14} />
-                  </button>
-                  <button
-                    aria-pressed={readerSettings.textAlign === "left"}
-                    className={clsx(readerSettings.textAlign === "left" && "active")}
-                    onClick={() =>
-                      setReaderSettings((current) => ({
-                        ...current,
-                        textAlign: "left"
-                      }))
-                    }
-                    title="左对齐"
-                    type="button"
-                  >
-                    <AlignLeft size={14} />
-                  </button>
-                  <button
-                    aria-pressed={readerSettings.textAlign === "justify"}
-                    className={clsx(readerSettings.textAlign === "justify" && "active")}
-                    onClick={() =>
-                      setReaderSettings((current) => ({
-                        ...current,
-                        textAlign: "justify"
-                      }))
-                    }
-                    title="两端对齐"
-                    type="button"
-                  >
-                    <AlignJustify size={14} />
-                  </button>
-                </div>
-              </div>
+              <span className={clsx("ten-minute-save-state", saveStatus)}>
+                {isDocumentLoading
+                  ? "正在加载正文"
+                  : saveStatus === "saving"
+                    ? "正在保存"
+                    : saveStatus === "saved"
+                      ? "已保存"
+                      : saveStatus === "error"
+                        ? "保存失败"
+                        : "选中文字可编辑样式"}
+              </span>
               <button
                 className="toolbar-button"
                 disabled={!nextLesson}
@@ -364,25 +359,86 @@ export function TenMinuteReader({ onError }: TenMinuteReaderProps) {
             </div>
           </div>
 
-          <div className="bible-reader-verses ten-minute-sections">
-            {displaySections.map((section) => (
-              <section className="ten-minute-section" key={section.id}>
-                <h2 className="ten-minute-section-title">{section.title}</h2>
-                <div className="ten-minute-section-body">
-                  {section.paragraphs.map((paragraph, index) => (
-                    <article className="bible-reader-verse-row ten-minute-row" key={index}>
-                      <div className="bible-reader-verse-button ten-minute-paragraph">
-                        <span className="bible-reader-verse-text ten-minute-text">{paragraph}</span>
-                      </div>
-                    </article>
-                  ))}
-                </div>
-              </section>
-            ))}
-          </div>
+          {isDocumentLoading || !documentBlocks ? (
+            <div className="bible-reader-empty">正在加载正文...</div>
+          ) : (
+            <TenMinuteLessonEditor
+              key={`${selectedLesson.id}-${documentVersion}`}
+              blocks={documentBlocks}
+              onChange={handleDocumentChange}
+            />
+          )}
         </section>
       </div>
     </section>
+  );
+}
+
+type TenMinuteLessonEditorProps = {
+  blocks: NoteBlock[];
+  onChange: (blocks: NoteBlock[]) => void;
+};
+
+function TenMinuteLessonEditor({ blocks, onChange }: TenMinuteLessonEditorProps) {
+  const dictionary = useMemo(
+    () => ({
+      ...zh,
+      placeholders: {
+        ...zh.placeholders,
+        default: "输入正文"
+      }
+    }),
+    []
+  );
+  const editor = useCreateBlockNote(
+    {
+      dictionary,
+      initialContent: blocks as PartialBlock[],
+      schema: noteSchema,
+      tables: {
+        splitCells: true
+      }
+    },
+    [dictionary]
+  );
+  const renderFormattingToolbar = useCallback(
+    (toolbarProps: FormattingToolbarProps) => (
+      <TenMinuteFormattingToolbar {...toolbarProps} />
+    ),
+    []
+  );
+
+  return (
+    <BlockNoteView
+      className="ten-minute-editor"
+      editable
+      editor={editor}
+      formattingToolbar={false}
+      onChange={() => onChange(editor.document as NoteBlock[])}
+      slashMenu={false}
+      theme="light"
+    >
+      <FormattingToolbarController formattingToolbar={renderFormattingToolbar} />
+    </BlockNoteView>
+  );
+}
+
+function TenMinuteFormattingToolbar(props: FormattingToolbarProps) {
+  return (
+    <FormattingToolbar>
+      <BlockTypeSelect items={props.blockTypeSelectItems} />
+      <BasicTextStyleButton basicTextStyle="bold" />
+      <BasicTextStyleButton basicTextStyle="italic" />
+      <BasicTextStyleButton basicTextStyle="underline" />
+      <BasicTextStyleButton basicTextStyle="strike" />
+      <TextAlignButton textAlignment="left" />
+      <TextAlignButton textAlignment="center" />
+      <TextAlignButton textAlignment="right" />
+      <ColorStyleButton />
+      <NestBlockButton />
+      <UnnestBlockButton />
+      <CreateLinkButton />
+    </FormattingToolbar>
   );
 }
 
@@ -421,6 +477,22 @@ function createTenMinuteDisplaySections(sections: TenMinuteSection[]): TenMinute
 
     return displaySections;
   });
+}
+
+function createTenMinuteEditorBlocks(lesson: TenMinuteLesson): NoteBlock[] {
+  return createTenMinuteDisplaySections(lesson.sections).flatMap((section) => [
+    {
+      content: section.title,
+      props: {
+        level: 2
+      },
+      type: "heading"
+    },
+    ...section.paragraphs.map((paragraph) => ({
+      content: paragraph,
+      type: "paragraph"
+    }))
+  ]) as NoteBlock[];
 }
 
 function cleanTenMinuteParagraph(text: string): string {

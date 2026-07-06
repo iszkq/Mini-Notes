@@ -1,5 +1,7 @@
 import clsx from "clsx";
 import {
+  ArrowDown,
+  ArrowUp,
   BookMarked,
   Check,
   ChevronDown,
@@ -70,6 +72,8 @@ type ItemDraft = {
   source: string;
   tagsText: string;
 };
+
+type SortDirection = "up" | "down";
 
 const EMPTY_LIBRARY: RevelationQaLibraryData = {
   primaryCategories: [],
@@ -542,6 +546,63 @@ export function RevelationQaLibrary({ onError }: RevelationQaLibraryProps) {
     }
   }
 
+  async function movePrimaryCategory(category: RevelationQaPrimaryCategory, direction: SortDirection) {
+    const updates = getQaMoveSortOrderUpdates(sortedPrimaryCategories, category.id, direction);
+    if (updates.length === 0 || isBusy) {
+      return;
+    }
+
+    setBusyAction(`primary-move-${category.id}`);
+    try {
+      const updatedCategories = await Promise.all(
+        updates.map((update) =>
+          updateRevelationQaPrimaryCategory(update.category.id, {
+            sortOrder: update.sortOrder
+          })
+        )
+      );
+      const updatedById = new Map(updatedCategories.map((item) => [item.id, item]));
+      setLibrary((current) => ({
+        ...current,
+        primaryCategories: current.primaryCategories.map((item) => updatedById.get(item.id) ?? item)
+      }));
+      setLocalError(null);
+    } catch (cause) {
+      reportError(cause, "分类排序保存失败。");
+    } finally {
+      setBusyAction(null);
+    }
+  }
+
+  async function moveSecondaryCategory(category: RevelationQaSecondaryCategory, direction: SortDirection) {
+    const secondaries = secondaryByPrimaryId.get(category.primaryId) ?? [];
+    const updates = getQaMoveSortOrderUpdates(secondaries, category.id, direction);
+    if (updates.length === 0 || isBusy) {
+      return;
+    }
+
+    setBusyAction(`secondary-move-${category.id}`);
+    try {
+      const updatedCategories = await Promise.all(
+        updates.map((update) =>
+          updateRevelationQaSecondaryCategory(update.category.id, {
+            sortOrder: update.sortOrder
+          })
+        )
+      );
+      const updatedById = new Map(updatedCategories.map((item) => [item.id, item]));
+      setLibrary((current) => ({
+        ...current,
+        secondaryCategories: current.secondaryCategories.map((item) => updatedById.get(item.id) ?? item)
+      }));
+      setLocalError(null);
+    } catch (cause) {
+      reportError(cause, "分类排序保存失败。");
+    } finally {
+      setBusyAction(null);
+    }
+  }
+
   function selectPrimary(category: RevelationQaPrimaryCategory) {
     setSelectedPrimaryId(category.id);
     setExpandedPrimaryIds((current) => new Set([...current, category.id]));
@@ -698,10 +759,12 @@ export function RevelationQaLibrary({ onError }: RevelationQaLibraryProps) {
             ) : sortedPrimaryCategories.length === 0 ? (
               <div className="qa-library-empty">先创建一个一级分类。</div>
             ) : (
-              sortedPrimaryCategories.map((primary) => {
+              sortedPrimaryCategories.map((primary, primaryIndex) => {
                 const secondaries = secondaryByPrimaryId.get(primary.id) ?? [];
                 const isExpanded = expandedPrimaryIds.has(primary.id);
                 const isActivePrimary = selectedPrimaryId === primary.id;
+                const canMovePrimaryUp = primaryIndex > 0;
+                const canMovePrimaryDown = primaryIndex < sortedPrimaryCategories.length - 1;
 
                 return (
                   <div className="qa-library-primary-node" key={primary.id}>
@@ -729,6 +792,24 @@ export function RevelationQaLibrary({ onError }: RevelationQaLibraryProps) {
                         <span>{primary.name}</span>
                         <em>{secondaries.length}</em>
                       </button>
+                      <div className="qa-library-sort-buttons">
+                        <button
+                          disabled={!canMovePrimaryUp || isBusy}
+                          onClick={() => void movePrimaryCategory(primary, "up")}
+                          title="上移一级分类"
+                          type="button"
+                        >
+                          <ArrowUp size={12} />
+                        </button>
+                        <button
+                          disabled={!canMovePrimaryDown || isBusy}
+                          onClick={() => void movePrimaryCategory(primary, "down")}
+                          title="下移一级分类"
+                          type="button"
+                        >
+                          <ArrowDown size={12} />
+                        </button>
+                      </div>
                       <button
                         className="qa-library-icon-button"
                         onClick={() => beginEditPrimary(primary)}
@@ -763,8 +844,10 @@ export function RevelationQaLibrary({ onError }: RevelationQaLibraryProps) {
                         {secondaries.length === 0 ? (
                           <span className="qa-library-secondary-empty">暂无二级分类</span>
                         ) : (
-                          secondaries.map((secondary) => {
+                          secondaries.map((secondary, secondaryIndex) => {
                             const itemCount = itemCountBySecondaryId.get(secondary.id) ?? 0;
+                            const canMoveSecondaryUp = secondaryIndex > 0;
+                            const canMoveSecondaryDown = secondaryIndex < secondaries.length - 1;
                             return (
                               <div
                                 className={clsx(
@@ -785,6 +868,24 @@ export function RevelationQaLibrary({ onError }: RevelationQaLibraryProps) {
                                   <span>{secondary.name}</span>
                                   <em>{itemCount}</em>
                                 </button>
+                                <div className="qa-library-sort-buttons">
+                                  <button
+                                    disabled={!canMoveSecondaryUp || isBusy}
+                                    onClick={() => void moveSecondaryCategory(secondary, "up")}
+                                    title="上移二级分类"
+                                    type="button"
+                                  >
+                                    <ArrowUp size={12} />
+                                  </button>
+                                  <button
+                                    disabled={!canMoveSecondaryDown || isBusy}
+                                    onClick={() => void moveSecondaryCategory(secondary, "down")}
+                                    title="下移二级分类"
+                                    type="button"
+                                  >
+                                    <ArrowDown size={12} />
+                                  </button>
+                                </div>
                                 <button
                                   className="qa-library-icon-button"
                                   onClick={() => beginEditSecondary(secondary)}
@@ -885,7 +986,14 @@ export function RevelationQaLibrary({ onError }: RevelationQaLibraryProps) {
                         <em>{item.answers.length} 个答案</em>
                       </span>
                       <strong>{item.question}</strong>
-                      <span className="qa-library-answer-preview">{item.answers[0]}</span>
+                      <span className="qa-library-answer-preview-list">
+                        {item.answers.map((answer, answerIndex) => (
+                          <span className="qa-library-answer-preview" key={answerIndex}>
+                            <em>{answerIndex + 1}</em>
+                            <span>{answer}</span>
+                          </span>
+                        ))}
+                      </span>
                       <span className="qa-library-item-foot">
                         {item.tags.length > 0 ? (
                           <span>
@@ -1113,6 +1221,39 @@ function compareQaSortOrder<T extends { sortOrder: number; updatedAt: string }>(
   }
 
   return right.updatedAt.localeCompare(left.updatedAt);
+}
+
+function getQaMoveSortOrderUpdates<T extends { id: string; sortOrder: number }>(
+  categories: T[],
+  categoryId: string,
+  direction: SortDirection
+): Array<{ category: T; sortOrder: number }> {
+  const currentIndex = categories.findIndex((category) => category.id === categoryId);
+  const targetIndex = direction === "up" ? currentIndex - 1 : currentIndex + 1;
+  const current = categories[currentIndex];
+  const target = categories[targetIndex];
+  if (!current || !target) {
+    return [];
+  }
+
+  if (current.sortOrder !== target.sortOrder) {
+    return [
+      { category: current, sortOrder: target.sortOrder },
+      { category: target, sortOrder: current.sortOrder }
+    ];
+  }
+
+  const nextCategories = [...categories];
+  [nextCategories[currentIndex], nextCategories[targetIndex]] = [
+    nextCategories[targetIndex],
+    nextCategories[currentIndex]
+  ];
+  const baseSortOrder = Math.max(Date.now(), ...categories.map((category) => category.sortOrder)) + categories.length;
+
+  return nextCategories.map((category, index) => ({
+    category,
+    sortOrder: baseSortOrder - index
+  }));
 }
 
 function splitTags(value: string): string[] {

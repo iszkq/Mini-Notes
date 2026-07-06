@@ -1599,6 +1599,34 @@ button:disabled {
   background: #e8f3f1;
 }
 
+.ten-minute-save-state {
+  display: inline-flex;
+  align-items: center;
+  min-height: 30px;
+  padding: 0 9px;
+  border-radius: 999px;
+  color: #667085;
+  background: #f3f5f6;
+  font-size: 0.74rem;
+  font-weight: 850;
+  white-space: nowrap;
+}
+
+.ten-minute-save-state.saving {
+  color: #8a621b;
+  background: #fff7e8;
+}
+
+.ten-minute-save-state.saved {
+  color: #1f6f4a;
+  background: #ecf8f1;
+}
+
+.ten-minute-save-state.error {
+  color: #9d3631;
+  background: #fff1ee;
+}
+
 .bible-reader-verses {
   position: relative;
   display: grid;
@@ -1709,6 +1737,32 @@ button:disabled {
 
 .ten-minute-row .bible-reader-verse-button:hover {
   background: #f3f7f5;
+}
+
+.ten-minute-editor {
+  min-height: min(68vh, 780px);
+  padding: 2px 0 48px;
+  color: #171a1f;
+}
+
+.ten-minute-editor .bn-editor {
+  padding-inline: 0;
+  background: transparent;
+}
+
+.ten-minute-editor .bn-block-content {
+  max-width: none;
+}
+
+.ten-minute-editor .bn-block-content[data-content-type="heading"] {
+  color: #214f52;
+  font-weight: 850;
+}
+
+.ten-minute-editor .bn-block-content[data-content-type="paragraph"] {
+  font-size: 0.96rem;
+  line-height: 1.85;
+  text-indent: 2em;
 }
 
 .bible-note-mark {
@@ -2030,6 +2084,8 @@ button:disabled {
 
 .qa-library-main-panel {
   display: grid;
+  align-content: start;
+  grid-auto-rows: max-content;
   gap: 12px;
   min-height: calc(100vh - 166px);
   padding: 14px;
@@ -2146,7 +2202,7 @@ button:disabled {
 
 .qa-library-tree-row {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 28px 28px;
+  grid-template-columns: minmax(0, 1fr) 30px 28px 28px;
   align-items: center;
   gap: 4px;
   min-height: 38px;
@@ -2236,6 +2292,33 @@ button:disabled {
 .qa-library-icon-button.danger:hover {
   color: #b42318;
   background: #fff1f0;
+}
+
+.qa-library-sort-buttons {
+  display: grid;
+  gap: 2px;
+  width: 30px;
+}
+
+.qa-library-sort-buttons button {
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 16px;
+  border: 0;
+  border-radius: 5px;
+  color: #667085;
+  background: transparent;
+}
+
+.qa-library-sort-buttons button:hover:not(:disabled) {
+  color: #315d8f;
+  background: #e8f2fb;
+}
+
+.qa-library-sort-buttons button:disabled {
+  color: #c7ced6;
+  cursor: not-allowed;
 }
 
 .qa-library-secondary-list {
@@ -2360,14 +2443,39 @@ button:disabled {
   line-height: 1.42;
 }
 
+.qa-library-answer-preview-list {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+}
+
 .qa-library-answer-preview {
-  display: -webkit-box;
-  overflow: hidden;
+  display: grid;
+  grid-template-columns: 20px minmax(0, 1fr);
+  align-items: start;
+  gap: 7px;
   color: #4b5563;
   font-size: 0.84rem;
   line-height: 1.65;
-  -webkit-box-orient: vertical;
-  -webkit-line-clamp: 2;
+}
+
+.qa-library-answer-preview > em {
+  display: grid;
+  place-items: center;
+  width: 20px;
+  min-height: 20px;
+  margin-top: 2px;
+  border-radius: 999px;
+  color: #2f6f73;
+  background: #edf8f5;
+  font-size: 0.68rem;
+  font-style: normal;
+  font-weight: 850;
+}
+
+.qa-library-answer-preview > span {
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
 }
 
 .qa-library-item-foot {
