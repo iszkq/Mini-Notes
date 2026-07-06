@@ -13,5 +13,11 @@
     "isolatedModules": true,
     "noEmit": true
   },
-  "include": ["src/worker.ts", "src/shared.ts", "src/bible.ts", "src/tenMinuteData.ts"]
+  "include": [
+    "src/worker.ts",
+    "src/shared.ts",
+    "src/bible.ts",
+    "src/tenMinuteData.ts",
+    "src/revelationQaSeed.ts"
+  ]
 }

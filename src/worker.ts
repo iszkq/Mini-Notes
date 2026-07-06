@@ -38,6 +38,7 @@ import type {
   UploadResult
 } from "./shared";
 import { tenMinuteLessons as bundledTenMinuteLessons } from "./tenMinuteData";
+import { revelationQaSeed } from "./revelationQaSeed";
 import {
   parseBibleCsv,
   searchBibleVerses,
@@ -1102,10 +1103,158 @@ function isTenMinuteTextAlign(value: unknown): value is TenMinuteReaderSettings[
   return value === "left" || value === "justify";
 }
 
+const REVELATION_QA_SEED_VERSION = "qsl-notion-2026-07-06";
+const REVELATION_QA_SEED_SORT_BASE = 10_000_000;
+
+async function ensureRevelationQaSeed(env: Env, userId: string): Promise<void> {
+  const state = await env.DB.prepare(
+    `SELECT user_id
+     FROM revelation_qa_seed_state
+     WHERE user_id = ?`
+  )
+    .bind(userId)
+    .first<{ user_id: string }>();
+  if (state) {
+    return;
+  }
+
+  const seedIdPrefix = `qa-seed-${userId}-`;
+  const [existingPrimaryRow, existingSeedRow] = await Promise.all([
+    env.DB.prepare(
+      `SELECT COUNT(*) AS count
+       FROM revelation_qa_primary_categories
+       WHERE user_id = ?`
+    )
+      .bind(userId)
+      .first<{ count: number | string }>(),
+    env.DB.prepare(
+      `SELECT COUNT(*) AS count
+       FROM revelation_qa_primary_categories
+       WHERE user_id = ?
+         AND id LIKE ?`
+    )
+      .bind(userId, `${seedIdPrefix}%`)
+      .first<{ count: number | string }>()
+  ]);
+
+  const existingPrimaryCount = Number(existingPrimaryRow?.count ?? 0) || 0;
+  const existingSeedCount = Number(existingSeedRow?.count ?? 0) || 0;
+  if (existingPrimaryCount > 0 && existingSeedCount === 0) {
+    await markRevelationQaSeedComplete(env, userId);
+    return;
+  }
+
+  const now = new Date().toISOString();
+  const statements: D1PreparedStatement[] = [];
+
+  revelationQaSeed.forEach((primary, primaryIndex) => {
+    const primaryId = createRevelationQaSeedId(userId, primaryIndex);
+    const primarySortOrder = REVELATION_QA_SEED_SORT_BASE - primaryIndex * 10_000;
+
+    statements.push(
+      env.DB.prepare(
+        `INSERT OR IGNORE INTO revelation_qa_primary_categories
+           (id, user_id, name, description, sort_order, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?)`
+      ).bind(
+        primaryId,
+        userId,
+        cleanRevelationQaText(primary.name, 80),
+        cleanRevelationQaText(primary.description, 240),
+        primarySortOrder,
+        now,
+        now
+      )
+    );
+
+    primary.categories.forEach((secondary, secondaryIndex) => {
+      const secondaryId = createRevelationQaSeedId(userId, primaryIndex, secondaryIndex);
+      const secondarySortOrder = REVELATION_QA_SEED_SORT_BASE - secondaryIndex * 100;
+
+      statements.push(
+        env.DB.prepare(
+          `INSERT OR IGNORE INTO revelation_qa_secondary_categories
+             (id, user_id, primary_id, name, description, sort_order, created_at, updated_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+        ).bind(
+          secondaryId,
+          userId,
+          primaryId,
+          cleanRevelationQaText(secondary.name, 80),
+          cleanRevelationQaText(secondary.description, 240),
+          secondarySortOrder,
+          now,
+          now
+        )
+      );
+
+      secondary.items.forEach((item, itemIndex) => {
+        const itemId = createRevelationQaSeedId(userId, primaryIndex, secondaryIndex, itemIndex);
+        const itemSortOrder = REVELATION_QA_SEED_SORT_BASE - itemIndex;
+
+        statements.push(
+          env.DB.prepare(
+            `INSERT OR IGNORE INTO revelation_qa_items
+               (id, user_id, secondary_id, question, answers, tags, source, sort_order, created_at, updated_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+          ).bind(
+            itemId,
+            userId,
+            secondaryId,
+            cleanRevelationQaText(item.question, 500),
+            JSON.stringify(cleanRevelationQaTextArray(item.answers, 16, 4000)),
+            JSON.stringify(cleanRevelationQaTags(item.tags)),
+            cleanRevelationQaText(item.source, 160),
+            itemSortOrder,
+            now,
+            now
+          )
+        );
+      });
+    });
+  });
+
+  await runD1BatchInChunks(env, statements, 80);
+  await markRevelationQaSeedComplete(env, userId);
+}
+
+async function markRevelationQaSeedComplete(env: Env, userId: string): Promise<void> {
+  await env.DB.prepare(
+    `INSERT OR IGNORE INTO revelation_qa_seed_state
+       (user_id, seed_version, created_at)
+     VALUES (?, ?, ?)`
+  )
+    .bind(userId, REVELATION_QA_SEED_VERSION, new Date().toISOString())
+    .run();
+}
+
+async function runD1BatchInChunks(
+  env: Env,
+  statements: D1PreparedStatement[],
+  chunkSize: number
+): Promise<void> {
+  for (let index = 0; index < statements.length; index += chunkSize) {
+    await env.DB.batch(statements.slice(index, index + chunkSize));
+  }
+}
+
+function createRevelationQaSeedId(
+  userId: string,
+  primaryIndex: number,
+  secondaryIndex?: number,
+  itemIndex?: number
+): string {
+  return ["qa-seed", userId, primaryIndex, secondaryIndex, itemIndex]
+    .filter((part) => part !== undefined)
+    .join("-");
+}
+
 async function listRevelationQaLibrary(
   env: Env,
   userId: string
 ): Promise<Response> {
+  await ensureRevelationQaSeed(env, userId);
+
   const [primaryResult, secondaryResult, countResult] = await Promise.all([
     env.DB.prepare(
       `SELECT id,
