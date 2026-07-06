@@ -6,7 +6,6 @@ import { BlockNoteView } from "@blocknote/mantine";
 import "@blocknote/mantine/style.css";
 import {
   BasicTextStyleButton,
-  BlockTypeSelect,
   ColorStyleButton,
   CreateLinkButton,
   FormattingToolbar,
@@ -14,8 +13,10 @@ import {
   NestBlockButton,
   type FormattingToolbarProps,
   UnnestBlockButton,
+  useBlockNoteEditor,
   useComponentsContext,
-  useCreateBlockNote
+  useCreateBlockNote,
+  useEditorState
 } from "@blocknote/react";
 import {
   ChevronLeft,
@@ -23,7 +24,8 @@ import {
   Eye,
   EyeOff,
   MessageSquarePlus,
-  Timer
+  Timer,
+  Type
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
@@ -60,6 +62,17 @@ const TEN_MINUTE_DEFAULT_SETTINGS: TenMinuteReaderSettings = {
 };
 
 const TEN_MINUTE_SAVE_DELAY_MS = 520;
+const TEN_MINUTE_TEXT_SIZE_OPTIONS = [
+  { label: "默认", value: "default" },
+  { label: "12", value: "12px" },
+  { label: "14", value: "14px" },
+  { label: "16", value: "16px" },
+  { label: "18", value: "18px" },
+  { label: "20", value: "20px" },
+  { label: "24", value: "24px" },
+  { label: "28", value: "28px" },
+  { label: "32", value: "32px" }
+];
 
 export function TenMinuteReader({ onError }: TenMinuteReaderProps) {
   const saveTimeoutRef = useRef<number | null>(null);
@@ -425,6 +438,8 @@ function TenMinuteLessonEditor({ blocks, onChange }: TenMinuteLessonEditorProps)
 }
 
 function TenMinuteFormattingToolbar(props: FormattingToolbarProps) {
+  void props;
+
   return (
     <FormattingToolbar>
       <BasicTextStyleButton basicTextStyle="bold" />
@@ -432,12 +447,57 @@ function TenMinuteFormattingToolbar(props: FormattingToolbarProps) {
       <BasicTextStyleButton basicTextStyle="underline" />
       <BasicTextStyleButton basicTextStyle="strike" />
       <ColorStyleButton />
-      <BlockTypeSelect items={props.blockTypeSelectItems} />
+      <TenMinuteTextSizeSelect />
       <NestBlockButton />
       <UnnestBlockButton />
       <CreateLinkButton />
       <TenMinuteCommentButton />
     </FormattingToolbar>
+  );
+}
+
+function TenMinuteTextSizeSelect() {
+  const Components = useComponentsContext();
+  const editor = useBlockNoteEditor<any, any, any>();
+  const fontSize = useEditorState({
+    editor,
+    on: "selection",
+    selector: ({ editor }) => {
+      if (
+        !editor.isEditable ||
+        !("fontSize" in editor.schema.styleSchema) ||
+        !(editor.getSelection()?.blocks || [editor.getTextCursorPosition().block]).find(
+          (block) => block.content !== undefined
+        )
+      ) {
+        return undefined;
+      }
+
+      return editor.getActiveStyles().fontSize ?? "default";
+    }
+  });
+
+  if (!Components || fontSize === undefined) {
+    return null;
+  }
+
+  return (
+    <Components.FormattingToolbar.Select
+      className="bn-select editor-text-size-select"
+      items={TEN_MINUTE_TEXT_SIZE_OPTIONS.map((item) => ({
+        icon: <Type size={15} />,
+        isSelected: fontSize === item.value,
+        onClick: () => {
+          editor.focus();
+          if (item.value === "default") {
+            editor.removeStyles({ fontSize: "" });
+          } else {
+            editor.addStyles({ fontSize: item.value });
+          }
+        },
+        text: item.label
+      }))}
+    />
   );
 }
 
