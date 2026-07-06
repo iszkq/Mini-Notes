@@ -1616,7 +1616,7 @@ button:disabled {
 }
 
 .ten-minute-row .bible-reader-verse-button:hover {
-  background: transparent;
+  background: #f3f7f5;
 }
 
 .bible-note-mark {
