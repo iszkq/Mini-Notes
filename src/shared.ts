@@ -84,6 +84,129 @@ export type BibleNoteUpdateInput = {
   tags?: string[];
 };
 
+export type TenMinuteSection = {
+  title: string;
+  paragraphs: string[];
+};
+
+export type TenMinuteLesson = {
+  id: string;
+  name: string;
+  title: string;
+  sections: TenMinuteSection[];
+};
+
+export type TenMinuteTextSize = "small" | "normal" | "large";
+export type TenMinuteLineSpacing = "compact" | "normal" | "loose";
+export type TenMinuteTextWeight = "regular" | "medium";
+export type TenMinuteTextAlign = "left" | "justify";
+
+export type TenMinuteReaderSettings = {
+  lineSpacing: TenMinuteLineSpacing;
+  nameSidebarVisible: boolean;
+  textAlign: TenMinuteTextAlign;
+  textSize: TenMinuteTextSize;
+  textWeight: TenMinuteTextWeight;
+};
+
+export type TenMinuteReaderData = {
+  lessons: TenMinuteLesson[];
+  settings: TenMinuteReaderSettings;
+};
+
+export type RevelationQaPrimaryCategory = {
+  id: string;
+  name: string;
+  description: string;
+  sortOrder: number;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type RevelationQaSecondaryCategory = {
+  id: string;
+  primaryId: string;
+  name: string;
+  description: string;
+  sortOrder: number;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type RevelationQaItem = {
+  id: string;
+  secondaryId: string;
+  question: string;
+  answers: string[];
+  tags: string[];
+  source: string;
+  sortOrder: number;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type RevelationQaSecondaryItemCount = {
+  secondaryId: string;
+  count: number;
+};
+
+export type RevelationQaLibrary = {
+  primaryCategories: RevelationQaPrimaryCategory[];
+  secondaryCategories: RevelationQaSecondaryCategory[];
+  itemCounts: RevelationQaSecondaryItemCount[];
+};
+
+export type RevelationQaItemsPage = {
+  items: RevelationQaItem[];
+  limit: number;
+  offset: number;
+  total: number;
+};
+
+export type RevelationQaPrimaryCategoryCreateInput = {
+  name: string;
+  description?: string;
+  sortOrder?: number;
+};
+
+export type RevelationQaPrimaryCategoryUpdateInput = {
+  name?: string;
+  description?: string;
+  sortOrder?: number;
+};
+
+export type RevelationQaSecondaryCategoryCreateInput = {
+  primaryId: string;
+  name: string;
+  description?: string;
+  sortOrder?: number;
+};
+
+export type RevelationQaSecondaryCategoryUpdateInput = {
+  primaryId?: string;
+  name?: string;
+  description?: string;
+  sortOrder?: number;
+};
+
+export type RevelationQaItemCreateInput = {
+  secondaryId: string;
+  question: string;
+  answers: string[];
+  tags?: string[];
+  source?: string;
+  sortOrder?: number;
+};
+
+export type RevelationQaItemUpdateInput = {
+  secondaryId?: string;
+  question?: string;
+  answers?: string[];
+  tags?: string[];
+  source?: string;
+  sortOrder?: number;
+};
+
 export type LoginInput = {
   username: string;
   password: string;

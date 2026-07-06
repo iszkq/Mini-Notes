@@ -1,14 +1,4 @@
-export type TenMinuteSection = {
-  title: string;
-  paragraphs: string[];
-};
-
-export type TenMinuteLesson = {
-  id: string;
-  name: string;
-  title: string;
-  sections: TenMinuteSection[];
-};
+import type { TenMinuteLesson } from "./shared";
 
 export const tenMinuteLessons: TenMinuteLesson[] = [
   {

@@ -15,7 +15,20 @@ import type {
   NoteSummary,
   NoteUpdateInput,
   RegisterInput,
+  RevelationQaItem,
+  RevelationQaItemCreateInput,
+  RevelationQaItemUpdateInput,
+  RevelationQaItemsPage,
+  RevelationQaLibrary,
+  RevelationQaPrimaryCategory,
+  RevelationQaPrimaryCategoryCreateInput,
+  RevelationQaPrimaryCategoryUpdateInput,
+  RevelationQaSecondaryCategory,
+  RevelationQaSecondaryCategoryCreateInput,
+  RevelationQaSecondaryCategoryUpdateInput,
   SessionStatus,
+  TenMinuteReaderData,
+  TenMinuteReaderSettings,
   UploadResult
 } from "./shared";
 
@@ -130,6 +143,120 @@ export async function updateBibleNote(
 
 export async function deleteBibleNote(id: string): Promise<{ ok: true }> {
   return apiRequest(`/api/bible/notes/${encodeURIComponent(id)}`, {
+    method: "DELETE"
+  });
+}
+
+export async function getTenMinuteReaderData(): Promise<TenMinuteReaderData> {
+  return apiRequest("/api/ten-minute");
+}
+
+export async function updateTenMinuteReaderSettings(
+  settings: TenMinuteReaderSettings
+): Promise<TenMinuteReaderSettings> {
+  return apiRequest("/api/ten-minute/settings", {
+    method: "PATCH",
+    body: JSON.stringify(settings)
+  });
+}
+
+export async function getRevelationQaLibrary(): Promise<RevelationQaLibrary> {
+  return apiRequest("/api/revelation-qa");
+}
+
+export async function listRevelationQaItems(input: {
+  limit?: number;
+  offset?: number;
+  query?: string;
+  secondaryId: string;
+}): Promise<RevelationQaItemsPage> {
+  const params = new URLSearchParams({
+    secondary: input.secondaryId
+  });
+  if (input.limit !== undefined) {
+    params.set("limit", String(input.limit));
+  }
+  if (input.offset !== undefined) {
+    params.set("offset", String(input.offset));
+  }
+  if (input.query?.trim()) {
+    params.set("q", input.query.trim());
+  }
+
+  return apiRequest(`/api/revelation-qa/items?${params}`);
+}
+
+export async function createRevelationQaPrimaryCategory(
+  input: RevelationQaPrimaryCategoryCreateInput
+): Promise<RevelationQaPrimaryCategory> {
+  return apiRequest("/api/revelation-qa/primary", {
+    method: "POST",
+    body: JSON.stringify(input)
+  });
+}
+
+export async function updateRevelationQaPrimaryCategory(
+  id: string,
+  input: RevelationQaPrimaryCategoryUpdateInput
+): Promise<RevelationQaPrimaryCategory> {
+  return apiRequest(`/api/revelation-qa/primary/${encodeURIComponent(id)}`, {
+    method: "PATCH",
+    body: JSON.stringify(input)
+  });
+}
+
+export async function deleteRevelationQaPrimaryCategory(id: string): Promise<{ ok: true }> {
+  return apiRequest(`/api/revelation-qa/primary/${encodeURIComponent(id)}`, {
+    method: "DELETE"
+  });
+}
+
+export async function createRevelationQaSecondaryCategory(
+  input: RevelationQaSecondaryCategoryCreateInput
+): Promise<RevelationQaSecondaryCategory> {
+  return apiRequest("/api/revelation-qa/secondary", {
+    method: "POST",
+    body: JSON.stringify(input)
+  });
+}
+
+export async function updateRevelationQaSecondaryCategory(
+  id: string,
+  input: RevelationQaSecondaryCategoryUpdateInput
+): Promise<RevelationQaSecondaryCategory> {
+  return apiRequest(`/api/revelation-qa/secondary/${encodeURIComponent(id)}`, {
+    method: "PATCH",
+    body: JSON.stringify(input)
+  });
+}
+
+export async function deleteRevelationQaSecondaryCategory(id: string): Promise<{ ok: true }> {
+  return apiRequest(`/api/revelation-qa/secondary/${encodeURIComponent(id)}`, {
+    method: "DELETE"
+  });
+}
+
+export async function createRevelationQaItem(
+  input: RevelationQaItemCreateInput
+): Promise<RevelationQaItem> {
+  return apiRequest("/api/revelation-qa/items", {
+    method: "POST",
+    body: JSON.stringify(input)
+  });
+}
+
+export async function updateRevelationQaItem(
+  id: string,
+  input: RevelationQaItemUpdateInput
+): Promise<RevelationQaItem> {
+  return apiRequest(`/api/revelation-qa/items/${encodeURIComponent(id)}`, {
+    method: "PATCH",
+    body: JSON.stringify(input)
+  });
+}
+
+export async function deleteRevelationQaItem(id: string): Promise<{ ok: true }> {
+  return apiRequest(`/api/revelation-qa/items/${encodeURIComponent(id)}`, {
     method: "DELETE"
   });
 }

@@ -12,7 +12,19 @@ import {
   Type
 } from "lucide-react";
 import { useEffect, useMemo, useState, type CSSProperties } from "react";
-import { tenMinuteLessons, type TenMinuteSection } from "../tenMinuteData";
+import {
+  ApiError,
+  getTenMinuteReaderData,
+  updateTenMinuteReaderSettings
+} from "../api";
+import type {
+  TenMinuteLineSpacing,
+  TenMinuteLesson,
+  TenMinuteTextSize,
+  TenMinuteTextWeight,
+  TenMinuteReaderSettings,
+  TenMinuteSection
+} from "../shared";
 
 type TenMinuteDisplaySection = {
   id: string;
@@ -20,20 +32,10 @@ type TenMinuteDisplaySection = {
   title: string;
 };
 
-type TenMinuteTextSize = "small" | "normal" | "large";
-type TenMinuteLineSpacing = "compact" | "normal" | "loose";
-type TenMinuteTextWeight = "regular" | "medium";
-type TenMinuteTextAlign = "left" | "justify";
-
-type TenMinuteReaderSettings = {
-  lineSpacing: TenMinuteLineSpacing;
-  nameSidebarVisible: boolean;
-  textAlign: TenMinuteTextAlign;
-  textSize: TenMinuteTextSize;
-  textWeight: TenMinuteTextWeight;
+type TenMinuteReaderProps = {
+  onError?: (message: string) => void;
 };
 
-const TEN_MINUTE_SETTINGS_STORAGE_KEY = "mini-notes-ten-minute-reader-settings";
 const TEN_MINUTE_DEFAULT_SETTINGS: TenMinuteReaderSettings = {
   lineSpacing: "normal",
   nameSidebarVisible: true,
@@ -59,23 +61,27 @@ const TEN_MINUTE_TEXT_WEIGHT_VALUES: Record<TenMinuteTextWeight, string> = {
   medium: "560"
 };
 
-export function TenMinuteReader() {
-  const [selectedLessonId, setSelectedLessonId] = useState(tenMinuteLessons[0]?.id ?? "");
+export function TenMinuteReader({ onError }: TenMinuteReaderProps) {
+  const [lessons, setLessons] = useState<TenMinuteLesson[]>([]);
+  const [selectedLessonId, setSelectedLessonId] = useState("");
   const [readerSettings, setReaderSettings] = useState<TenMinuteReaderSettings>(
-    readTenMinuteReaderSettings
+    TEN_MINUTE_DEFAULT_SETTINGS
   );
+  const [isLoading, setIsLoading] = useState(true);
+  const [settingsLoaded, setSettingsLoaded] = useState(false);
+  const [localError, setLocalError] = useState<string | null>(null);
 
   const selectedLesson = useMemo(
-    () => tenMinuteLessons.find((lesson) => lesson.id === selectedLessonId) ?? tenMinuteLessons[0],
-    [selectedLessonId]
+    () => lessons.find((lesson) => lesson.id === selectedLessonId) ?? lessons[0],
+    [lessons, selectedLessonId]
   );
   const selectedLessonIndex = selectedLesson
-    ? tenMinuteLessons.findIndex((lesson) => lesson.id === selectedLesson.id)
+    ? lessons.findIndex((lesson) => lesson.id === selectedLesson.id)
     : -1;
-  const previousLesson = selectedLessonIndex > 0 ? tenMinuteLessons[selectedLessonIndex - 1] : null;
+  const previousLesson = selectedLessonIndex > 0 ? lessons[selectedLessonIndex - 1] : null;
   const nextLesson =
-    selectedLessonIndex >= 0 && selectedLessonIndex < tenMinuteLessons.length - 1
-      ? tenMinuteLessons[selectedLessonIndex + 1]
+    selectedLessonIndex >= 0 && selectedLessonIndex < lessons.length - 1
+      ? lessons[selectedLessonIndex + 1]
       : null;
   const paragraphCount =
     selectedLesson?.sections.reduce((total, section) => total + section.paragraphs.length, 0) ?? 0;
@@ -95,17 +101,73 @@ export function TenMinuteReader() {
   );
 
   useEffect(() => {
-    if (typeof window === "undefined") {
+    let cancelled = false;
+
+    async function loadReaderData() {
+      setIsLoading(true);
+      try {
+        const data = await getTenMinuteReaderData();
+        if (cancelled) {
+          return;
+        }
+
+        setLessons(data.lessons);
+        setReaderSettings(data.settings);
+        setSelectedLessonId((current) =>
+          data.lessons.some((lesson) => lesson.id === current)
+            ? current
+            : data.lessons[0]?.id ?? ""
+        );
+        setLocalError(null);
+        setSettingsLoaded(true);
+      } catch (cause) {
+        if (!cancelled) {
+          const message = cause instanceof ApiError ? cause.message : "10分钟内容加载失败。";
+          setLocalError(message);
+          onError?.(message);
+        }
+      } finally {
+        if (!cancelled) {
+          setIsLoading(false);
+        }
+      }
+    }
+
+    void loadReaderData();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [onError]);
+
+  useEffect(() => {
+    if (!settingsLoaded) {
       return;
     }
 
-    window.localStorage.setItem(TEN_MINUTE_SETTINGS_STORAGE_KEY, JSON.stringify(readerSettings));
-  }, [readerSettings]);
+    const timeoutId = window.setTimeout(() => {
+      void updateTenMinuteReaderSettings(readerSettings).catch((cause) => {
+        const message = cause instanceof ApiError ? cause.message : "10分钟文字样式保存失败。";
+        setLocalError(message);
+        onError?.(message);
+      });
+    }, 360);
+
+    return () => window.clearTimeout(timeoutId);
+  }, [onError, readerSettings, settingsLoaded]);
+
+  if (isLoading) {
+    return (
+      <section className="bible-reader-page ten-minute-page">
+        <div className="bible-reader-empty">正在加载 10 分钟内容...</div>
+      </section>
+    );
+  }
 
   if (!selectedLesson) {
     return (
       <section className="bible-reader-page ten-minute-page">
-        <div className="bible-reader-empty">暂时没有可显示的 10 分钟内容。</div>
+        <div className="bible-reader-empty">{localError ?? "暂时没有可显示的 10 分钟内容。"}</div>
       </section>
     );
   }
@@ -121,7 +183,7 @@ export function TenMinuteReader() {
           <h1>{selectedLesson.title}</h1>
         </div>
         <div className="bible-reader-stats">
-          <strong>{tenMinuteLessons.length}</strong>
+          <strong>{lessons.length}</strong>
           <span>篇内容</span>
         </div>
       </header>
@@ -153,7 +215,7 @@ export function TenMinuteReader() {
                 </button>
               </div>
               <div className="bible-reader-pill-list ten-minute-name-list">
-                {tenMinuteLessons.map((lesson) => (
+                {lessons.map((lesson) => (
                   <button
                     className={clsx(selectedLesson.id === lesson.id && "active")}
                     key={lesson.id}
@@ -394,55 +456,4 @@ function formatChineseNumber(value: number): string {
   const tens = Math.floor(value / 10);
   const ones = value % 10;
   return `${digits[tens]}十${ones ? digits[ones] : ""}`;
-}
-
-function readTenMinuteReaderSettings(): TenMinuteReaderSettings {
-  if (typeof window === "undefined") {
-    return TEN_MINUTE_DEFAULT_SETTINGS;
-  }
-
-  try {
-    const stored = window.localStorage.getItem(TEN_MINUTE_SETTINGS_STORAGE_KEY);
-    if (!stored) {
-      return TEN_MINUTE_DEFAULT_SETTINGS;
-    }
-
-    const parsed = JSON.parse(stored) as Partial<TenMinuteReaderSettings>;
-    return {
-      lineSpacing: isTenMinuteLineSpacing(parsed.lineSpacing)
-        ? parsed.lineSpacing
-        : TEN_MINUTE_DEFAULT_SETTINGS.lineSpacing,
-      nameSidebarVisible:
-        typeof parsed.nameSidebarVisible === "boolean"
-          ? parsed.nameSidebarVisible
-          : TEN_MINUTE_DEFAULT_SETTINGS.nameSidebarVisible,
-      textAlign: isTenMinuteTextAlign(parsed.textAlign)
-        ? parsed.textAlign
-        : TEN_MINUTE_DEFAULT_SETTINGS.textAlign,
-      textSize: isTenMinuteTextSize(parsed.textSize)
-        ? parsed.textSize
-        : TEN_MINUTE_DEFAULT_SETTINGS.textSize,
-      textWeight: isTenMinuteTextWeight(parsed.textWeight)
-        ? parsed.textWeight
-        : TEN_MINUTE_DEFAULT_SETTINGS.textWeight
-    };
-  } catch {
-    return TEN_MINUTE_DEFAULT_SETTINGS;
-  }
-}
-
-function isTenMinuteTextSize(value: unknown): value is TenMinuteTextSize {
-  return value === "small" || value === "normal" || value === "large";
-}
-
-function isTenMinuteLineSpacing(value: unknown): value is TenMinuteLineSpacing {
-  return value === "compact" || value === "normal" || value === "loose";
-}
-
-function isTenMinuteTextWeight(value: unknown): value is TenMinuteTextWeight {
-  return value === "regular" || value === "medium";
-}
-
-function isTenMinuteTextAlign(value: unknown): value is TenMinuteTextAlign {
-  return value === "left" || value === "justify";
 }

@@ -19,9 +19,23 @@ import type {
   NoteTitleSize,
   NoteUpdateInput,
   RegisterInput,
+  RevelationQaItem,
+  RevelationQaItemCreateInput,
+  RevelationQaItemUpdateInput,
+  RevelationQaLibrary,
+  RevelationQaPrimaryCategory,
+  RevelationQaPrimaryCategoryCreateInput,
+  RevelationQaPrimaryCategoryUpdateInput,
+  RevelationQaSecondaryCategory,
+  RevelationQaSecondaryCategoryCreateInput,
+  RevelationQaSecondaryCategoryUpdateInput,
   SessionStatus,
+  TenMinuteLesson,
+  TenMinuteReaderData,
+  TenMinuteReaderSettings,
   UploadResult
 } from "./shared";
+import { tenMinuteLessons as bundledTenMinuteLessons } from "./tenMinuteData";
 import {
   parseBibleCsv,
   searchBibleVerses,
@@ -114,6 +128,46 @@ type DbBibleNoteRow = {
   contentSize?: number | string | null;
 };
 
+type DbRevelationQaPrimaryCategoryRow = {
+  id: string;
+  name: string;
+  description: string | null;
+  sortOrder: number | string;
+  createdAt: string;
+  updatedAt: string;
+};
+
+type DbRevelationQaSecondaryCategoryRow = {
+  id: string;
+  primaryId: string;
+  name: string;
+  description: string | null;
+  sortOrder: number | string;
+  createdAt: string;
+  updatedAt: string;
+};
+
+type DbRevelationQaItemRow = {
+  id: string;
+  secondaryId: string;
+  question: string;
+  answers: string;
+  tags: string;
+  source: string | null;
+  sortOrder: number | string;
+  createdAt: string;
+  updatedAt: string;
+};
+
+type DbRevelationQaItemCountRow = {
+  secondaryId: string;
+  count: number | string;
+};
+
+type DbTenMinuteReaderSettingsRow = {
+  settings: string;
+};
+
 type PageLinkNoteRow = {
   id: string;
   title: string;
@@ -146,6 +200,7 @@ const PBKDF2_ITERATIONS = 60000;
 const LEGACY_PBKDF2_ITERATIONS = [210000];
 const NOTE_CONTENT_OBJECT_PREFIX = "note-content";
 const BIBLE_NOTE_CONTENT_OBJECT_PREFIX = "bible-note-content";
+const TEN_MINUTE_CONTENT_OBJECT_KEY = "ten-minute/content.json";
 const NOTE_SEARCH_TEXT_MAX_BYTES = 16 * 1024;
 const NOTE_SUMMARY_MAX_BYTES = 512;
 const NOTE_SEARCH_PATTERN_MAX_BYTES = 50;
@@ -291,6 +346,58 @@ async function handleApi(
 
     if (segments[0] === "bible" && segments[1] === "notes" && segments[2] && request.method === "DELETE") {
       return deleteBibleNote(env, user.id, segments[2]);
+    }
+
+    if (segments[0] === "ten-minute" && request.method === "GET" && !segments[1]) {
+      return getTenMinuteReaderData(env, user.id);
+    }
+
+    if (segments[0] === "ten-minute" && segments[1] === "settings" && request.method === "PATCH") {
+      return updateTenMinuteReaderSettings(request, env, user.id);
+    }
+
+    if (segments[0] === "revelation-qa" && request.method === "GET" && !segments[1]) {
+      return listRevelationQaLibrary(env, user.id);
+    }
+
+    if (segments[0] === "revelation-qa" && segments[1] === "items" && request.method === "GET" && !segments[2]) {
+      return listRevelationQaItems(env, user.id, url);
+    }
+
+    if (segments[0] === "revelation-qa" && segments[1] === "primary" && request.method === "POST" && !segments[2]) {
+      return createRevelationQaPrimaryCategory(request, env, user.id);
+    }
+
+    if (segments[0] === "revelation-qa" && segments[1] === "primary" && segments[2] && request.method === "PATCH") {
+      return updateRevelationQaPrimaryCategory(request, env, user.id, segments[2]);
+    }
+
+    if (segments[0] === "revelation-qa" && segments[1] === "primary" && segments[2] && request.method === "DELETE") {
+      return deleteRevelationQaPrimaryCategory(env, user.id, segments[2]);
+    }
+
+    if (segments[0] === "revelation-qa" && segments[1] === "secondary" && request.method === "POST" && !segments[2]) {
+      return createRevelationQaSecondaryCategory(request, env, user.id);
+    }
+
+    if (segments[0] === "revelation-qa" && segments[1] === "secondary" && segments[2] && request.method === "PATCH") {
+      return updateRevelationQaSecondaryCategory(request, env, user.id, segments[2]);
+    }
+
+    if (segments[0] === "revelation-qa" && segments[1] === "secondary" && segments[2] && request.method === "DELETE") {
+      return deleteRevelationQaSecondaryCategory(env, user.id, segments[2]);
+    }
+
+    if (segments[0] === "revelation-qa" && segments[1] === "items" && request.method === "POST" && !segments[2]) {
+      return createRevelationQaItem(request, env, user.id);
+    }
+
+    if (segments[0] === "revelation-qa" && segments[1] === "items" && segments[2] && request.method === "PATCH") {
+      return updateRevelationQaItem(request, env, user.id, segments[2]);
+    }
+
+    if (segments[0] === "revelation-qa" && segments[1] === "items" && segments[2] && request.method === "DELETE") {
+      return deleteRevelationQaItem(env, user.id, segments[2]);
     }
 
     if (segments[0] === "emoji-index" && request.method === "GET") {
@@ -694,6 +801,940 @@ async function deleteBibleNote(
   await deleteBibleNoteBody(env, current.contentKey);
 
   return json({ ok: true });
+}
+
+async function getTenMinuteReaderData(
+  env: Env,
+  userId: string
+): Promise<Response> {
+  const [lessons, settings] = await Promise.all([
+    readTenMinuteLessonsFromR2(env),
+    readTenMinuteReaderSettings(env, userId)
+  ]);
+
+  const data: TenMinuteReaderData = {
+    lessons,
+    settings
+  };
+
+  return json(data);
+}
+
+async function updateTenMinuteReaderSettings(
+  request: Request,
+  env: Env,
+  userId: string
+): Promise<Response> {
+  const current = await readTenMinuteReaderSettings(env, userId);
+  const body = await readJson<Partial<TenMinuteReaderSettings>>(request);
+  const settings = cleanTenMinuteReaderSettings(body, current);
+  const now = new Date().toISOString();
+
+  await env.DB.prepare(
+    `INSERT INTO ten_minute_reader_settings
+       (user_id, settings, created_at, updated_at)
+     VALUES (?, ?, ?, ?)
+     ON CONFLICT(user_id) DO UPDATE SET
+       settings = excluded.settings,
+       updated_at = excluded.updated_at`
+  )
+    .bind(userId, JSON.stringify(settings), now, now)
+    .run();
+
+  return json(settings);
+}
+
+async function readTenMinuteLessonsFromR2(env: Env): Promise<TenMinuteLesson[]> {
+  const object = await env.FILES.get(TEN_MINUTE_CONTENT_OBJECT_KEY);
+  if (object) {
+    try {
+      return cleanTenMinuteLessons(JSON.parse(await object.text()));
+    } catch (cause) {
+      console.error("读取 10 分钟 R2 内容失败，使用内置内容兜底。", cause);
+    }
+  }
+
+  const lessons = cleanTenMinuteLessons({ lessons: bundledTenMinuteLessons });
+  if (!object) {
+    await env.FILES.put(
+      TEN_MINUTE_CONTENT_OBJECT_KEY,
+      JSON.stringify({ lessons }),
+      {
+        httpMetadata: {
+          contentType: "application/json; charset=utf-8"
+        }
+      }
+    );
+  }
+
+  return lessons;
+}
+
+async function readTenMinuteReaderSettings(
+  env: Env,
+  userId: string
+): Promise<TenMinuteReaderSettings> {
+  const row = await env.DB.prepare(
+    `SELECT settings
+     FROM ten_minute_reader_settings
+     WHERE user_id = ?`
+  )
+    .bind(userId)
+    .first<DbTenMinuteReaderSettingsRow>();
+
+  if (!row) {
+    return DEFAULT_TEN_MINUTE_READER_SETTINGS;
+  }
+
+  try {
+    return cleanTenMinuteReaderSettings(JSON.parse(row.settings), DEFAULT_TEN_MINUTE_READER_SETTINGS);
+  } catch {
+    return DEFAULT_TEN_MINUTE_READER_SETTINGS;
+  }
+}
+
+const DEFAULT_TEN_MINUTE_READER_SETTINGS: TenMinuteReaderSettings = {
+  lineSpacing: "normal",
+  nameSidebarVisible: true,
+  textAlign: "left",
+  textSize: "normal",
+  textWeight: "regular"
+};
+
+function cleanTenMinuteReaderSettings(
+  value: Partial<TenMinuteReaderSettings> | null | undefined,
+  fallback: TenMinuteReaderSettings
+): TenMinuteReaderSettings {
+  return {
+    lineSpacing: isTenMinuteLineSpacing(value?.lineSpacing)
+      ? value.lineSpacing
+      : fallback.lineSpacing,
+    nameSidebarVisible:
+      typeof value?.nameSidebarVisible === "boolean"
+        ? value.nameSidebarVisible
+        : fallback.nameSidebarVisible,
+    textAlign: isTenMinuteTextAlign(value?.textAlign) ? value.textAlign : fallback.textAlign,
+    textSize: isTenMinuteTextSize(value?.textSize) ? value.textSize : fallback.textSize,
+    textWeight: isTenMinuteTextWeight(value?.textWeight) ? value.textWeight : fallback.textWeight
+  };
+}
+
+function cleanTenMinuteLessons(value: unknown): TenMinuteLesson[] {
+  const source = Array.isArray(value)
+    ? value
+    : isRecord(value) && Array.isArray(value.lessons)
+      ? value.lessons
+      : bundledTenMinuteLessons;
+
+  return source
+    .map((lesson, index) => cleanTenMinuteLesson(lesson, index))
+    .filter((lesson): lesson is TenMinuteLesson => Boolean(lesson));
+}
+
+function cleanTenMinuteLesson(value: unknown, index: number): TenMinuteLesson | null {
+  if (!isRecord(value)) {
+    return null;
+  }
+
+  const title = cleanRevelationQaText(value.title, 180);
+  const sections = Array.isArray(value.sections)
+    ? value.sections.map(cleanTenMinuteSection).filter((section): section is TenMinuteLesson["sections"][number] => Boolean(section))
+    : [];
+  if (!title || sections.length === 0) {
+    return null;
+  }
+
+  return {
+    id: cleanRevelationQaText(value.id, 80) || `ten-minute-${index + 1}`,
+    name: cleanRevelationQaText(value.name, 80) || title,
+    title,
+    sections
+  };
+}
+
+function cleanTenMinuteSection(value: unknown): TenMinuteLesson["sections"][number] | null {
+  if (!isRecord(value)) {
+    return null;
+  }
+
+  const title = cleanRevelationQaText(value.title, 80);
+  const paragraphs = Array.isArray(value.paragraphs)
+    ? value.paragraphs
+        .map((paragraph) => cleanRevelationQaText(paragraph, 12000))
+        .filter(Boolean)
+        .slice(0, 120)
+    : [];
+
+  if (!title || paragraphs.length === 0) {
+    return null;
+  }
+
+  return {
+    title,
+    paragraphs
+  };
+}
+
+function isTenMinuteTextSize(value: unknown): value is TenMinuteReaderSettings["textSize"] {
+  return value === "small" || value === "normal" || value === "large";
+}
+
+function isTenMinuteLineSpacing(value: unknown): value is TenMinuteReaderSettings["lineSpacing"] {
+  return value === "compact" || value === "normal" || value === "loose";
+}
+
+function isTenMinuteTextWeight(value: unknown): value is TenMinuteReaderSettings["textWeight"] {
+  return value === "regular" || value === "medium";
+}
+
+function isTenMinuteTextAlign(value: unknown): value is TenMinuteReaderSettings["textAlign"] {
+  return value === "left" || value === "justify";
+}
+
+async function listRevelationQaLibrary(
+  env: Env,
+  userId: string
+): Promise<Response> {
+  const [primaryResult, secondaryResult, countResult] = await Promise.all([
+    env.DB.prepare(
+      `SELECT id,
+              name,
+              COALESCE(description, '') AS description,
+              sort_order AS sortOrder,
+              created_at AS createdAt,
+              updated_at AS updatedAt
+       FROM revelation_qa_primary_categories
+       WHERE user_id = ?
+       ORDER BY sort_order DESC, updated_at DESC`
+    )
+      .bind(userId)
+      .all<DbRevelationQaPrimaryCategoryRow>(),
+    env.DB.prepare(
+      `SELECT id,
+              primary_id AS primaryId,
+              name,
+              COALESCE(description, '') AS description,
+              sort_order AS sortOrder,
+              created_at AS createdAt,
+              updated_at AS updatedAt
+       FROM revelation_qa_secondary_categories
+       WHERE user_id = ?
+       ORDER BY sort_order DESC, updated_at DESC`
+    )
+      .bind(userId)
+      .all<DbRevelationQaSecondaryCategoryRow>(),
+    env.DB.prepare(
+      `SELECT secondary_id AS secondaryId,
+              COUNT(*) AS count
+       FROM revelation_qa_items
+       WHERE user_id = ?
+       GROUP BY secondary_id`
+    )
+      .bind(userId)
+      .all<DbRevelationQaItemCountRow>()
+  ]);
+
+  const library: RevelationQaLibrary = {
+    primaryCategories: primaryResult.results.map(rowToRevelationQaPrimaryCategory),
+    secondaryCategories: secondaryResult.results.map(rowToRevelationQaSecondaryCategory),
+    itemCounts: countResult.results.map((row) => ({
+      count: Number(row.count) || 0,
+      secondaryId: row.secondaryId
+    }))
+  };
+
+  return json(library);
+}
+
+async function listRevelationQaItems(
+  env: Env,
+  userId: string,
+  url: URL
+): Promise<Response> {
+  const secondaryId = cleanRevelationQaId(url.searchParams.get("secondary"));
+  if (!(await findRevelationQaSecondaryCategory(env, userId, secondaryId))) {
+    return error("请先选择有效的二级分类。", 400);
+  }
+
+  const limit = cleanRevelationQaPageLimit(url.searchParams.get("limit"));
+  const offset = cleanRevelationQaPageOffset(url.searchParams.get("offset"));
+  const keyword = cleanRevelationQaText(url.searchParams.get("q"), 80);
+  const likeKeyword = `%${keyword.replace(/[\\%_]/g, "\\$&")}%`;
+  const hasKeyword = Boolean(keyword);
+
+  const countQuery = hasKeyword
+    ? `SELECT COUNT(*) AS count
+       FROM revelation_qa_items
+       WHERE user_id = ?
+         AND secondary_id = ?
+         AND (
+           question LIKE ? ESCAPE '\\'
+           OR answers LIKE ? ESCAPE '\\'
+           OR tags LIKE ? ESCAPE '\\'
+           OR source LIKE ? ESCAPE '\\'
+         )`
+    : `SELECT COUNT(*) AS count
+       FROM revelation_qa_items
+       WHERE user_id = ?
+         AND secondary_id = ?`;
+  const itemQuery = hasKeyword
+    ? `SELECT id,
+              secondary_id AS secondaryId,
+              question,
+              answers,
+              tags,
+              COALESCE(source, '') AS source,
+              sort_order AS sortOrder,
+              created_at AS createdAt,
+              updated_at AS updatedAt
+       FROM revelation_qa_items
+       WHERE user_id = ?
+         AND secondary_id = ?
+         AND (
+           question LIKE ? ESCAPE '\\'
+           OR answers LIKE ? ESCAPE '\\'
+           OR tags LIKE ? ESCAPE '\\'
+           OR source LIKE ? ESCAPE '\\'
+         )
+       ORDER BY sort_order DESC, updated_at DESC
+       LIMIT ? OFFSET ?`
+    : `SELECT id,
+              secondary_id AS secondaryId,
+              question,
+              answers,
+              tags,
+              COALESCE(source, '') AS source,
+              sort_order AS sortOrder,
+              created_at AS createdAt,
+              updated_at AS updatedAt
+       FROM revelation_qa_items
+       WHERE user_id = ?
+         AND secondary_id = ?
+       ORDER BY sort_order DESC, updated_at DESC
+       LIMIT ? OFFSET ?`;
+
+  const countStatement = hasKeyword
+    ? env.DB.prepare(countQuery).bind(userId, secondaryId, likeKeyword, likeKeyword, likeKeyword, likeKeyword)
+    : env.DB.prepare(countQuery).bind(userId, secondaryId);
+  const itemStatement = hasKeyword
+    ? env.DB.prepare(itemQuery).bind(
+        userId,
+        secondaryId,
+        likeKeyword,
+        likeKeyword,
+        likeKeyword,
+        likeKeyword,
+        limit,
+        offset
+      )
+    : env.DB.prepare(itemQuery).bind(userId, secondaryId, limit, offset);
+
+  const [countRow, itemResult] = await Promise.all([
+    countStatement.first<{ count: number | string }>(),
+    itemStatement.all<DbRevelationQaItemRow>()
+  ]);
+
+  return json({
+    items: itemResult.results.map(rowToRevelationQaItem),
+    limit,
+    offset,
+    total: Number(countRow?.count ?? 0) || 0
+  });
+}
+
+async function createRevelationQaPrimaryCategory(
+  request: Request,
+  env: Env,
+  userId: string
+): Promise<Response> {
+  const body = await readJson<RevelationQaPrimaryCategoryCreateInput>(request);
+  const name = cleanRevelationQaText(body.name, 80);
+  if (!name) {
+    return error("一级分类名称不能为空。", 400);
+  }
+
+  const now = new Date().toISOString();
+  const category: RevelationQaPrimaryCategory = {
+    id: crypto.randomUUID(),
+    name,
+    description: cleanRevelationQaText(body.description, 240),
+    sortOrder: cleanRevelationQaSortOrder(body.sortOrder, Date.now()),
+    createdAt: now,
+    updatedAt: now
+  };
+
+  await env.DB.prepare(
+    `INSERT INTO revelation_qa_primary_categories
+       (id, user_id, name, description, sort_order, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?)`
+  )
+    .bind(
+      category.id,
+      userId,
+      category.name,
+      category.description,
+      category.sortOrder,
+      category.createdAt,
+      category.updatedAt
+    )
+    .run();
+
+  return json(category, 201);
+}
+
+async function updateRevelationQaPrimaryCategory(
+  request: Request,
+  env: Env,
+  userId: string,
+  categoryId: string
+): Promise<Response> {
+  const current = await findRevelationQaPrimaryCategory(env, userId, categoryId);
+  if (!current) {
+    return error("一级分类不存在。", 404);
+  }
+
+  const body = await readJson<RevelationQaPrimaryCategoryUpdateInput>(request);
+  const name = body.name === undefined ? current.name : cleanRevelationQaText(body.name, 80);
+  if (!name) {
+    return error("一级分类名称不能为空。", 400);
+  }
+
+  const next: RevelationQaPrimaryCategory = {
+    ...rowToRevelationQaPrimaryCategory(current),
+    name,
+    description:
+      body.description === undefined
+        ? current.description ?? ""
+        : cleanRevelationQaText(body.description, 240),
+    sortOrder:
+      body.sortOrder === undefined
+        ? Number(current.sortOrder)
+        : cleanRevelationQaSortOrder(body.sortOrder, Number(current.sortOrder)),
+    updatedAt: new Date().toISOString()
+  };
+
+  await env.DB.prepare(
+    `UPDATE revelation_qa_primary_categories
+     SET name = ?,
+         description = ?,
+         sort_order = ?,
+         updated_at = ?
+     WHERE id = ?
+       AND user_id = ?`
+  )
+    .bind(next.name, next.description, next.sortOrder, next.updatedAt, categoryId, userId)
+    .run();
+
+  return json(next);
+}
+
+async function deleteRevelationQaPrimaryCategory(
+  env: Env,
+  userId: string,
+  categoryId: string
+): Promise<Response> {
+  const current = await findRevelationQaPrimaryCategory(env, userId, categoryId);
+  if (!current) {
+    return error("一级分类不存在。", 404);
+  }
+
+  await env.DB.prepare(
+    `DELETE FROM revelation_qa_items
+     WHERE user_id = ?
+       AND secondary_id IN (
+         SELECT id
+         FROM revelation_qa_secondary_categories
+         WHERE user_id = ?
+           AND primary_id = ?
+       )`
+  )
+    .bind(userId, userId, categoryId)
+    .run();
+  await env.DB.prepare(
+    `DELETE FROM revelation_qa_secondary_categories
+     WHERE user_id = ?
+       AND primary_id = ?`
+  )
+    .bind(userId, categoryId)
+    .run();
+  await env.DB.prepare(
+    `DELETE FROM revelation_qa_primary_categories
+     WHERE id = ?
+       AND user_id = ?`
+  )
+    .bind(categoryId, userId)
+    .run();
+
+  return json({ ok: true });
+}
+
+async function createRevelationQaSecondaryCategory(
+  request: Request,
+  env: Env,
+  userId: string
+): Promise<Response> {
+  const body = await readJson<RevelationQaSecondaryCategoryCreateInput>(request);
+  const primaryId = cleanRevelationQaId(body.primaryId);
+  if (!(await findRevelationQaPrimaryCategory(env, userId, primaryId))) {
+    return error("请先选择有效的一级分类。", 400);
+  }
+
+  const name = cleanRevelationQaText(body.name, 80);
+  if (!name) {
+    return error("二级分类名称不能为空。", 400);
+  }
+
+  const now = new Date().toISOString();
+  const category: RevelationQaSecondaryCategory = {
+    id: crypto.randomUUID(),
+    primaryId,
+    name,
+    description: cleanRevelationQaText(body.description, 240),
+    sortOrder: cleanRevelationQaSortOrder(body.sortOrder, Date.now()),
+    createdAt: now,
+    updatedAt: now
+  };
+
+  await env.DB.prepare(
+    `INSERT INTO revelation_qa_secondary_categories
+       (id, user_id, primary_id, name, description, sort_order, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+  )
+    .bind(
+      category.id,
+      userId,
+      category.primaryId,
+      category.name,
+      category.description,
+      category.sortOrder,
+      category.createdAt,
+      category.updatedAt
+    )
+    .run();
+
+  return json(category, 201);
+}
+
+async function updateRevelationQaSecondaryCategory(
+  request: Request,
+  env: Env,
+  userId: string,
+  categoryId: string
+): Promise<Response> {
+  const current = await findRevelationQaSecondaryCategory(env, userId, categoryId);
+  if (!current) {
+    return error("二级分类不存在。", 404);
+  }
+
+  const body = await readJson<RevelationQaSecondaryCategoryUpdateInput>(request);
+  const primaryId =
+    body.primaryId === undefined ? current.primaryId : cleanRevelationQaId(body.primaryId);
+  if (!(await findRevelationQaPrimaryCategory(env, userId, primaryId))) {
+    return error("请先选择有效的一级分类。", 400);
+  }
+
+  const name = body.name === undefined ? current.name : cleanRevelationQaText(body.name, 80);
+  if (!name) {
+    return error("二级分类名称不能为空。", 400);
+  }
+
+  const next: RevelationQaSecondaryCategory = {
+    ...rowToRevelationQaSecondaryCategory(current),
+    primaryId,
+    name,
+    description:
+      body.description === undefined
+        ? current.description ?? ""
+        : cleanRevelationQaText(body.description, 240),
+    sortOrder:
+      body.sortOrder === undefined
+        ? Number(current.sortOrder)
+        : cleanRevelationQaSortOrder(body.sortOrder, Number(current.sortOrder)),
+    updatedAt: new Date().toISOString()
+  };
+
+  await env.DB.prepare(
+    `UPDATE revelation_qa_secondary_categories
+     SET primary_id = ?,
+         name = ?,
+         description = ?,
+         sort_order = ?,
+         updated_at = ?
+     WHERE id = ?
+       AND user_id = ?`
+  )
+    .bind(
+      next.primaryId,
+      next.name,
+      next.description,
+      next.sortOrder,
+      next.updatedAt,
+      categoryId,
+      userId
+    )
+    .run();
+
+  return json(next);
+}
+
+async function deleteRevelationQaSecondaryCategory(
+  env: Env,
+  userId: string,
+  categoryId: string
+): Promise<Response> {
+  const current = await findRevelationQaSecondaryCategory(env, userId, categoryId);
+  if (!current) {
+    return error("二级分类不存在。", 404);
+  }
+
+  await env.DB.prepare(
+    `DELETE FROM revelation_qa_items
+     WHERE user_id = ?
+       AND secondary_id = ?`
+  )
+    .bind(userId, categoryId)
+    .run();
+  await env.DB.prepare(
+    `DELETE FROM revelation_qa_secondary_categories
+     WHERE id = ?
+       AND user_id = ?`
+  )
+    .bind(categoryId, userId)
+    .run();
+
+  return json({ ok: true });
+}
+
+async function createRevelationQaItem(
+  request: Request,
+  env: Env,
+  userId: string
+): Promise<Response> {
+  const body = await readJson<RevelationQaItemCreateInput>(request);
+  const secondaryId = cleanRevelationQaId(body.secondaryId);
+  if (!(await findRevelationQaSecondaryCategory(env, userId, secondaryId))) {
+    return error("请先选择有效的二级分类。", 400);
+  }
+
+  const question = cleanRevelationQaText(body.question, 500);
+  const answers = cleanRevelationQaTextArray(body.answers, 16, 4000);
+  if (!question) {
+    return error("问题不能为空。", 400);
+  }
+  if (answers.length === 0) {
+    return error("至少需要填写一个答案。", 400);
+  }
+
+  const now = new Date().toISOString();
+  const item: RevelationQaItem = {
+    id: crypto.randomUUID(),
+    secondaryId,
+    question,
+    answers,
+    tags: cleanRevelationQaTags(body.tags),
+    source: cleanRevelationQaText(body.source, 160),
+    sortOrder: cleanRevelationQaSortOrder(body.sortOrder, Date.now()),
+    createdAt: now,
+    updatedAt: now
+  };
+
+  await env.DB.prepare(
+    `INSERT INTO revelation_qa_items
+       (id, user_id, secondary_id, question, answers, tags, source, sort_order, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+  )
+    .bind(
+      item.id,
+      userId,
+      item.secondaryId,
+      item.question,
+      JSON.stringify(item.answers),
+      JSON.stringify(item.tags),
+      item.source,
+      item.sortOrder,
+      item.createdAt,
+      item.updatedAt
+    )
+    .run();
+
+  return json(item, 201);
+}
+
+async function updateRevelationQaItem(
+  request: Request,
+  env: Env,
+  userId: string,
+  itemId: string
+): Promise<Response> {
+  const current = await findRevelationQaItem(env, userId, itemId);
+  if (!current) {
+    return error("问答不存在。", 404);
+  }
+
+  const body = await readJson<RevelationQaItemUpdateInput>(request);
+  const currentItem = rowToRevelationQaItem(current);
+  const secondaryId =
+    body.secondaryId === undefined
+      ? currentItem.secondaryId
+      : cleanRevelationQaId(body.secondaryId);
+  if (!(await findRevelationQaSecondaryCategory(env, userId, secondaryId))) {
+    return error("请先选择有效的二级分类。", 400);
+  }
+
+  const question =
+    body.question === undefined ? currentItem.question : cleanRevelationQaText(body.question, 500);
+  const answers =
+    body.answers === undefined
+      ? currentItem.answers
+      : cleanRevelationQaTextArray(body.answers, 16, 4000);
+  if (!question) {
+    return error("问题不能为空。", 400);
+  }
+  if (answers.length === 0) {
+    return error("至少需要填写一个答案。", 400);
+  }
+
+  const next: RevelationQaItem = {
+    ...currentItem,
+    secondaryId,
+    question,
+    answers,
+    tags: body.tags === undefined ? currentItem.tags : cleanRevelationQaTags(body.tags),
+    source:
+      body.source === undefined ? currentItem.source : cleanRevelationQaText(body.source, 160),
+    sortOrder:
+      body.sortOrder === undefined
+        ? currentItem.sortOrder
+        : cleanRevelationQaSortOrder(body.sortOrder, currentItem.sortOrder),
+    updatedAt: new Date().toISOString()
+  };
+
+  await env.DB.prepare(
+    `UPDATE revelation_qa_items
+     SET secondary_id = ?,
+         question = ?,
+         answers = ?,
+         tags = ?,
+         source = ?,
+         sort_order = ?,
+         updated_at = ?
+     WHERE id = ?
+       AND user_id = ?`
+  )
+    .bind(
+      next.secondaryId,
+      next.question,
+      JSON.stringify(next.answers),
+      JSON.stringify(next.tags),
+      next.source,
+      next.sortOrder,
+      next.updatedAt,
+      itemId,
+      userId
+    )
+    .run();
+
+  return json(next);
+}
+
+async function deleteRevelationQaItem(
+  env: Env,
+  userId: string,
+  itemId: string
+): Promise<Response> {
+  const current = await findRevelationQaItem(env, userId, itemId);
+  if (!current) {
+    return error("问答不存在。", 404);
+  }
+
+  await env.DB.prepare(
+    `DELETE FROM revelation_qa_items
+     WHERE id = ?
+       AND user_id = ?`
+  )
+    .bind(itemId, userId)
+    .run();
+
+  return json({ ok: true });
+}
+
+async function findRevelationQaPrimaryCategory(
+  env: Env,
+  userId: string,
+  categoryId: string
+): Promise<DbRevelationQaPrimaryCategoryRow | null> {
+  const id = cleanRevelationQaId(categoryId);
+  if (!id) {
+    return null;
+  }
+
+  return env.DB.prepare(
+    `SELECT id,
+            name,
+            COALESCE(description, '') AS description,
+            sort_order AS sortOrder,
+            created_at AS createdAt,
+            updated_at AS updatedAt
+     FROM revelation_qa_primary_categories
+     WHERE id = ?
+       AND user_id = ?`
+  )
+    .bind(id, userId)
+    .first<DbRevelationQaPrimaryCategoryRow>();
+}
+
+async function findRevelationQaSecondaryCategory(
+  env: Env,
+  userId: string,
+  categoryId: string
+): Promise<DbRevelationQaSecondaryCategoryRow | null> {
+  const id = cleanRevelationQaId(categoryId);
+  if (!id) {
+    return null;
+  }
+
+  return env.DB.prepare(
+    `SELECT id,
+            primary_id AS primaryId,
+            name,
+            COALESCE(description, '') AS description,
+            sort_order AS sortOrder,
+            created_at AS createdAt,
+            updated_at AS updatedAt
+     FROM revelation_qa_secondary_categories
+     WHERE id = ?
+       AND user_id = ?`
+  )
+    .bind(id, userId)
+    .first<DbRevelationQaSecondaryCategoryRow>();
+}
+
+async function findRevelationQaItem(
+  env: Env,
+  userId: string,
+  itemId: string
+): Promise<DbRevelationQaItemRow | null> {
+  const id = cleanRevelationQaId(itemId);
+  if (!id) {
+    return null;
+  }
+
+  return env.DB.prepare(
+    `SELECT id,
+            secondary_id AS secondaryId,
+            question,
+            answers,
+            tags,
+            COALESCE(source, '') AS source,
+            sort_order AS sortOrder,
+            created_at AS createdAt,
+            updated_at AS updatedAt
+     FROM revelation_qa_items
+     WHERE id = ?
+       AND user_id = ?`
+  )
+    .bind(id, userId)
+    .first<DbRevelationQaItemRow>();
+}
+
+function rowToRevelationQaPrimaryCategory(
+  row: DbRevelationQaPrimaryCategoryRow
+): RevelationQaPrimaryCategory {
+  return {
+    id: row.id,
+    name: row.name,
+    description: row.description ?? "",
+    sortOrder: Number(row.sortOrder) || 0,
+    createdAt: row.createdAt,
+    updatedAt: row.updatedAt
+  };
+}
+
+function rowToRevelationQaSecondaryCategory(
+  row: DbRevelationQaSecondaryCategoryRow
+): RevelationQaSecondaryCategory {
+  return {
+    id: row.id,
+    primaryId: row.primaryId,
+    name: row.name,
+    description: row.description ?? "",
+    sortOrder: Number(row.sortOrder) || 0,
+    createdAt: row.createdAt,
+    updatedAt: row.updatedAt
+  };
+}
+
+function rowToRevelationQaItem(row: DbRevelationQaItemRow): RevelationQaItem {
+  return {
+    id: row.id,
+    secondaryId: row.secondaryId,
+    question: row.question,
+    answers: parseRevelationQaStringArray(row.answers),
+    tags: parseRevelationQaStringArray(row.tags),
+    source: row.source ?? "",
+    sortOrder: Number(row.sortOrder) || 0,
+    createdAt: row.createdAt,
+    updatedAt: row.updatedAt
+  };
+}
+
+function cleanRevelationQaId(value: unknown): string {
+  return typeof value === "string" ? value.trim().slice(0, 80) : "";
+}
+
+function cleanRevelationQaText(value: unknown, maxLength: number): string {
+  return typeof value === "string" ? value.trim().slice(0, maxLength) : "";
+}
+
+function cleanRevelationQaSortOrder(value: unknown, fallback: number): number {
+  const sortOrder = Number(value);
+  return Number.isFinite(sortOrder) ? Math.trunc(sortOrder) : fallback;
+}
+
+function cleanRevelationQaPageLimit(value: unknown): number {
+  const limit = Number(value);
+  if (!Number.isFinite(limit)) {
+    return 30;
+  }
+
+  return Math.max(1, Math.min(80, Math.trunc(limit)));
+}
+
+function cleanRevelationQaPageOffset(value: unknown): number {
+  const offset = Number(value);
+  if (!Number.isFinite(offset)) {
+    return 0;
+  }
+
+  return Math.max(0, Math.trunc(offset));
+}
+
+function cleanRevelationQaTags(value: unknown): string[] {
+  return Array.from(new Set(cleanRevelationQaTextArray(value, 12, 40)));
+}
+
+function cleanRevelationQaTextArray(
+  value: unknown,
+  maxItems: number,
+  maxLength: number
+): string[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return value
+    .map((item) => cleanRevelationQaText(item, maxLength))
+    .filter(Boolean)
+    .slice(0, maxItems);
+}
+
+function parseRevelationQaStringArray(value: string): string[] {
+  try {
+    const parsed = JSON.parse(value);
+    return cleanRevelationQaTextArray(parsed, 64, 4000);
+  } catch {
+    return [];
+  }
 }
 
 async function cleanBibleNoteInput(
@@ -3452,6 +4493,18 @@ async function deleteAllUserResources(env: Env, userId: string): Promise<void> {
     .bind(userId)
     .run();
   await env.DB.prepare("DELETE FROM bible_notes WHERE user_id = ?")
+    .bind(userId)
+    .run();
+  await env.DB.prepare("DELETE FROM revelation_qa_items WHERE user_id = ?")
+    .bind(userId)
+    .run();
+  await env.DB.prepare("DELETE FROM revelation_qa_secondary_categories WHERE user_id = ?")
+    .bind(userId)
+    .run();
+  await env.DB.prepare("DELETE FROM revelation_qa_primary_categories WHERE user_id = ?")
+    .bind(userId)
+    .run();
+  await env.DB.prepare("DELETE FROM ten_minute_reader_settings WHERE user_id = ?")
     .bind(userId)
     .run();
   await env.DB.prepare("DELETE FROM notes WHERE user_id = ?")
