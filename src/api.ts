@@ -12,6 +12,8 @@ import type {
   LoginInput,
   Note,
   NoteCreateInput,
+  NoteMoveInput,
+  NoteMoveResult,
   NoteSummary,
   NoteUpdateInput,
   RegisterInput,
@@ -92,6 +94,13 @@ export async function updateNote(
   input: NoteUpdateInput
 ): Promise<Note> {
   return apiRequest(`/api/notes/${encodeURIComponent(id)}`, {
+    method: "PATCH",
+    body: JSON.stringify(input)
+  });
+}
+
+export async function moveNote(id: string, input: NoteMoveInput): Promise<NoteMoveResult> {
+  return apiRequest(`/api/notes/${encodeURIComponent(id)}/move`, {
     method: "PATCH",
     body: JSON.stringify(input)
   });

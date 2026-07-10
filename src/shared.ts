@@ -49,6 +49,15 @@ export type NoteUpdateInput = {
   isArchived?: boolean;
 };
 
+export type NoteMoveInput = {
+  parentId: string | null;
+  sortOrder: number;
+};
+
+export type NoteMoveResult = NoteSummary & {
+  previousParentId: string | null;
+};
+
 export type BibleNote = {
   id: string;
   bookName: string;

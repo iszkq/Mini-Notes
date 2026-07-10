@@ -15,6 +15,8 @@ import type {
   NoteBlock,
   NoteCreateInput,
   NoteKind,
+  NoteMoveInput,
+  NoteMoveResult,
   NoteSummary,
   NoteTitleSize,
   NoteUpdateInput,
@@ -455,6 +457,15 @@ async function handleApi(
       request.method === "DELETE"
     ) {
       return disableNoteShare(env, user.id, segments[1]);
+    }
+
+    if (
+      segments[0] === "notes" &&
+      segments[1] &&
+      segments[2] === "move" &&
+      request.method === "PATCH"
+    ) {
+      return moveNote(request, env, user.id, segments[1]);
     }
 
     if (
@@ -2718,13 +2729,13 @@ async function updateNote(
      SET title = ?,
          icon = ?,
          title_size = ?,
-         parent_id = ?,
+         parent_id = CASE WHEN ? = 1 THEN ? ELSE parent_id END,
          content = ?,
          content_key = ?,
          content_size = ?,
          summary = ?,
          is_archived = ?,
-         sort_order = ?,
+         sort_order = CASE WHEN ? = 1 THEN ? ELSE sort_order END,
          updated_at = ?
      WHERE id = ? AND user_id = ?`
   )
@@ -2732,12 +2743,14 @@ async function updateNote(
       next.title,
       next.icon,
       next.titleSize,
+      body.parentId === undefined ? 0 : 1,
       next.parentId,
       storedContent.dbContent,
       storedContent.contentKey,
       storedContent.contentSize,
       nextSummary,
       next.isArchived ? 1 : 0,
+      body.sortOrder === undefined ? 0 : 1,
       next.sortOrder,
       next.updatedAt,
       id,
@@ -2768,6 +2781,52 @@ async function updateNote(
   }
 
   return json(next);
+}
+
+async function moveNote(
+  request: Request,
+  env: Env,
+  userId: string,
+  id: string
+): Promise<Response> {
+  const current = await env.DB.prepare(
+    `SELECT ${NOTE_COLUMNS}
+     FROM notes
+     WHERE id = ? AND user_id = ? AND is_archived = 0`
+  )
+    .bind(id, userId)
+    .first<DbNoteRow>();
+
+  if (!current) {
+    return error("页面不存在。", 404);
+  }
+
+  const body = await readJson<NoteMoveInput>(request);
+  const parentId = await resolveParentIdForUser(
+    env,
+    userId,
+    cleanNoteKind(current.kind),
+    body.parentId,
+    current.id
+  );
+  const sortOrder = cleanSortOrder(body.sortOrder, Number(current.sortOrder));
+  const updatedAt = new Date().toISOString();
+
+  await env.DB.prepare(
+    `UPDATE notes
+     SET parent_id = ?, sort_order = ?, updated_at = ?
+     WHERE id = ? AND user_id = ?`
+  )
+    .bind(parentId, sortOrder, updatedAt, id, userId)
+    .run();
+
+  return json({
+    ...rowToSummary(current),
+    parentId,
+    previousParentId: current.parentId,
+    sortOrder,
+    updatedAt
+  } satisfies NoteMoveResult);
 }
 
 async function enableNoteShare(
@@ -2865,15 +2924,13 @@ async function deleteNoteRecord(
   const currentContent =
     cleanNoteKind(current.kind) === "page" ? await readNoteContent(env, current, userId) : [];
 
-  if (cleanNoteKind(current.kind) === "category") {
-    await env.DB.prepare(
-      `UPDATE notes
-       SET parent_id = NULL, updated_at = ?
-       WHERE user_id = ? AND parent_id = ? AND is_archived = 0`
-    )
-      .bind(new Date().toISOString(), userId, id)
-      .run();
-  }
+  await env.DB.prepare(
+    `UPDATE notes
+     SET parent_id = NULL, updated_at = ?
+     WHERE user_id = ? AND parent_id = ? AND is_archived = 0`
+  )
+    .bind(new Date().toISOString(), userId, id)
+    .run();
 
   await env.DB.prepare(
     "DELETE FROM notes WHERE id = ? AND user_id = ?"
@@ -4253,16 +4310,16 @@ async function resolveParentIdForUser(
     .first<{ id: string; kind: NoteKind; parentId: string | null }>();
 
   if (!parent) {
-    return null;
+    throw new HttpError("目标位置不存在或已被删除。", 400);
   }
 
   const parentKind = cleanNoteKind(parent.kind);
   if (kind === "category" && parentKind !== "category") {
-    return null;
+    throw new HttpError("分类只能放在其他分类中。", 400);
   }
 
   if (kind === "page" && parentKind !== "category" && parentKind !== "page") {
-    return null;
+    throw new HttpError("页面不能放到这个位置。", 400);
   }
 
   if (noteId && parentKind === kind && (await wouldCreateParentCycle(env, userId, noteId, parent.id))) {
