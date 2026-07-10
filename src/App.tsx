@@ -34,11 +34,13 @@ import {
 } from "lucide-react";
 import {
   Fragment,
+  Suspense,
   type CSSProperties,
   type DragEvent as ReactDragEvent,
   type FormEvent,
   type MouseEvent as ReactMouseEvent,
   type ReactNode,
+  lazy,
   useCallback,
   useEffect,
   useMemo,
@@ -63,21 +65,43 @@ import {
   updateNote
 } from "./api";
 import { collectNoteComments } from "./comments";
-import { AdminPanel } from "./components/AdminPanel";
-import { BibleReader } from "./components/BibleReader";
-import { EmojiPackPicker } from "./components/EmojiPackPicker";
-import { ExportPanel } from "./components/ExportPanel";
 import { NoteIcon } from "./components/NoteIcon";
-import { NotebookEditor } from "./components/NotebookEditor";
-import { RevelationQaLibrary } from "./components/RevelationQaLibrary";
-import { TenMinuteReader } from "./components/TenMinuteReader";
 import { isImageIcon, type EmojiItem } from "./emojiPacks";
-import { openExportWindow, renderNotesToExportWindow } from "./export";
+import { openExportWindow } from "./exportWindow";
 import type { AuthUser, Note, NoteBlock, NoteSummary, NoteTitleSize } from "./shared";
+
+const AdminPanel = lazy(() =>
+  import("./components/AdminPanel").then((module) => ({ default: module.AdminPanel }))
+);
+const BibleReader = lazy(() =>
+  import("./components/BibleReader").then((module) => ({ default: module.BibleReader }))
+);
+const EmojiPackPicker = lazy(() =>
+  import("./components/EmojiPackPicker").then((module) => ({ default: module.EmojiPackPicker }))
+);
+const ExportPanel = lazy(() =>
+  import("./components/ExportPanel").then((module) => ({ default: module.ExportPanel }))
+);
+const NotebookEditor = lazy(() =>
+  import("./components/NotebookEditor").then((module) => ({ default: module.NotebookEditor }))
+);
+const RevelationQaLibrary = lazy(() =>
+  import("./components/RevelationQaLibrary").then((module) => ({
+    default: module.RevelationQaLibrary
+  }))
+);
+const TenMinuteReader = lazy(() =>
+  import("./components/TenMinuteReader").then((module) => ({ default: module.TenMinuteReader }))
+);
 
 type SaveStatus = "idle" | "saving" | "saved" | "error";
 type AuthMode = "login" | "register";
 type WorkspaceView = "notes" | "bible" | "ten-minute" | "revelation-qa" | "admin";
+
+type NotesBrowserLocation =
+  | { kind: "page" }
+  | { kind: "root" }
+  | { kind: "category"; categoryId: string };
 
 type PagePreset = {
   value: string;
@@ -101,6 +125,12 @@ type NoteDropTarget = {
   parentId: string | null;
   beforeId: string | null;
   position: "before" | "inside" | "after" | "append";
+};
+
+type DragAutoScrollState = {
+  list: HTMLElement;
+  velocity: number;
+  lastFrameAt: number | null;
 };
 
 type PageSnapshot = Pick<Note, "title" | "icon" | "titleSize" | "content">;
@@ -215,6 +245,9 @@ function App() {
   const [publicPending, setPublicPending] = useState(isPublicView);
   const [publicError, setPublicError] = useState<string | null>(null);
   const [workspaceView, setWorkspaceView] = useState<WorkspaceView>("notes");
+  const [notesBrowserLocation, setNotesBrowserLocation] = useState<NotesBrowserLocation>({
+    kind: "page"
+  });
   const [sidebarCollapsed, setSidebarCollapsed] = useState(() => {
     if (typeof window === "undefined") {
       return false;
@@ -226,6 +259,10 @@ function App() {
   const [editingCategoryId, setEditingCategoryId] = useState<string | null>(null);
   const [editingCategoryTitle, setEditingCategoryTitle] = useState("");
   const revisionRef = useRef(0);
+  const authSessionEpochRef = useRef(0);
+  const navigationIntentRef = useRef(0);
+  const loadNoteRequestRef = useRef(0);
+  const publicNoteRequestRef = useRef(0);
   const selectedIdRef = useRef<string | null>(null);
   const draftRef = useRef<Note | null>(null);
   const lastPageSnapshotRef = useRef<PageSnapshot | null>(null);
@@ -248,7 +285,13 @@ function App() {
   const suppressNoteClickRef = useRef(false);
   const dragExpandTimerRef = useRef<number | null>(null);
   const dragExpandTargetRef = useRef<string | null>(null);
+  const noteListRef = useRef<HTMLElement | null>(null);
+  const dragAutoScrollFrameRef = useRef<number | null>(null);
+  const dragAutoScrollStateRef = useRef<DragAutoScrollState | null>(null);
   const notesRef = useRef<NoteSummary[]>([]);
+  const noteSaveQueueRef = useRef<Promise<boolean>>(Promise.resolve(true));
+  const noteSavePendingCountRef = useRef(0);
+  const noteSaveRequestsRef = useRef<Map<string, Promise<boolean>>>(new Map());
   const noteMoveQueuesRef = useRef<Map<string, Promise<void>>>(new Map());
   const noteMoveVersionsRef = useRef<Map<string, number>>(new Map());
   const [sidebarGroupLimits, setSidebarGroupLimits] = useState<Record<string, number>>({});
@@ -329,14 +372,19 @@ function App() {
   }, [sidebarCollapsed]);
 
   const handleLoggedOut = useCallback((nextHasUsers = true) => {
+    authSessionEpochRef.current += 1;
+    navigationIntentRef.current += 1;
+    loadNoteRequestRef.current += 1;
     setSessionUser(null);
     setHasUsers(nextHasUsers);
     setAuthMode("login");
     setAuthPassword("");
     setAuthInviteCode("");
     setIsLocked(true);
+    setIsLoadingNote(false);
     setNotes([]);
     draftRef.current = null;
+    selectedIdRef.current = null;
     lastPageSnapshotRef.current = null;
     setDraft(null);
     setSelectedId(null);
@@ -348,6 +396,7 @@ function App() {
     setExportPending(false);
     setExportSelection([]);
     setWorkspaceView("notes");
+    setNotesBrowserLocation({ kind: "page" });
     setCollapsedCategoryIds([]);
     setEditingCategoryId(null);
     setEditingCategoryTitle("");
@@ -361,16 +410,18 @@ function App() {
 
   const loadNote = useCallback(
     async (id: string) => {
-      selectedIdRef.current = id;
-      setSelectedId(id);
+      const requestId = loadNoteRequestRef.current + 1;
+      loadNoteRequestRef.current = requestId;
       setIsLoadingNote(true);
       setAppError(null);
       setShareOpen(false);
       setShareCopied(false);
 
-      try {
+        try {
         const note = normalizeNote(await getNote(id));
-        if (selectedIdRef.current === id) {
+        if (loadNoteRequestRef.current === requestId) {
+          selectedIdRef.current = id;
+          setSelectedId(id);
           draftRef.current = note;
           lastPageSnapshotRef.current = clonePageSnapshot(note);
           setDraft(note);
@@ -378,7 +429,11 @@ function App() {
           setSaveStatus("idle");
           resetPageHistory(note.id);
         }
-      } catch (error) {
+        } catch (error) {
+        if (loadNoteRequestRef.current !== requestId) {
+          return;
+        }
+
         if (error instanceof ApiError && error.status === 401) {
           handleLoggedOut(hasUsers);
           setAppError("登录状态已失效，请重新登录。");
@@ -386,7 +441,7 @@ function App() {
           setAppError("页面加载失败。");
         }
       } finally {
-        if (selectedIdRef.current === id) {
+        if (loadNoteRequestRef.current === requestId) {
           setIsLoadingNote(false);
         }
       }
@@ -423,7 +478,9 @@ function App() {
       if (nextSelected) {
         await loadNote(nextSelected);
       } else {
+        selectedIdRef.current = null;
         setSelectedId(null);
+        setNotesBrowserLocation({ kind: "root" });
         draftRef.current = null;
         lastPageSnapshotRef.current = null;
         setDraft(null);
@@ -452,20 +509,32 @@ function App() {
   }, [bootstrap, isPublicView]);
 
   const loadPublicNote = useCallback(async (shareToken: string, noteId?: string | null) => {
+    const requestId = publicNoteRequestRef.current + 1;
+    publicNoteRequestRef.current = requestId;
     setPublicPending(true);
     setPublicError(null);
 
     try {
       const note = normalizeNote(await getPublicNote(shareToken, noteId));
+      if (publicNoteRequestRef.current !== requestId) {
+        return;
+      }
+
       setPublicNote(note);
     } catch (error) {
+      if (publicNoteRequestRef.current !== requestId) {
+        return;
+      }
+
       if (error instanceof ApiError) {
         setPublicError(error.message);
       } else {
         setPublicError("分享页面暂时无法打开，请稍后重试。");
       }
     } finally {
-      setPublicPending(false);
+      if (publicNoteRequestRef.current === requestId) {
+        setPublicPending(false);
+      }
     }
   }, []);
 
@@ -622,13 +691,70 @@ function App() {
     [sortedRecords]
   );
 
-  const noteBreadcrumbs = useMemo(
-    () =>
-      draft
-        ? buildNoteBreadcrumb(normalizeNoteSummary(toSummary(draft)), recordsById)
-        : [],
-    [draft, recordsById]
+  const draftBreadcrumbRecord = useMemo(
+    () => (draft ? normalizeNoteSummary(toSummary(draft)) : null),
+    [
+      draft?.createdAt,
+      draft?.icon,
+      draft?.id,
+      draft?.isArchived,
+      draft?.kind,
+      draft?.parentId,
+      draft?.sharedAt,
+      draft?.shareToken,
+      draft?.sortOrder,
+      draft?.title,
+      draft?.titleSize,
+      draft?.updatedAt
+    ]
   );
+  const noteBreadcrumbs = useMemo(
+    () => (draftBreadcrumbRecord ? buildNoteBreadcrumb(draftBreadcrumbRecord, recordsById) : []),
+    [draftBreadcrumbRecord, recordsById]
+  );
+
+  const isNotesOverview = notesBrowserLocation.kind !== "page";
+  const overviewCategory = useMemo(
+    () =>
+      notesBrowserLocation.kind === "category"
+        ? categoriesById.get(notesBrowserLocation.categoryId) ?? null
+        : null,
+    [categoriesById, notesBrowserLocation]
+  );
+  const overviewParentId = overviewCategory?.id ?? null;
+  const overviewCategories = useMemo(
+    () => categoriesByParent.get(overviewParentId) ?? [],
+    [categoriesByParent, overviewParentId]
+  );
+  const allPagesByParent = useMemo(() => {
+    const groups = new Map<string | null, NoteSummary[]>();
+    sortedNotes.forEach((note) => {
+      const parentId = note.parentId ?? null;
+      const current = groups.get(parentId) ?? [];
+      current.push(note);
+      groups.set(parentId, current);
+    });
+    return groups;
+  }, [sortedNotes]);
+  const overviewPages = useMemo(
+    () => allPagesByParent.get(overviewParentId) ?? [],
+    [allPagesByParent, overviewParentId]
+  );
+  const overviewBreadcrumbs = useMemo(
+    () => (overviewCategory ? buildNoteBreadcrumb(overviewCategory, recordsById) : []),
+    [overviewCategory, recordsById]
+  );
+  const breadcrumbRecords = isNotesOverview ? overviewBreadcrumbs : noteBreadcrumbs;
+  const breadcrumbPathKey = breadcrumbRecords.map((record) => record.id).join("/");
+
+  useEffect(() => {
+    if (
+      notesBrowserLocation.kind === "category" &&
+      !categoriesById.has(notesBrowserLocation.categoryId)
+    ) {
+      setNotesBrowserLocation({ kind: "root" });
+    }
+  }, [categoriesById, notesBrowserLocation]);
 
   useEffect(() => {
     const breadcrumb = breadcrumbRef.current;
@@ -637,7 +763,7 @@ function App() {
     }
 
     breadcrumb.scrollLeft = breadcrumb.scrollWidth;
-  }, [noteBreadcrumbs]);
+  }, [breadcrumbPathKey]);
 
   const selectedCategory = useMemo(
     () => [...noteBreadcrumbs].reverse().find((record) => record.kind === "category") ?? null,
@@ -834,54 +960,135 @@ function App() {
   }, [draft?.shareToken]);
 
   const saveDraft = useCallback(
-    async (snapshot: Note, revision: number) => {
-      try {
-        setSaveStatus("saving");
-        const saved = normalizeNote(
-          await updateNote(snapshot.id, {
-            title: snapshot.title,
-            icon: snapshot.icon,
-            titleSize: snapshot.titleSize,
-            content: snapshot.content
-          })
-        );
-
-        const currentSummary = notesRef.current.find((note) => note.id === saved.id);
-        const positionSafeSaved: Note = {
-          ...saved,
-          parentId: currentSummary?.parentId ?? saved.parentId,
-          sortOrder: currentSummary?.sortOrder ?? saved.sortOrder
-        };
-        const nextNotes = updateSummary(notesRef.current, positionSafeSaved);
-        notesRef.current = nextNotes;
-        setNotes(nextNotes);
-        if (selectedIdRef.current === snapshot.id && revisionRef.current === revision) {
-          const currentDraft = draftRef.current;
-          const nextDraft = currentDraft
-            ? {
-                ...positionSafeSaved,
-                parentId: currentDraft.parentId,
-                sortOrder: currentDraft.sortOrder
-              }
-            : positionSafeSaved;
-          draftRef.current = nextDraft;
-          lastPageSnapshotRef.current = clonePageSnapshot(nextDraft);
-          setDraft(nextDraft);
-          setDirty(false);
-          setSaveStatus("saved");
-        }
-      } catch (error) {
-        if (error instanceof ApiError && error.status === 401) {
-          handleLoggedOut(hasUsers);
-          setAppError("登录状态已失效，请重新登录。");
-        } else {
-          setSaveStatus("error");
-          setAppError("自动保存失败。");
-        }
+    (snapshot: Note, revision: number): Promise<boolean> => {
+      const sessionEpoch = authSessionEpochRef.current;
+      const saveKey = `${sessionEpoch}:${snapshot.id}:${revision}`;
+      const existingSave = noteSaveRequestsRef.current.get(saveKey);
+      if (existingSave) {
+        return existingSave;
       }
+
+      const queuedSnapshot: Note = {
+        ...snapshot,
+        content: cloneNoteBlocks(snapshot.content)
+      };
+      const executeSave = async (): Promise<boolean> => {
+        if (authSessionEpochRef.current !== sessionEpoch) {
+          return false;
+        }
+
+        try {
+          setSaveStatus("saving");
+          const saved = normalizeNote(
+            await updateNote(queuedSnapshot.id, {
+              title: queuedSnapshot.title,
+              icon: queuedSnapshot.icon,
+              titleSize: queuedSnapshot.titleSize,
+              content: queuedSnapshot.content
+            })
+          );
+
+          if (authSessionEpochRef.current !== sessionEpoch) {
+            return false;
+          }
+
+          const currentSummary = notesRef.current.find((note) => note.id === saved.id);
+          const positionSafeSaved: Note = {
+            ...saved,
+            parentId: currentSummary?.parentId ?? saved.parentId,
+            sortOrder: currentSummary?.sortOrder ?? saved.sortOrder
+          };
+          const nextNotes = updateSummary(notesRef.current, positionSafeSaved);
+          notesRef.current = nextNotes;
+          setNotes(nextNotes);
+          const isCurrentRevision =
+            selectedIdRef.current !== queuedSnapshot.id || revisionRef.current === revision;
+          if (selectedIdRef.current === queuedSnapshot.id && isCurrentRevision) {
+            const currentDraft = draftRef.current;
+            const nextDraft = currentDraft
+              ? {
+                  ...positionSafeSaved,
+                  parentId: currentDraft.parentId,
+                  sortOrder: currentDraft.sortOrder
+                }
+              : positionSafeSaved;
+            draftRef.current = nextDraft;
+            lastPageSnapshotRef.current = clonePageSnapshot(nextDraft);
+            setDraft(nextDraft);
+            setDirty(false);
+            setSaveStatus("saved");
+            setAppError(null);
+          }
+          return isCurrentRevision;
+        } catch (error) {
+          if (error instanceof ApiError && error.status === 401) {
+            handleLoggedOut(hasUsers);
+            setAppError("登录状态已失效，请重新登录。");
+          } else {
+            setSaveStatus("error");
+            setAppError(error instanceof ApiError ? error.message : "自动保存失败。");
+          }
+          return false;
+        }
+      };
+
+      const pendingSave = noteSaveQueueRef.current.then(executeSave, executeSave);
+      noteSavePendingCountRef.current += 1;
+      const trackedSave = pendingSave.finally(() => {
+        noteSavePendingCountRef.current = Math.max(0, noteSavePendingCountRef.current - 1);
+        if (noteSaveRequestsRef.current.get(saveKey) === trackedSave) {
+          noteSaveRequestsRef.current.delete(saveKey);
+        }
+      });
+      noteSaveRequestsRef.current.set(saveKey, trackedSave);
+      noteSaveQueueRef.current = trackedSave;
+      return trackedSave;
     },
     [handleLoggedOut, hasUsers]
   );
+
+  useEffect(() => {
+    if (isLocked || isPublicView || typeof window === "undefined") {
+      return;
+    }
+
+    const flushCurrentDraft = () => {
+      if (!dirty) {
+        return;
+      }
+
+      const currentDraft = draftRef.current;
+      if (currentDraft) {
+        void saveDraft(currentDraft, revisionRef.current);
+      }
+    };
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === "hidden") {
+        flushCurrentDraft();
+      }
+    };
+    const handlePageHide = () => {
+      flushCurrentDraft();
+    };
+    const handleBeforeUnload = (event: BeforeUnloadEvent) => {
+      flushCurrentDraft();
+      if (!dirty && noteSavePendingCountRef.current === 0) {
+        return;
+      }
+
+      event.preventDefault();
+      event.returnValue = "";
+    };
+
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+    window.addEventListener("pagehide", handlePageHide);
+    window.addEventListener("beforeunload", handleBeforeUnload);
+    return () => {
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
+      window.removeEventListener("pagehide", handlePageHide);
+      window.removeEventListener("beforeunload", handleBeforeUnload);
+    };
+  }, [dirty, isLocked, isPublicView, saveDraft]);
 
   useEffect(() => {
     if (!draft || !dirty || isLocked) {
@@ -1142,18 +1349,29 @@ function App() {
 
   const selectNote = useCallback(
     async (id: string) => {
+      const navigationIntent = navigationIntentRef.current + 1;
+      navigationIntentRef.current = navigationIntent;
       setWorkspaceView("notes");
-      if (id === selectedId) {
+      if (id === draftRef.current?.id && !isLoadingNote) {
+        setNotesBrowserLocation({ kind: "page" });
         return;
       }
 
       if (draft && dirty) {
-        await saveDraft(draft, revisionRef.current);
+        const saved = await saveDraft(draft, revisionRef.current);
+        if (!saved) {
+          return;
+        }
       }
 
+      if (navigationIntentRef.current !== navigationIntent) {
+        return;
+      }
+
+      setNotesBrowserLocation({ kind: "page" });
       await loadNote(id);
     },
-    [dirty, draft, loadNote, saveDraft, selectedId]
+    [dirty, draft, isLoadingNote, loadNote, saveDraft]
   );
 
   const revealSidebarRecord = useCallback(
@@ -1190,6 +1408,33 @@ function App() {
       }, 80);
     },
     [recordsById]
+  );
+
+  const openNotesOverview = useCallback(
+    (categoryId: string | null = null) => {
+      navigationIntentRef.current += 1;
+      setWorkspaceView("notes");
+      setSidebarCollapsed(false);
+      setQuery("");
+      setShareOpen(false);
+      setShareCopied(false);
+      setFindReplaceOpen(false);
+      setCategoryMenuOpen(false);
+      setPageActionMenu(null);
+      setNotesBrowserLocation(
+        categoryId ? { kind: "category", categoryId } : { kind: "root" }
+      );
+
+      if (categoryId) {
+        revealSidebarRecord(categoryId);
+      }
+
+      const currentDraft = draftRef.current;
+      if (currentDraft && dirty) {
+        void saveDraft(currentDraft, revisionRef.current);
+      }
+    },
+    [dirty, revealSidebarRecord, saveDraft]
   );
 
   useEffect(() => {
@@ -1232,6 +1477,101 @@ function App() {
     dragExpandTargetRef.current = null;
   }, []);
 
+  const stopDragAutoScroll = useCallback(() => {
+    if (dragAutoScrollFrameRef.current !== null && typeof window !== "undefined") {
+      window.cancelAnimationFrame(dragAutoScrollFrameRef.current);
+    }
+
+    dragAutoScrollFrameRef.current = null;
+    dragAutoScrollStateRef.current = null;
+  }, []);
+
+  const updateDragAutoScroll = useCallback(
+    (clientY: number) => {
+      if (typeof window === "undefined") {
+        return;
+      }
+
+      const list = noteListRef.current;
+      if (!list || !list.isConnected || list.scrollHeight <= list.clientHeight) {
+        stopDragAutoScroll();
+        return;
+      }
+
+      const bounds = list.getBoundingClientRect();
+      if (clientY < bounds.top || clientY > bounds.bottom) {
+        stopDragAutoScroll();
+        return;
+      }
+
+      const edgeSize = Math.max(36, Math.min(72, bounds.height * 0.2));
+      const distanceFromTop = clientY - bounds.top;
+      const distanceFromBottom = bounds.bottom - clientY;
+      let velocity = 0;
+
+      if (distanceFromTop < edgeSize) {
+        const intensity = 1 - distanceFromTop / edgeSize;
+        velocity = -(220 + intensity * 780);
+      } else if (distanceFromBottom < edgeSize) {
+        const intensity = 1 - distanceFromBottom / edgeSize;
+        velocity = 220 + intensity * 780;
+      }
+
+      const maximumScrollTop = Math.max(0, list.scrollHeight - list.clientHeight);
+      if (
+        velocity === 0 ||
+        (velocity < 0 && list.scrollTop <= 0) ||
+        (velocity > 0 && list.scrollTop >= maximumScrollTop - 1)
+      ) {
+        stopDragAutoScroll();
+        return;
+      }
+
+      const currentState = dragAutoScrollStateRef.current;
+      if (currentState?.list === list) {
+        currentState.velocity = velocity;
+      } else {
+        dragAutoScrollStateRef.current = {
+          list,
+          velocity,
+          lastFrameAt: null
+        };
+      }
+
+      if (dragAutoScrollFrameRef.current !== null) {
+        return;
+      }
+
+      const scrollFrame = (frameAt: number) => {
+        const state = dragAutoScrollStateRef.current;
+        if (!state || !state.list.isConnected) {
+          dragAutoScrollFrameRef.current = null;
+          dragAutoScrollStateRef.current = null;
+          return;
+        }
+
+        const elapsed =
+          state.lastFrameAt === null
+            ? 16
+            : Math.min(40, Math.max(0, frameAt - state.lastFrameAt));
+        state.lastFrameAt = frameAt;
+        const previousScrollTop = state.list.scrollTop;
+        state.list.scrollTop += (state.velocity * elapsed) / 1000;
+
+        if (Math.abs(state.list.scrollTop - previousScrollTop) < 0.5) {
+          dragAutoScrollFrameRef.current = null;
+          dragAutoScrollStateRef.current = null;
+          return;
+        }
+
+        dragAutoScrollFrameRef.current = window.requestAnimationFrame(scrollFrame);
+      };
+
+      dragAutoScrollFrameRef.current = window.requestAnimationFrame(scrollFrame);
+    },
+    [stopDragAutoScroll]
+  );
+
   const scheduleCategoryAutoExpand = useCallback(
     (categoryId: string | null) => {
       if (
@@ -1260,6 +1600,29 @@ function App() {
   );
 
   useEffect(() => clearDragExpandTimer, [clearDragExpandTimer]);
+
+  useEffect(() => {
+    if (!draggedNoteId || typeof window === "undefined") {
+      stopDragAutoScroll();
+      return;
+    }
+
+    const handleWindowDragOver = (event: DragEvent) => updateDragAutoScroll(event.clientY);
+    const handleWindowDragStop = () => stopDragAutoScroll();
+
+    window.addEventListener("dragover", handleWindowDragOver, true);
+    window.addEventListener("dragend", handleWindowDragStop, true);
+    window.addEventListener("drop", handleWindowDragStop, true);
+    window.addEventListener("blur", handleWindowDragStop);
+
+    return () => {
+      window.removeEventListener("dragover", handleWindowDragOver, true);
+      window.removeEventListener("dragend", handleWindowDragStop, true);
+      window.removeEventListener("drop", handleWindowDragStop, true);
+      window.removeEventListener("blur", handleWindowDragStop);
+      stopDragAutoScroll();
+    };
+  }, [draggedNoteId, stopDragAutoScroll, updateDragAutoScroll]);
 
   const calculateDropSortOrder = useCallback(
     (parentId: string | null, beforeId: string | null, draggedId: string): number => {
@@ -1441,6 +1804,7 @@ function App() {
     (parentId: string | null, beforeId: string | null) => {
       const draggedId = draggedNoteIdRef.current;
       clearDragExpandTimer();
+      stopDragAutoScroll();
       draggedNoteIdRef.current = null;
       setDraggedNoteId(null);
       updateDropTarget(null);
@@ -1449,7 +1813,7 @@ function App() {
         queueNoteMove(draggedId, parentId, beforeId);
       }
     },
-    [clearDragExpandTimer, queueNoteMove, updateDropTarget]
+    [clearDragExpandTimer, queueNoteMove, stopDragAutoScroll, updateDropTarget]
   );
 
   const getNoteDropTarget = useCallback(
@@ -1522,6 +1886,7 @@ function App() {
     suppressNoteClickRef.current = true;
     updateDropTarget(null);
     clearDragExpandTimer();
+    stopDragAutoScroll();
     event.dataTransfer.effectAllowed = "move";
     event.dataTransfer.setData("text/plain", note.id);
     setNoteDragImage(event, note);
@@ -1529,6 +1894,7 @@ function App() {
 
   const handleDragEnd = () => {
     clearDragExpandTimer();
+    stopDragAutoScroll();
     draggedNoteIdRef.current = null;
     setDraggedNoteId(null);
     updateDropTarget(null);
@@ -1547,7 +1913,7 @@ function App() {
 
     event.preventDefault();
     event.stopPropagation();
-    autoScrollSidebar(event);
+    updateDragAutoScroll(event.clientY);
     const nextTarget = getNoteDropTarget(event, note);
     if (!nextTarget) {
       event.dataTransfer.dropEffect = "none";
@@ -1589,7 +1955,7 @@ function App() {
 
     event.preventDefault();
     event.stopPropagation();
-    autoScrollSidebar(event);
+    updateDragAutoScroll(event.clientY);
 
     if (parentId && isDescendantPage(parentId, draggedId)) {
       event.dataTransfer.dropEffect = "none";
@@ -1624,11 +1990,21 @@ function App() {
   };
 
   const createNewNote = useCallback(async (parentId: string | null = null) => {
+    const sessionEpoch = authSessionEpochRef.current;
+    const navigationIntent = navigationIntentRef.current + 1;
+    navigationIntentRef.current = navigationIntent;
     setWorkspaceView("notes");
     setSidebarCollapsed(false);
     setCategoryActionMenu(null);
     if (draft && dirty) {
-      await saveDraft(draft, revisionRef.current);
+      const saved = await saveDraft(draft, revisionRef.current);
+      if (!saved) {
+        return;
+      }
+    }
+
+    if (navigationIntentRef.current !== navigationIntent) {
+      return;
     }
 
     try {
@@ -1642,8 +2018,17 @@ function App() {
           content: []
         })
       );
+      if (authSessionEpochRef.current !== sessionEpoch) {
+        return;
+      }
+
       setNotes((current) => [normalizeNoteSummary(toSummary(created)), ...current]);
+      if (navigationIntentRef.current !== navigationIntent) {
+        return;
+      }
+
       revealSidebarRecord(created.id, parentId);
+      setNotesBrowserLocation({ kind: "page" });
       await loadNote(created.id);
     } catch (error) {
       if (error instanceof ApiError && error.status === 401) {
@@ -1699,11 +2084,21 @@ function App() {
   );
 
   const createCategory = useCallback(async (parentId: string | null = null) => {
+    const sessionEpoch = authSessionEpochRef.current;
+    const navigationIntent = navigationIntentRef.current + 1;
+    navigationIntentRef.current = navigationIntent;
     setWorkspaceView("notes");
     setSidebarCollapsed(false);
     setCategoryActionMenu(null);
     if (draft && dirty) {
-      await saveDraft(draft, revisionRef.current);
+      const saved = await saveDraft(draft, revisionRef.current);
+      if (!saved) {
+        return;
+      }
+    }
+
+    if (navigationIntentRef.current !== navigationIntent) {
+      return;
     }
 
     try {
@@ -1716,7 +2111,15 @@ function App() {
           content: []
         })
       );
+      if (authSessionEpochRef.current !== sessionEpoch) {
+        return;
+      }
+
       setNotes((current) => [normalizeNoteSummary(toSummary(created)), ...current]);
+      if (navigationIntentRef.current !== navigationIntent) {
+        return;
+      }
+
       setCollapsedCategoryIds((current) =>
         current.filter((id) => id !== created.id && id !== parentId)
       );
@@ -1738,29 +2141,50 @@ function App() {
       return;
     }
 
+    const sessionEpoch = authSessionEpochRef.current;
+    const actionIntent = navigationIntentRef.current + 1;
+    navigationIntentRef.current = actionIntent;
     const archivedSummary = normalizeNoteSummary(toSummary(draft));
+    const archivedId = draft.id;
     const previousParentId = draft.parentId ?? null;
 
     try {
-      await deleteNote(draft.id);
-      const remaining = notes
-        .filter((note) => note.id !== draft.id)
-        .map((note) => (note.parentId === draft.id ? { ...note, parentId: null } : note));
-      setNotes(remaining);
-      draftRef.current = null;
-      lastPageSnapshotRef.current = null;
-      setDraft(null);
-      setSelectedId(null);
-      setShareOpen(false);
-      setShareCopied(false);
-      setExportOpen(false);
+      await deleteNote(archivedId);
+      if (authSessionEpochRef.current !== sessionEpoch) {
+        return;
+      }
 
-      const nextPageId = getFirstPageId(remaining);
-      if (nextPageId) {
-        await loadNote(nextPageId);
-      } else {
+      const remaining = notesRef.current
+        .filter((note) => note.id !== archivedId)
+        .map((note) => (note.parentId === archivedId ? { ...note, parentId: null } : note));
+      notesRef.current = remaining;
+      setNotes(remaining);
+
+      const wasSelected = selectedIdRef.current === archivedId;
+      if (wasSelected) {
+        revisionRef.current += 1;
+        loadNoteRequestRef.current += 1;
+        selectedIdRef.current = null;
+        draftRef.current = null;
+        lastPageSnapshotRef.current = null;
+        setDraft(null);
+        setSelectedId(null);
+        resetPageHistory(null);
+        setShareOpen(false);
+        setShareCopied(false);
+        setExportOpen(false);
         setDirty(false);
         setSaveStatus("idle");
+      }
+
+      if (navigationIntentRef.current === actionIntent && wasSelected) {
+        const nextPageId = getFirstPageId(remaining);
+        if (nextPageId) {
+          setNotesBrowserLocation({ kind: "page" });
+          await loadNote(nextPageId);
+        } else {
+          setNotesBrowserLocation({ kind: "root" });
+        }
       }
 
       try {
@@ -1781,8 +2205,8 @@ function App() {
     handleLoggedOut,
     hasUsers,
     loadNote,
-    notes,
     reportPageLinkSyncError,
+    resetPageHistory,
     syncParentPageLink
   ]);
 
@@ -1797,7 +2221,10 @@ function App() {
       }
 
       if (draft && dirty) {
-        await saveDraft(draft, revisionRef.current);
+        const saved = await saveDraft(draft, revisionRef.current);
+        if (!saved) {
+          return;
+        }
       }
 
       try {
@@ -1866,6 +2293,13 @@ function App() {
   };
 
   const logoutWorkspace = async () => {
+    if (draft && dirty) {
+      const saved = await saveDraft(draft, revisionRef.current);
+      if (!saved) {
+        return;
+      }
+    }
+
     try {
       await logout();
     } finally {
@@ -1998,15 +2432,42 @@ function App() {
       return;
     }
 
+    const sessionEpoch = authSessionEpochRef.current;
+    const targetId = draft.id;
     setSharePending(true);
     setAppError(null);
 
     try {
-      const shared = normalizeNote(await enableShare(draft.id));
-      setDraft(shared);
-      setNotes((current) => updateSummary(current, shared));
-      setShareOpen(true);
-      setShareCopied(false);
+      const shared = normalizeNote(await enableShare(targetId));
+      if (authSessionEpochRef.current !== sessionEpoch) {
+        return;
+      }
+
+      const nextNotes = notesRef.current.map((note) =>
+        note.id === targetId
+          ? {
+              ...note,
+              shareToken: shared.shareToken,
+              sharedAt: shared.sharedAt,
+              updatedAt: shared.updatedAt
+            }
+          : note
+      );
+      notesRef.current = nextNotes;
+      setNotes(nextNotes);
+
+      if (selectedIdRef.current === targetId && draftRef.current?.id === targetId) {
+        const nextDraft = {
+          ...draftRef.current,
+          shareToken: shared.shareToken,
+          sharedAt: shared.sharedAt,
+          updatedAt: shared.updatedAt
+        };
+        draftRef.current = nextDraft;
+        setDraft(nextDraft);
+        setShareOpen(true);
+        setShareCopied(false);
+      }
     } catch (error) {
       if (error instanceof ApiError && error.status === 401) {
         handleLoggedOut(hasUsers);
@@ -2026,14 +2487,41 @@ function App() {
       return;
     }
 
+    const sessionEpoch = authSessionEpochRef.current;
+    const targetId = draft.id;
     setSharePending(true);
     setAppError(null);
 
     try {
-      const unshared = normalizeNote(await disableShare(draft.id));
-      setDraft(unshared);
-      setNotes((current) => updateSummary(current, unshared));
-      setShareCopied(false);
+      const unshared = normalizeNote(await disableShare(targetId));
+      if (authSessionEpochRef.current !== sessionEpoch) {
+        return;
+      }
+
+      const nextNotes = notesRef.current.map((note) =>
+        note.id === targetId
+          ? {
+              ...note,
+              shareToken: unshared.shareToken,
+              sharedAt: unshared.sharedAt,
+              updatedAt: unshared.updatedAt
+            }
+          : note
+      );
+      notesRef.current = nextNotes;
+      setNotes(nextNotes);
+
+      if (selectedIdRef.current === targetId && draftRef.current?.id === targetId) {
+        const nextDraft = {
+          ...draftRef.current,
+          shareToken: unshared.shareToken,
+          sharedAt: unshared.sharedAt,
+          updatedAt: unshared.updatedAt
+        };
+        draftRef.current = nextDraft;
+        setDraft(nextDraft);
+        setShareCopied(false);
+      }
     } catch (error) {
       if (error instanceof ApiError && error.status === 401) {
         handleLoggedOut(hasUsers);
@@ -2109,6 +2597,7 @@ function App() {
         })
       );
 
+      const { renderNotesToExportWindow } = await import("./export");
       renderNotesToExportWindow(exportWindow, notesToExport);
       setExportOpen(false);
     } catch (error) {
@@ -2165,6 +2654,7 @@ function App() {
   };
 
   const togglePageShare = async (note: NoteSummary) => {
+    const sessionEpoch = authSessionEpochRef.current;
     setPageActionMenu(null);
     setSharePending(true);
     setAppError(null);
@@ -2173,9 +2663,32 @@ function App() {
       const saved = normalizeNote(
         note.shareToken ? await disableShare(note.id) : await enableShare(note.id)
       );
-      setNotes((current) => updateSummary(current, saved));
-      if (draft?.id === saved.id) {
-        setDraft(saved);
+      if (authSessionEpochRef.current !== sessionEpoch) {
+        return;
+      }
+
+      const nextNotes = notesRef.current.map((item) =>
+        item.id === saved.id
+          ? {
+              ...item,
+              shareToken: saved.shareToken,
+              sharedAt: saved.sharedAt,
+              updatedAt: saved.updatedAt
+            }
+          : item
+      );
+      notesRef.current = nextNotes;
+      setNotes(nextNotes);
+
+      if (selectedIdRef.current === saved.id && draftRef.current?.id === saved.id) {
+        const nextDraft = {
+          ...draftRef.current,
+          shareToken: saved.shareToken,
+          sharedAt: saved.sharedAt,
+          updatedAt: saved.updatedAt
+        };
+        draftRef.current = nextDraft;
+        setDraft(nextDraft);
         setShareCopied(false);
       }
     } catch (error) {
@@ -2193,27 +2706,47 @@ function App() {
   };
 
   const archivePage = async (note: NoteSummary) => {
+    const sessionEpoch = authSessionEpochRef.current;
+    const actionIntent = navigationIntentRef.current + 1;
+    navigationIntentRef.current = actionIntent;
     setPageActionMenu(null);
 
     try {
       await deleteNote(note.id);
-      const remaining = notes
+      if (authSessionEpochRef.current !== sessionEpoch) {
+        return;
+      }
+
+      const remaining = notesRef.current
         .filter((item) => item.id !== note.id)
         .map((item) => (item.parentId === note.id ? { ...item, parentId: null } : item));
+      notesRef.current = remaining;
       setNotes(remaining);
 
-      if (selectedIdRef.current === note.id) {
+      const wasSelected = selectedIdRef.current === note.id;
+      if (wasSelected) {
+        revisionRef.current += 1;
+        loadNoteRequestRef.current += 1;
+        selectedIdRef.current = null;
         draftRef.current = null;
         lastPageSnapshotRef.current = null;
         setDraft(null);
         setSelectedId(null);
+        resetPageHistory(null);
         setShareOpen(false);
         setShareCopied(false);
         setExportOpen(false);
+        setDirty(false);
+        setSaveStatus("idle");
+      }
 
+      if (navigationIntentRef.current === actionIntent && wasSelected) {
         const nextId = getFirstPageId(remaining);
         if (nextId) {
+          setNotesBrowserLocation({ kind: "page" });
           await loadNote(nextId);
+        } else {
+          setNotesBrowserLocation({ kind: "root" });
         }
       }
 
@@ -2498,34 +3031,38 @@ function App() {
         )
       : null;
 
-  const exportPanel = (
-    <ExportPanel
-      notes={sortedNotes}
-      onClear={clearExportSelection}
-      onClose={() => setExportOpen(false)}
-      onExportPdf={() => void exportSelectedNotesAsPdf()}
-      onSelectAll={selectAllExportNotes}
-      onSelectVisible={selectVisibleExportNotes}
-      onToggleNote={toggleExportSelection}
-      open={exportOpen}
-      pending={exportPending}
-      selectedIds={exportSelection}
-    />
-  );
+  const exportPanel = exportOpen ? (
+    <Suspense fallback={null}>
+      <ExportPanel
+        notes={sortedNotes}
+        onClear={clearExportSelection}
+        onClose={() => setExportOpen(false)}
+        onExportPdf={() => void exportSelectedNotesAsPdf()}
+        onSelectAll={selectAllExportNotes}
+        onSelectVisible={selectVisibleExportNotes}
+        onToggleNote={toggleExportSelection}
+        open
+        pending={exportPending}
+        selectedIds={exportSelection}
+      />
+    </Suspense>
+  ) : null;
 
-  const pageIconPicker = (
-    <EmojiPackPicker
-      confirmLabel="设为页面图标"
-      onClose={() => setPageIconPickerTargetId(null)}
-      onSelect={(item: EmojiItem) => {
-        if (pageIconPickerTargetId) {
-          void updatePageIcon(pageIconPickerTargetId, item.url);
-        }
-      }}
-      open={Boolean(pageIconPickerTargetId && iconPickerTarget)}
-      title="选择页面图标"
-    />
-  );
+  const pageIconPicker = pageIconPickerTargetId && iconPickerTarget ? (
+    <Suspense fallback={null}>
+      <EmojiPackPicker
+        confirmLabel="设为页面图标"
+        onClose={() => setPageIconPickerTargetId(null)}
+        onSelect={(item: EmojiItem) => {
+          if (pageIconPickerTargetId) {
+            void updatePageIcon(pageIconPickerTargetId, item.url);
+          }
+        }}
+        open
+        title="选择页面图标"
+      />
+    </Suspense>
+  ) : null;
 
   const renderCategoryNode = (
     category: NoteSummary,
@@ -2565,6 +3102,9 @@ function App() {
         <div
           className={clsx(
             "category-row",
+            notesBrowserLocation.kind === "category" &&
+              notesBrowserLocation.categoryId === category.id &&
+              "active",
             draggedNoteId &&
               dropTarget?.anchorId === category.id &&
               dropTarget?.parentId === category.id &&
@@ -2613,7 +3153,7 @@ function App() {
           ) : (
             <button
               className="category-label"
-              onClick={() => toggleCategoryCollapse(category.id)}
+              onClick={() => openNotesOverview(category.id)}
               type="button"
             >
               {category.title}
@@ -2673,6 +3213,10 @@ function App() {
     const childLimit = getSidebarGroupLimit(note.id);
     const visibleChildNotes = childNotes.slice(0, childLimit);
     const nested = depth > 0;
+    const showDropAfterAtSubtreeEnd =
+      childNotes.length > 0 &&
+      dropTarget?.anchorId === note.id &&
+      dropTarget.position === "after";
     const depthStyle =
       depth > 1
         ? ({ "--note-depth-offset": `${Math.min(depth, 6) * 18}px` } as CSSProperties)
@@ -2685,10 +3229,13 @@ function App() {
             "note-row",
             nested && "nested",
             depth > 1 && "deep",
-            note.id === selectedId && "active",
+            notesBrowserLocation.kind === "page" && note.id === selectedId && "active",
             draggedNoteId === note.id && "dragging",
             dropTarget?.anchorId === note.id && dropTarget.position === "before" && "drop-before",
-            dropTarget?.anchorId === note.id && dropTarget.position === "after" && "drop-after",
+            dropTarget?.anchorId === note.id &&
+              dropTarget.position === "after" &&
+              !showDropAfterAtSubtreeEnd &&
+              "drop-after",
             dropTarget?.anchorId === note.id && dropTarget.position === "inside" && "drop-inside"
           )}
           draggable={!query.trim()}
@@ -2725,11 +3272,15 @@ function App() {
                 dropTarget?.anchorId === note.id &&
                 dropTarget?.parentId === note.id &&
                 dropTarget.position === "append" &&
-                "drop-target"
+                "drop-target",
+              showDropAfterAtSubtreeEnd && "drop-after-subtree",
+              showDropAfterAtSubtreeEnd && nested && "drop-after-subtree-nested",
+              showDropAfterAtSubtreeEnd && depth > 1 && "drop-after-subtree-deep"
             )}
             data-drop-label={draggedNoteId ? "放为子页面" : undefined}
             onDragOver={(event) => handleGroupDragOver(event, note.id, note.id)}
             onDrop={(event) => handleGroupDrop(event, note.id, note.id)}
+            style={showDropAfterAtSubtreeEnd ? depthStyle : undefined}
           >
             {visibleChildNotes.map((childNote) =>
               renderPageNode(childNote, depth + 1, nextVisited)
@@ -2784,12 +3335,14 @@ function App() {
               </div>
             </div>
 
-            <NotebookEditor
-              key={`public-${publicNote.id}`}
-              note={publicNote}
-              onChange={() => undefined}
-              readOnly
-            />
+            <Suspense fallback={<LazyViewFallback label="正在加载分享内容" />}>
+              <NotebookEditor
+                key={`public-${publicNote.id}`}
+                note={publicNote}
+                onChange={() => undefined}
+                readOnly
+              />
+            </Suspense>
           </article>
         </section>
       </main>
@@ -2907,8 +3460,9 @@ function App() {
               <h2>{authMode === "register" ? "创建账号" : "登录 Mini Notes"}</h2>
             </div>
 
-            <div className="auth-tabs" role="tablist" aria-label="登录方式">
+            <div className="auth-tabs" role="group" aria-label="登录方式">
               <button
+                aria-pressed={authMode === "login"}
                 className={clsx("auth-tab", authMode === "login" && "active")}
                 onClick={() => {
                   setAuthMode("login");
@@ -2919,6 +3473,7 @@ function App() {
                 登录
               </button>
               <button
+                aria-pressed={authMode === "register"}
                 className={clsx("auth-tab", authMode === "register" && "active")}
                 onClick={() => {
                   setAuthMode("register");
@@ -3123,6 +3678,7 @@ function App() {
         <nav
           aria-label="页面列表"
           className={clsx("note-list", draggedNoteId && "is-dragging")}
+          ref={noteListRef}
         >
           {query.trim() ? (
             <>
@@ -3205,22 +3761,34 @@ function App() {
       <section className="workspace">
         <header className="topbar">
           <div className="topbar-left">
-            {!isAdminView && !isBibleView && !isTenMinuteView && !isRevelationQaView && draft ? (
+            {!isAdminView &&
+            !isBibleView &&
+            !isTenMinuteView &&
+            !isRevelationQaView &&
+            (draft || isNotesOverview) ? (
               <nav className="note-breadcrumb" aria-label="页面路径" ref={breadcrumbRef}>
-                <button
-                  className="note-breadcrumb__item root"
-                  onClick={() => {
-                    setWorkspaceView("notes");
-                    setSidebarCollapsed(false);
-                  }}
-                  title="展开笔记导航"
-                  type="button"
-                >
-                  <FileText size={15} />
-                  <span>笔记</span>
-                </button>
-                {noteBreadcrumbs.map((record, index) => {
-                  const isCurrent = index === noteBreadcrumbs.length - 1;
+                {notesBrowserLocation.kind === "root" ? (
+                  <span
+                    aria-current="page"
+                    className="note-breadcrumb__item current root"
+                    title="笔记首页"
+                  >
+                    <FileText size={15} />
+                    <span>笔记</span>
+                  </span>
+                ) : (
+                  <button
+                    className="note-breadcrumb__item root"
+                    onClick={() => openNotesOverview()}
+                    title="返回笔记首页"
+                    type="button"
+                  >
+                    <FileText size={15} />
+                    <span>笔记</span>
+                  </button>
+                )}
+                {breadcrumbRecords.map((record, index) => {
+                  const isCurrent = index === breadcrumbRecords.length - 1;
                   return (
                     <Fragment key={record.id}>
                       <ChevronRight className="note-breadcrumb__separator" size={14} />
@@ -3230,7 +3798,11 @@ function App() {
                           className="note-breadcrumb__item current"
                           title={record.title}
                         >
-                          <NoteIcon icon={normalizePageIcon(record.icon)} />
+                          {record.kind === "category" ? (
+                            <Folder size={14} />
+                          ) : (
+                            <NoteIcon icon={normalizePageIcon(record.icon)} />
+                          )}
                           <span>{record.title || "未命名"}</span>
                         </span>
                       ) : (
@@ -3240,7 +3812,7 @@ function App() {
                             if (record.kind === "page") {
                               void selectNote(record.id);
                             } else {
-                              revealSidebarRecord(record.id);
+                              openNotesOverview(record.id);
                             }
                           }}
                           title={record.title}
@@ -3311,7 +3883,7 @@ function App() {
                   返回笔记
                 </button>
               </>
-            ) : (
+            ) : isNotesOverview ? null : (
               <>
                 {draft ? (
                   <div className="topbar-history" aria-label="页面历史">
@@ -3500,14 +4072,108 @@ function App() {
           </div>
         ) : null}
 
-        {isAdminView && sessionUser ? (
-          <AdminPanel currentUser={sessionUser} onSessionRefresh={bootstrap} />
+        <Suspense fallback={<LazyViewFallback label="正在加载页面" />}>
+          {isAdminView && sessionUser ? (
+            <AdminPanel currentUser={sessionUser} onSessionRefresh={bootstrap} />
         ) : isBibleView ? (
           <BibleReader onError={setAppError} />
         ) : isTenMinuteView ? (
           <TenMinuteReader onError={setAppError} />
         ) : isRevelationQaView ? (
           <RevelationQaLibrary onError={setAppError} />
+        ) : isNotesOverview ? (
+          <section className="notes-overview">
+            <header className="notes-overview__hero">
+              <div className="notes-overview__identity">
+                <span className="notes-overview__icon" aria-hidden="true">
+                  {overviewCategory ? <Folder size={26} /> : <FileText size={26} />}
+                </span>
+                <div>
+                  <span className="notes-overview__eyebrow">
+                    {overviewCategory ? "分类概览" : "笔记空间"}
+                  </span>
+                  <h1>{overviewCategory?.title ?? "笔记首页"}</h1>
+                  <p>
+                    {overviewCategories.length + overviewPages.length > 0
+                      ? `${overviewCategories.length} 个分类 · ${overviewPages.length} 个页面`
+                      : "这里暂时还没有内容"}
+                  </p>
+                </div>
+              </div>
+              <div className="notes-overview__actions">
+                <button
+                  className="toolbar-button"
+                  onClick={() => void createCategory(overviewParentId)}
+                  type="button"
+                >
+                  <FolderPlus size={16} />
+                  新建分类
+                </button>
+                <button
+                  className="primary-button"
+                  onClick={() => void createNewNote(overviewParentId)}
+                  type="button"
+                >
+                  <Plus size={16} />
+                  新建页面
+                </button>
+              </div>
+            </header>
+
+            {overviewCategories.length > 0 || overviewPages.length > 0 ? (
+              <div className="notes-overview__grid">
+                {overviewCategories.map((category) => {
+                  const childCount =
+                    (categoriesByParent.get(category.id)?.length ?? 0) +
+                    (allPagesByParent.get(category.id)?.length ?? 0);
+
+                  return (
+                    <button
+                      className="notes-overview-card category"
+                      key={category.id}
+                      onClick={() => openNotesOverview(category.id)}
+                      type="button"
+                    >
+                      <span className="notes-overview-card__icon">
+                        <Folder size={20} />
+                      </span>
+                      <span className="notes-overview-card__copy">
+                        <strong>{category.title || "未命名分类"}</strong>
+                        <small>{childCount > 0 ? `${childCount} 个项目` : "空分类"}</small>
+                      </span>
+                      <ArrowRight className="notes-overview-card__arrow" size={17} />
+                    </button>
+                  );
+                })}
+
+                {overviewPages.map((note) => (
+                  <button
+                    className="notes-overview-card page-link"
+                    key={note.id}
+                    onClick={() => void selectNote(note.id)}
+                    type="button"
+                  >
+                    <span className="notes-overview-card__icon page-icon">
+                      <NoteIcon icon={normalizePageIcon(note.icon)} />
+                    </span>
+                    <span className="notes-overview-card__copy">
+                      <strong>{note.title || "未命名"}</strong>
+                      <small>{formatRelative(note.updatedAt)}</small>
+                    </span>
+                    <ArrowRight className="notes-overview-card__arrow" size={17} />
+                  </button>
+                ))}
+              </div>
+            ) : (
+              <div className="notes-overview__empty">
+                <span className="notes-overview__empty-icon">
+                  <Folder size={24} />
+                </span>
+                <h2>从这里开始整理</h2>
+                <p>新建一个页面或分类，它会出现在当前层级。</p>
+              </div>
+            )}
+          </section>
         ) : draft && !isLoadingNote ? (
           <article className={clsx("page", draftCommentCount > 0 && "has-comments")}>
             <div className="page-heading-layout">
@@ -3588,18 +4254,28 @@ function App() {
               </button>
             </div>
           </section>
-        ) : (
-          <section className="center-screen inset">
-            <Sparkles className="pulse-icon" size={24} />
-            <span>正在打开页面</span>
-          </section>
-        )}
+          ) : (
+            <section className="center-screen inset">
+              <Sparkles className="pulse-icon" size={24} />
+              <span>正在打开页面</span>
+            </section>
+          )}
+        </Suspense>
       </section>
       {categoryActionPanel}
       {pageActionPanel}
       {exportPanel}
       {pageIconPicker}
     </main>
+  );
+}
+
+function LazyViewFallback({ label }: { label: string }) {
+  return (
+    <section className="center-screen inset" role="status">
+      <Sparkles className="pulse-icon" size={24} />
+      <span>{label}</span>
+    </section>
   );
 }
 
@@ -3923,26 +4599,6 @@ function setNoteDragImage(
   window.requestAnimationFrame(() => {
     preview.remove();
   });
-}
-
-function autoScrollSidebar(event: ReactDragEvent<HTMLElement>): void {
-  const list = event.currentTarget.closest<HTMLElement>(".note-list");
-  if (!list) {
-    return;
-  }
-
-  const bounds = list.getBoundingClientRect();
-  const edgeSize = Math.min(64, bounds.height * 0.18);
-  const distanceFromTop = event.clientY - bounds.top;
-  const distanceFromBottom = bounds.bottom - event.clientY;
-
-  if (distanceFromTop >= 0 && distanceFromTop < edgeSize) {
-    const intensity = 1 - distanceFromTop / edgeSize;
-    list.scrollTop -= Math.ceil(4 + intensity * 16);
-  } else if (distanceFromBottom >= 0 && distanceFromBottom < edgeSize) {
-    const intensity = 1 - distanceFromBottom / edgeSize;
-    list.scrollTop += Math.ceil(4 + intensity * 16);
-  }
 }
 
 function getFirstPageId(notes: NoteSummary[]): string | null {

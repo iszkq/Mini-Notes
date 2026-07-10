@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
 import type { NoteSummary } from "../shared";
 import { NoteIcon } from "./NoteIcon";
+import { useDialogFocus } from "./useDialogFocus";
 
 type ExportPanelProps = {
   notes: NoteSummary[];
@@ -31,6 +32,7 @@ export function ExportPanel({
   onToggleNote
 }: ExportPanelProps) {
   const [query, setQuery] = useState("");
+  const dialogRef = useDialogFocus(open, onClose);
 
   useEffect(() => {
     if (!open) {
@@ -59,10 +61,18 @@ export function ExportPanel({
         aria-label="关闭导出面板"
         className="export-panel-backdrop"
         onClick={onClose}
+        tabIndex={-1}
         type="button"
       />
 
-      <section aria-label="批量导出" aria-modal="true" className="export-panel" role="dialog">
+      <section
+        aria-label="批量导出"
+        aria-modal="true"
+        className="export-panel"
+        ref={dialogRef}
+        role="dialog"
+        tabIndex={-1}
+      >
         <header className="export-panel-head">
           <div>
             <strong>批量导出</strong>
@@ -86,6 +96,7 @@ export function ExportPanel({
           <label className="search-box export-search-box">
             <Search size={16} />
             <input
+              data-dialog-initial-focus
               onChange={(event) => setQuery(event.target.value)}
               placeholder="搜索要导出的页面"
               value={query}

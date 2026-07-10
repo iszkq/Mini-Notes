@@ -19,7 +19,15 @@ import {
   Trash2,
   X
 } from "lucide-react";
-import { useCallback, useEffect, useMemo, useState, type FormEvent } from "react";
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+  type FormEvent
+} from "react";
 import {
   ApiError,
   createRevelationQaItem,
@@ -91,6 +99,9 @@ const EMPTY_ITEMS_PAGE: RevelationQaItemsPage = {
 const QA_ITEMS_PAGE_SIZE = 30;
 
 export function RevelationQaLibrary({ onError }: RevelationQaLibraryProps) {
+  const itemsContextRef = useRef("");
+  const itemsRequestIdRef = useRef(0);
+  const loadMorePendingRef = useRef(false);
   const [library, setLibrary] = useState<RevelationQaLibraryData>(EMPTY_LIBRARY);
   const [itemsPage, setItemsPage] = useState<RevelationQaItemsPage>(EMPTY_ITEMS_PAGE);
   const [isLoading, setIsLoading] = useState(true);
@@ -107,6 +118,13 @@ export function RevelationQaLibrary({ onError }: RevelationQaLibraryProps) {
   const [query, setQuery] = useState("");
   const [editingItemId, setEditingItemId] = useState<string | null>(null);
   const [itemDraft, setItemDraft] = useState<ItemDraft>(() => createEmptyItemDraft());
+  const itemsContextKey = `${selectedSecondaryId ?? ""}\u0000${query}`;
+
+  useLayoutEffect(() => {
+    itemsContextRef.current = itemsContextKey;
+    itemsRequestIdRef.current += 1;
+    loadMorePendingRef.current = false;
+  }, [itemsContextKey]);
 
   const reportError = useCallback(
     (cause: unknown, fallback: string) => {
@@ -234,14 +252,21 @@ export function RevelationQaLibrary({ onError }: RevelationQaLibraryProps) {
 
   useEffect(() => {
     if (!selectedSecondaryId) {
+      itemsRequestIdRef.current += 1;
+      loadMorePendingRef.current = false;
       setItemsPage(EMPTY_ITEMS_PAGE);
+      setIsItemLoading(false);
       return;
     }
 
     let cancelled = false;
+    const contextKey = itemsContextKey;
+    const requestId = itemsRequestIdRef.current + 1;
+    itemsRequestIdRef.current = requestId;
+    loadMorePendingRef.current = false;
     setItemsPage(EMPTY_ITEMS_PAGE);
+    setIsItemLoading(true);
     const timeoutId = window.setTimeout(() => {
-      setIsItemLoading(true);
       void listRevelationQaItems({
         limit: QA_ITEMS_PAGE_SIZE,
         offset: 0,
@@ -249,18 +274,30 @@ export function RevelationQaLibrary({ onError }: RevelationQaLibraryProps) {
         secondaryId: selectedSecondaryId
       })
         .then((page) => {
-          if (!cancelled) {
+          if (
+            !cancelled &&
+            itemsRequestIdRef.current === requestId &&
+            itemsContextRef.current === contextKey
+          ) {
             setItemsPage(page);
             setLocalError(null);
           }
         })
         .catch((cause) => {
-          if (!cancelled) {
+          if (
+            !cancelled &&
+            itemsRequestIdRef.current === requestId &&
+            itemsContextRef.current === contextKey
+          ) {
             reportError(cause, "问答列表加载失败。");
           }
         })
         .finally(() => {
-          if (!cancelled) {
+          if (
+            !cancelled &&
+            itemsRequestIdRef.current === requestId &&
+            itemsContextRef.current === contextKey
+          ) {
             setIsItemLoading(false);
           }
         });
@@ -270,15 +307,24 @@ export function RevelationQaLibrary({ onError }: RevelationQaLibraryProps) {
       cancelled = true;
       window.clearTimeout(timeoutId);
     };
-  }, [query, reportError, selectedSecondaryId]);
+  }, [itemsContextKey, query, reportError, selectedSecondaryId]);
 
   const isBusy = busyAction !== null;
 
   async function loadMoreItems() {
-    if (!selectedSecondaryId || isItemLoading || itemsPage.items.length >= itemsPage.total) {
+    if (
+      !selectedSecondaryId ||
+      isItemLoading ||
+      loadMorePendingRef.current ||
+      itemsPage.items.length >= itemsPage.total
+    ) {
       return;
     }
 
+    const contextKey = itemsContextKey;
+    const requestId = itemsRequestIdRef.current + 1;
+    itemsRequestIdRef.current = requestId;
+    loadMorePendingRef.current = true;
     setIsItemLoading(true);
     try {
       const page = await listRevelationQaItems({
@@ -287,6 +333,13 @@ export function RevelationQaLibrary({ onError }: RevelationQaLibraryProps) {
         query,
         secondaryId: selectedSecondaryId
       });
+      if (
+        itemsRequestIdRef.current !== requestId ||
+        itemsContextRef.current !== contextKey
+      ) {
+        return;
+      }
+
       setItemsPage((current) => ({
         ...page,
         items: [...current.items, ...page.items],
@@ -294,9 +347,20 @@ export function RevelationQaLibrary({ onError }: RevelationQaLibraryProps) {
       }));
       setLocalError(null);
     } catch (cause) {
-      reportError(cause, "加载更多问答失败。");
+      if (
+        itemsRequestIdRef.current === requestId &&
+        itemsContextRef.current === contextKey
+      ) {
+        reportError(cause, "加载更多问答失败。");
+      }
     } finally {
-      setIsItemLoading(false);
+      if (
+        itemsRequestIdRef.current === requestId &&
+        itemsContextRef.current === contextKey
+      ) {
+        loadMorePendingRef.current = false;
+        setIsItemLoading(false);
+      }
     }
   }
 

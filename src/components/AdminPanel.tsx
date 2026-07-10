@@ -13,7 +13,15 @@ import {
   Users,
   X
 } from "lucide-react";
-import { ChangeEvent, FormEvent, useEffect, useMemo, useState } from "react";
+import {
+  ChangeEvent,
+  FormEvent,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState
+} from "react";
 import {
   ApiError,
   createAdminUpload,
@@ -39,6 +47,8 @@ type UploadPreview = {
 };
 
 export function AdminPanel({ currentUser, onSessionRefresh }: AdminPanelProps) {
+  const uploadsRequestIdRef = useRef(0);
+  const selectedUserIdRef = useRef<string | null>(currentUser.id);
   const [users, setUsers] = useState<AdminUser[]>([]);
   const [storageSummary, setStorageSummary] = useState<AdminStorageSummary | null>(null);
   const [selectedUserId, setSelectedUserId] = useState<string | null>(currentUser.id);
@@ -81,16 +91,23 @@ export function AdminPanel({ currentUser, onSessionRefresh }: AdminPanelProps) {
     return users.filter((user) => user.username.toLowerCase().includes(term));
   }, [query, users]);
 
+  useLayoutEffect(() => {
+    selectedUserIdRef.current = selectedUserId;
+  }, [selectedUserId]);
+
   useEffect(() => {
     void refreshUsers(currentUser.id);
   }, [currentUser.id]);
 
   useEffect(() => {
     if (!selectedUser) {
+      uploadsRequestIdRef.current += 1;
       setEditUsername("");
       setEditPassword("");
       setEditIsAdmin(false);
       setUploads([]);
+      setUploadNames({});
+      setLoadingUploads(false);
       return;
     }
 
@@ -130,19 +147,42 @@ export function AdminPanel({ currentUser, onSessionRefresh }: AdminPanelProps) {
   }
 
   async function refreshUploads(userId: string) {
+    if (selectedUserIdRef.current !== userId) {
+      return;
+    }
+
+    const requestId = uploadsRequestIdRef.current + 1;
+    uploadsRequestIdRef.current = requestId;
     setLoadingUploads(true);
     setPanelError(null);
 
     try {
       const nextUploads = await listAdminUploads(userId);
+      if (
+        uploadsRequestIdRef.current !== requestId ||
+        selectedUserIdRef.current !== userId
+      ) {
+        return;
+      }
+
       setUploads(nextUploads);
       setUploadNames(
         Object.fromEntries(nextUploads.map((upload) => [upload.id, upload.name]))
       );
     } catch (error) {
-      setPanelError(toMessage(error, "媒体列表加载失败。"));
+      if (
+        uploadsRequestIdRef.current === requestId &&
+        selectedUserIdRef.current === userId
+      ) {
+        setPanelError(toMessage(error, "媒体列表加载失败。"));
+      }
     } finally {
-      setLoadingUploads(false);
+      if (
+        uploadsRequestIdRef.current === requestId &&
+        selectedUserIdRef.current === userId
+      ) {
+        setLoadingUploads(false);
+      }
     }
   }
 

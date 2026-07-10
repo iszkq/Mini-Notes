@@ -1,5 +1,4 @@
 import type { BlockNoteEditor, PartialBlock } from "@blocknote/core";
-import "@blocknote/core/fonts/inter.css";
 import { filterSuggestionItems } from "@blocknote/core/extensions";
 import { zh } from "@blocknote/core/locales";
 import { BlockNoteView } from "@blocknote/mantine";
@@ -27,6 +26,8 @@ import {
   X
 } from "lucide-react";
 import {
+  Suspense,
+  lazy,
   useCallback,
   useEffect,
   useLayoutEffect,
@@ -54,11 +55,8 @@ import {
   noteSchema
 } from "../editorSchema";
 import type { Note, NoteBlock, NoteSummary } from "../shared";
-import { BibleInsertModal } from "./BibleInsertModal";
-import { EmojiPackPicker } from "./EmojiPackPicker";
 import type { EmojiItem } from "../emojiPacks";
 import { ConfirmDialog } from "./ConfirmDialog";
-import { EditorFindReplacePanel } from "./EditorFindReplacePanel";
 import { NotebookFormattingToolbar } from "./NotebookFormattingToolbar";
 import {
   collectNoteComments,
@@ -79,6 +77,18 @@ import {
   type CopiedImageBlock,
   type EditorImageBlock
 } from "../imageClipboard";
+
+const BibleInsertModal = lazy(() =>
+  import("./BibleInsertModal").then((module) => ({ default: module.BibleInsertModal }))
+);
+const EditorFindReplacePanel = lazy(() =>
+  import("./EditorFindReplacePanel").then((module) => ({
+    default: module.EditorFindReplacePanel
+  }))
+);
+const EmojiPackPicker = lazy(() =>
+  import("./EmojiPackPicker").then((module) => ({ default: module.EmojiPackPicker }))
+);
 
 type NotebookEditorProps = {
   findReplaceAnchorRef?: RefObject<HTMLElement | null>;
@@ -1420,33 +1430,39 @@ export function NotebookEditor({
         ) : null}
       </div>
 
-      {!readOnly ? (
-        <BibleInsertModal
-          onClose={() => {
-            setBibleModalOpen(false);
-            setBibleInsertTarget(null);
-          }}
-          onConfirm={handleInsertBibleVerses}
-          open={bibleModalOpen}
-        />
+      {!readOnly && bibleModalOpen ? (
+        <Suspense fallback={null}>
+          <BibleInsertModal
+            onClose={() => {
+              setBibleModalOpen(false);
+              setBibleInsertTarget(null);
+            }}
+            onConfirm={handleInsertBibleVerses}
+            open
+          />
+        </Suspense>
       ) : null}
 
-      {!readOnly ? (
-        <EmojiPackPicker
-          onClose={() => setEmojiPickerOpen(false)}
-          onSelect={insertEmojiImage}
-          open={emojiPickerOpen}
-          title="插入表情包"
-        />
+      {!readOnly && emojiPickerOpen ? (
+        <Suspense fallback={null}>
+          <EmojiPackPicker
+            onClose={() => setEmojiPickerOpen(false)}
+            onSelect={insertEmojiImage}
+            open
+            title="插入表情包"
+          />
+        </Suspense>
       ) : null}
 
-      {!readOnly && findReplaceAnchorRef && onFindReplaceClose ? (
-        <EditorFindReplacePanel
-          anchorRef={findReplaceAnchorRef}
-          editor={editor}
-          onClose={onFindReplaceClose}
-          open={findReplaceOpen}
-        />
+      {!readOnly && findReplaceOpen && findReplaceAnchorRef && onFindReplaceClose ? (
+        <Suspense fallback={null}>
+          <EditorFindReplacePanel
+            anchorRef={findReplaceAnchorRef}
+            editor={editor}
+            onClose={onFindReplaceClose}
+            open
+          />
+        </Suspense>
       ) : null}
 
       {!readOnly && imageCropTarget ? (

@@ -201,8 +201,8 @@ let emojiIndexPromise: Promise<string> | null = null;
 
 const SESSION_COOKIE_NAME = "cloud_notes_session";
 const SESSION_TTL_SECONDS = 60 * 60 * 24 * 30;
-const PBKDF2_ITERATIONS = 60000;
-const LEGACY_PBKDF2_ITERATIONS = [210000];
+const PBKDF2_ITERATIONS = 210000;
+const LEGACY_PBKDF2_ITERATIONS = [60000];
 const NOTE_CONTENT_OBJECT_PREFIX = "note-content";
 const BIBLE_NOTE_CONTENT_OBJECT_PREFIX = "bible-note-content";
 const TEN_MINUTE_CONTENT_OBJECT_KEY = "ten-minute/content.json";
@@ -213,7 +213,9 @@ const LEGACY_NOTE_CONTENT_MIGRATION_BATCH_SIZE = 8;
 const DEFAULT_FILE_NAME = "未命名文件";
 const DEFAULT_FILE_MIME_TYPE = "application/octet-stream";
 const EMBEDDED_UPLOAD_MAX_BYTES = 12 * 1024 * 1024;
-const REMOTE_IMAGE_IMPORT_MAX_BYTES = 80 * 1024 * 1024;
+const UPLOAD_MAX_BYTES = 80 * 1024 * 1024;
+const MULTIPART_UPLOAD_MAX_BYTES = UPLOAD_MAX_BYTES + 1024 * 1024;
+const REMOTE_IMAGE_IMPORT_MAX_BYTES = UPLOAD_MAX_BYTES;
 const MIME_TYPE_BY_EXTENSION: Record<string, string> = {
   ".aac": "audio/aac",
   ".avi": "video/x-msvideo",
@@ -259,7 +261,16 @@ export default {
     const url = new URL(request.url);
 
     if (url.pathname.startsWith("/api/")) {
-      return handleApi(request, env, url);
+      try {
+        return await handleApi(request, env, url);
+      } catch (cause) {
+        if (cause instanceof HttpError) {
+          return error(cause.message, cause.status);
+        }
+
+        console.error(cause);
+        return error("请求失败。", 500);
+      }
     }
 
     return env.ASSETS.fetch(request);
@@ -776,7 +787,11 @@ async function createBibleNote(
       storedBody.contentKey,
       storedBody.contentSize
     )
-    .run();
+    .run()
+    .catch(async (cause) => {
+      await deleteBibleNoteBody(env, storedBody.contentKey);
+      throw cause;
+    });
 
   return json(note, 201);
 }
@@ -802,33 +817,55 @@ async function updateBibleNote(
   }
 
   const updatedAt = new Date().toISOString();
-  const storedBody =
-    body.body !== undefined || !currentRow.contentKey
-      ? await persistBibleNoteBody(env, userId, noteId, nextBody)
-      : {
-          contentKey: currentRow.contentKey,
-          contentSize: Number(currentRow.contentSize ?? byteLength(nextBody))
-        };
-  await env.DB.prepare(
-    `UPDATE bible_notes
-     SET body = ?,
-         tags = ?,
-         updated_at = ?,
-         content_key = ?,
-         content_size = ?
-     WHERE id = ?
-       AND user_id = ?`
-  )
-    .bind(
-      "",
-      JSON.stringify(nextTags),
-      updatedAt,
-      storedBody.contentKey,
-      storedBody.contentSize,
-      noteId,
-      userId
+  const hasBodyUpdate = body.body !== undefined;
+
+  if (hasBodyUpdate) {
+    const storedBody = await persistBibleNoteBody(env, userId, noteId, nextBody);
+    const updateResult = await env.DB.prepare(
+      `UPDATE bible_notes
+       SET body = ?,
+           tags = ?,
+           updated_at = ?,
+           content_key = ?,
+           content_size = ?
+       WHERE id = ?
+         AND user_id = ?
+         AND ((content_key = ?) OR (content_key IS NULL AND ? IS NULL))`
     )
-    .run();
+      .bind(
+        "",
+        JSON.stringify(nextTags),
+        updatedAt,
+        storedBody.contentKey,
+        storedBody.contentSize,
+        noteId,
+        userId,
+        currentRow.contentKey ?? null,
+        currentRow.contentKey ?? null
+      )
+      .run()
+      .catch(async (cause) => {
+        await deleteBibleNoteBody(env, storedBody.contentKey);
+        throw cause;
+      });
+
+    if (updateResult.meta.changes !== 1) {
+      await deleteBibleNoteBody(env, storedBody.contentKey);
+      throw new HttpError("笔记已在其他位置更新，请刷新后重试。", 409);
+    }
+
+    await deleteBibleNoteBody(env, currentRow.contentKey);
+  } else {
+    await env.DB.prepare(
+      `UPDATE bible_notes
+       SET tags = ?,
+           updated_at = ?
+       WHERE id = ?
+         AND user_id = ?`
+    )
+      .bind(JSON.stringify(nextTags), updatedAt, noteId, userId)
+      .run();
+  }
 
   return json({
     ...current,
@@ -2239,15 +2276,17 @@ async function readBibleNoteBody(
   userId: string,
   row: DbBibleNoteRow
 ): Promise<string> {
+  const legacyBody = cleanBibleNoteBody(row.body);
+
   if (!row.contentKey) {
-    const legacyBody = cleanBibleNoteBody(row.body);
     if (!legacyBody) {
       return "";
     }
 
+    let storedBody: { contentKey: string; contentSize: number } | null = null;
     try {
-      const storedBody = await persistBibleNoteBody(env, userId, row.id, legacyBody);
-      await env.DB.prepare(
+      storedBody = await persistBibleNoteBody(env, userId, row.id, legacyBody);
+      const updateResult = await env.DB.prepare(
         `UPDATE bible_notes
          SET body = ?,
              content_key = ?,
@@ -2259,10 +2298,18 @@ async function readBibleNoteBody(
         .bind("", storedBody.contentKey, storedBody.contentSize, row.id, userId)
         .run();
 
-      row.body = "";
-      row.contentKey = storedBody.contentKey;
-      row.contentSize = storedBody.contentSize;
+      if (updateResult.meta.changes === 1) {
+        row.body = "";
+        row.contentKey = storedBody.contentKey;
+        row.contentSize = storedBody.contentSize;
+      } else {
+        await deleteBibleNoteBody(env, storedBody.contentKey);
+        storedBody = null;
+      }
     } catch (cause) {
+      if (storedBody) {
+        await deleteBibleNoteBody(env, storedBody.contentKey);
+      }
       console.error("Failed to migrate legacy bible note body", {
         noteId: row.id,
         userId,
@@ -2280,17 +2327,38 @@ async function readBibleNoteBody(
         contentKey: row.contentKey,
         noteId: row.id
       });
-      return cleanBibleNoteBody(row.body);
+      if (legacyBody) {
+        return legacyBody;
+      }
+      throw new HttpError("笔记正文暂时无法读取，请稍后重试。", 503);
     }
 
-    return cleanBibleNoteBody(await object.text());
+    const storedBody = cleanBibleNoteBody(await object.text());
+    if (storedBody) {
+      return storedBody;
+    }
+
+    console.error("R2 bible note body is empty", {
+      contentKey: row.contentKey,
+      noteId: row.id
+    });
+    if (legacyBody) {
+      return legacyBody;
+    }
+    throw new HttpError("笔记正文暂时无法读取，请稍后重试。", 503);
   } catch (cause) {
+    if (cause instanceof HttpError) {
+      throw cause;
+    }
     console.error("Failed to read R2 bible note body", {
       contentKey: row.contentKey,
       noteId: row.id,
       cause
     });
-    return cleanBibleNoteBody(row.body);
+    if (legacyBody) {
+      return legacyBody;
+    }
+    throw new HttpError("笔记正文暂时无法读取，请稍后重试。", 503);
   }
 }
 
@@ -2333,7 +2401,7 @@ async function deleteBibleNoteBody(
 }
 
 function getBibleNoteContentObjectKey(userId: string, noteId: string): string {
-  return `${BIBLE_NOTE_CONTENT_OBJECT_PREFIX}/${userId}/${noteId}.txt`;
+  return `${BIBLE_NOTE_CONTENT_OBJECT_PREFIX}/${userId}/${noteId}/${crypto.randomUUID()}.txt`;
 }
 
 async function getEmojiIndex(): Promise<Response> {
@@ -2648,7 +2716,11 @@ async function createNote(
       note.createdAt,
       note.updatedAt
     )
-    .run();
+    .run()
+    .catch(async (cause) => {
+      await deleteStaleNoteContent(env, storedContent.contentKey, null);
+      throw cause;
+    });
 
   await syncNoteIndexes(env, userId, note.id, note.kind, note.title, note.content, note.updatedAt);
 
@@ -2674,17 +2746,26 @@ async function updateNote(
   }
 
   const body = await readJson<NoteUpdateInput>(request);
-  const currentContent = await readNoteContent(env, current, userId);
+  const currentKind = cleanNoteKind(current.kind);
+  const hasContentUpdate = currentKind === "page" && body.content !== undefined;
+  const currentContent =
+    currentKind === "page" ? await readNoteContent(env, current) : [];
+  const nextContent =
+    currentKind === "category"
+      ? []
+      : hasContentUpdate
+        ? await materializeEmbeddedUploads(env, userId, normalizeBlocks(body.content))
+        : currentContent;
   const next: Note = {
     ...rowToSummary(current),
     title:
       body.title === undefined
         ? current.title
-        : cleanTitle(body.title, cleanNoteKind(current.kind)),
+        : cleanTitle(body.title, currentKind),
     icon:
       body.icon === undefined
         ? current.icon
-        : cleanIcon(body.icon, cleanNoteKind(current.kind)),
+        : cleanIcon(body.icon, currentKind),
     titleSize:
       body.titleSize === undefined
         ? cleanTitleSize(current.titleSize)
@@ -2695,7 +2776,7 @@ async function updateNote(
         : await resolveParentIdForUser(
             env,
             userId,
-            cleanNoteKind(current.kind),
+            currentKind,
             body.parentId,
             current.id
           ),
@@ -2705,79 +2786,136 @@ async function updateNote(
         : cleanSortOrder(body.sortOrder, current.sortOrder),
     isArchived:
       body.isArchived === undefined ? Boolean(current.isArchived) : body.isArchived,
-    content:
-      cleanNoteKind(current.kind) === "category"
-        ? []
-        : await materializeEmbeddedUploads(
-            env,
-            userId,
-            body.content === undefined ? currentContent : normalizeBlocks(body.content)
-          ),
+    content: nextContent,
     updatedAt: new Date().toISOString()
   };
-  const storedContent = await persistNoteContent(
-    env,
-    userId,
-    id,
-    next.content,
-    cleanNoteKind(current.kind) === "page"
-  );
-  const nextSummary = cleanNoteKind(current.kind) === "page" ? extractNoteSummary(next.content) : "";
 
-  await env.DB.prepare(
-    `UPDATE notes
-     SET title = ?,
-         icon = ?,
-         title_size = ?,
-         parent_id = CASE WHEN ? = 1 THEN ? ELSE parent_id END,
-         content = ?,
-         content_key = ?,
-         content_size = ?,
-         summary = ?,
-         is_archived = ?,
-         sort_order = CASE WHEN ? = 1 THEN ? ELSE sort_order END,
-         updated_at = ?
-     WHERE id = ? AND user_id = ?`
-  )
-    .bind(
-      next.title,
-      next.icon,
-      next.titleSize,
-      body.parentId === undefined ? 0 : 1,
-      next.parentId,
-      storedContent.dbContent,
-      storedContent.contentKey,
-      storedContent.contentSize,
-      nextSummary,
-      next.isArchived ? 1 : 0,
-      body.sortOrder === undefined ? 0 : 1,
-      next.sortOrder,
-      next.updatedAt,
-      id,
-      userId
+  if (hasContentUpdate) {
+    const storedContent = await persistNoteContent(env, userId, id, next.content, true);
+    const nextSummary = extractNoteSummary(next.content);
+    const updateResult = await env.DB.prepare(
+      `UPDATE notes
+       SET title = ?,
+           icon = ?,
+           title_size = ?,
+           parent_id = CASE WHEN ? = 1 THEN ? ELSE parent_id END,
+           content = ?,
+           content_key = ?,
+           content_size = ?,
+           summary = ?,
+           is_archived = ?,
+           sort_order = CASE WHEN ? = 1 THEN ? ELSE sort_order END,
+           updated_at = ?
+       WHERE id = ?
+         AND user_id = ?
+         AND is_archived = 0
+         AND ((content_key = ?) OR (content_key IS NULL AND ? IS NULL))`
     )
-    .run();
+      .bind(
+        next.title,
+        next.icon,
+        next.titleSize,
+        body.parentId === undefined ? 0 : 1,
+        next.parentId,
+        storedContent.dbContent,
+        storedContent.contentKey,
+        storedContent.contentSize,
+        nextSummary,
+        next.isArchived ? 1 : 0,
+        body.sortOrder === undefined ? 0 : 1,
+        next.sortOrder,
+        next.updatedAt,
+        id,
+        userId,
+        current.contentKey ?? null,
+        current.contentKey ?? null
+      )
+      .run()
+      .catch(async (cause) => {
+        await deleteStaleNoteContent(env, storedContent.contentKey, null);
+        await cleanupRemovedUploadsForUser(env, userId, next.content, currentContent);
+        throw cause;
+      });
 
-  await deleteStaleNoteContent(env, current.contentKey, storedContent.contentKey);
+    if (updateResult.meta.changes !== 1) {
+      await deleteStaleNoteContent(env, storedContent.contentKey, null);
+      await cleanupRemovedUploadsForUser(env, userId, next.content, currentContent);
+      throw new HttpError("页面已在其他位置更新，请刷新后重试。", 409);
+    }
 
-  await syncNoteIndexes(
-    env,
-    userId,
-    next.id,
-    next.kind,
-    next.title,
-    next.content,
-    next.updatedAt,
-    next.isArchived
-  );
-
-  if (cleanNoteKind(current.kind) === "page") {
+    await deleteStaleNoteContent(env, current.contentKey, storedContent.contentKey);
+    await syncNoteIndexes(
+      env,
+      userId,
+      next.id,
+      next.kind,
+      next.title,
+      next.content,
+      next.updatedAt,
+      next.isArchived
+    );
     await cleanupRemovedUploadsForUser(
       env,
       userId,
       currentContent,
       next.isArchived ? [] : next.content
     );
+  } else {
+    const updateResult = await env.DB.prepare(
+      `UPDATE notes
+       SET title = ?,
+           icon = ?,
+           title_size = ?,
+           parent_id = CASE WHEN ? = 1 THEN ? ELSE parent_id END,
+           is_archived = ?,
+           sort_order = CASE WHEN ? = 1 THEN ? ELSE sort_order END,
+           updated_at = ?
+       WHERE id = ?
+         AND user_id = ?
+         AND is_archived = 0`
+    )
+      .bind(
+        next.title,
+        next.icon,
+        next.titleSize,
+        body.parentId === undefined ? 0 : 1,
+        next.parentId,
+        next.isArchived ? 1 : 0,
+        body.sortOrder === undefined ? 0 : 1,
+        next.sortOrder,
+        next.updatedAt,
+        id,
+        userId
+      )
+      .run();
+
+    if (updateResult.meta.changes !== 1) {
+      throw new HttpError("页面已在其他位置更新，请刷新后重试。", 409);
+    }
+
+    if (currentKind === "page" && body.isArchived !== undefined) {
+      await syncNoteIndexes(
+        env,
+        userId,
+        next.id,
+        next.kind,
+        next.title,
+        next.content,
+        next.updatedAt,
+        next.isArchived
+      );
+      if (next.isArchived) {
+        await cleanupRemovedUploadsForUser(env, userId, currentContent, []);
+      }
+    } else if (currentKind === "page" && body.title !== undefined) {
+      await env.DB.prepare(
+        `UPDATE note_search
+         SET title = ?, updated_at = ?
+         WHERE note_id = ? AND user_id = ?`
+      )
+        .bind(next.title, next.updatedAt, next.id, userId)
+        .run();
+    }
   }
 
   return json(next);
@@ -2802,6 +2940,20 @@ async function moveNote(
   }
 
   const body = await readJson<NoteMoveInput>(request);
+  if (
+    !Object.prototype.hasOwnProperty.call(body, "parentId") ||
+    (typeof body.parentId !== "string" && body.parentId !== null)
+  ) {
+    throw new HttpError("parentId 必须是字符串或 null。", 400);
+  }
+  if (
+    !Object.prototype.hasOwnProperty.call(body, "sortOrder") ||
+    typeof body.sortOrder !== "number" ||
+    !Number.isFinite(body.sortOrder)
+  ) {
+    throw new HttpError("sortOrder 必须是有限数值。", 400);
+  }
+
   const parentId = await resolveParentIdForUser(
     env,
     userId,
@@ -2809,7 +2961,7 @@ async function moveNote(
     body.parentId,
     current.id
   );
-  const sortOrder = cleanSortOrder(body.sortOrder, Number(current.sortOrder));
+  const sortOrder = body.sortOrder;
   const updatedAt = new Date().toISOString();
 
   await env.DB.prepare(
@@ -2958,6 +3110,14 @@ async function uploadFile(
   env: Env,
   userId: string
 ): Promise<Response> {
+  const declaredRequestSize = Number(request.headers.get("Content-Length") ?? 0);
+  if (
+    Number.isFinite(declaredRequestSize) &&
+    declaredRequestSize > MULTIPART_UPLOAD_MAX_BYTES
+  ) {
+    return error("单个文件不能超过 80 MB。", 413);
+  }
+
   const formData = await request.formData();
   const entry = formData.get("file");
 
@@ -3005,7 +3165,11 @@ async function importRemoteImage(
     return error("这个链接不是可直接预览的图片。", 415);
   }
 
-  const blob = await response.blob();
+  const blob = await readResponseBlobWithLimit(
+    response,
+    REMOTE_IMAGE_IMPORT_MAX_BYTES,
+    mimeType
+  );
   if (blob.size === 0) {
     return error("远程图片内容为空。", 422);
   }
@@ -3017,6 +3181,43 @@ async function importRemoteImage(
   const fileName = ensureFileNameExtension(baseFileName, mimeType);
   const result = await persistUploadBlob(env, userId, blob, fileName, mimeType, blob.size);
   return json(result, 201);
+}
+
+async function readResponseBlobWithLimit(
+  response: Response,
+  maxBytes: number,
+  mimeType: string
+): Promise<Blob> {
+  if (!response.body) {
+    return new Blob([], { type: mimeType });
+  }
+
+  const reader = response.body.getReader();
+  const chunks: Uint8Array<ArrayBuffer>[] = [];
+  let totalBytes = 0;
+
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) {
+        break;
+      }
+
+      totalBytes += value.byteLength;
+      if (totalBytes > maxBytes) {
+        await reader.cancel("remote image exceeds import limit").catch(() => undefined);
+        throw new HttpError("图片太大，无法自动导入到媒体库。", 413);
+      }
+
+      const copy = new Uint8Array(value.byteLength);
+      copy.set(value);
+      chunks.push(copy);
+    }
+  } finally {
+    reader.releaseLock();
+  }
+
+  return new Blob(chunks, { type: mimeType });
 }
 
 async function getStoredFile(
@@ -3285,7 +3486,7 @@ async function updateAdminUser(
     nextPasswordHash = await hashPassword(nextPassword, nextPasswordSalt);
   }
 
-  await env.DB.prepare(
+  const updateUserStatement = env.DB.prepare(
     `UPDATE users
      SET username = ?,
          is_admin = ?,
@@ -3299,8 +3500,16 @@ async function updateAdminUser(
       nextPasswordSalt,
       nextPasswordHash,
       targetUserId
-    )
-    .run();
+    );
+
+  if (nextPassword) {
+    await env.DB.batch([
+      updateUserStatement,
+      env.DB.prepare("DELETE FROM sessions WHERE user_id = ?").bind(targetUserId)
+    ]);
+  } else {
+    await updateUserStatement.run();
+  }
 
   const updated = await getAdminUserById(env, targetUserId);
   if (!updated) {
@@ -3652,21 +3861,30 @@ function rowToAdminUpload(row: DbUploadRow): AdminUpload {
   };
 }
 
-function parseBlocks(value: unknown): NoteBlock[] {
+function parseStoredBlocks(value: unknown): NoteBlock[] | null {
   if (typeof value !== "string") {
-    return [];
+    return null;
   }
 
   try {
-    return normalizeBlocks(JSON.parse(value));
+    const parsed = JSON.parse(value);
+    if (!Array.isArray(parsed)) {
+      return null;
+    }
+
+    const blocks = normalizeBlocks(parsed);
+    return blocks.length === parsed.length ? blocks : null;
   } catch {
-    return [];
+    return null;
   }
 }
 
 async function readNoteContent(env: Env, row: DbNoteRow, userId?: string): Promise<NoteBlock[]> {
+  const legacyBlocks = parseStoredBlocks(row.content);
+  const hasLegacyContent = Boolean(legacyBlocks && legacyBlocks.length > 0);
+
   if (!row.contentKey) {
-    const blocks = parseBlocks(row.content);
+    const blocks = legacyBlocks ?? [];
     if (userId && cleanNoteKind(row.kind) === "page") {
       try {
         await migrateLegacyNoteContentToR2(env, userId, row, blocks);
@@ -3689,17 +3907,38 @@ async function readNoteContent(env: Env, row: DbNoteRow, userId?: string): Promi
         noteId: row.id,
         contentKey: row.contentKey
       });
-      return parseBlocks(row.content);
+      if (hasLegacyContent) {
+        return legacyBlocks ?? [];
+      }
+      throw new HttpError("页面正文暂时无法读取，请稍后重试。", 503);
     }
 
-    return parseBlocks(await object.text());
+    const storedBlocks = parseStoredBlocks(await object.text());
+    if (storedBlocks) {
+      return storedBlocks;
+    }
+
+    console.error("R2 note content object is invalid", {
+      noteId: row.id,
+      contentKey: row.contentKey
+    });
+    if (hasLegacyContent) {
+      return legacyBlocks ?? [];
+    }
+    throw new HttpError("页面正文暂时无法读取，请稍后重试。", 503);
   } catch (cause) {
+    if (cause instanceof HttpError) {
+      throw cause;
+    }
     console.error("Failed to read R2 note content", {
       noteId: row.id,
       contentKey: row.contentKey,
       cause
     });
-    return parseBlocks(row.content);
+    if (hasLegacyContent) {
+      return legacyBlocks ?? [];
+    }
+    throw new HttpError("页面正文暂时无法读取，请稍后重试。", 503);
   }
 }
 
@@ -3858,7 +4097,7 @@ async function migrateLegacyNoteContentToR2(
 
   const storedContent = await persistNoteContent(env, userId, row.id, blocks, true);
   const summary = extractNoteSummary(blocks);
-  await env.DB.prepare(
+  const updateResult = await env.DB.prepare(
     `UPDATE notes
      SET content = ?,
          content_key = ?,
@@ -3876,7 +4115,16 @@ async function migrateLegacyNoteContentToR2(
       row.id,
       userId
     )
-    .run();
+    .run()
+    .catch(async (cause) => {
+      await deleteStaleNoteContent(env, storedContent.contentKey, null);
+      throw cause;
+    });
+
+  if (updateResult.meta.changes !== 1) {
+    await deleteStaleNoteContent(env, storedContent.contentKey, null);
+    return;
+  }
 
   row.content = storedContent.dbContent;
   row.contentKey = storedContent.contentKey;
@@ -3970,28 +4218,19 @@ async function syncNoteUploadRefs(
   content: NoteBlock[]
 ): Promise<void> {
   const uploadIds = Array.from(extractUploadIdsFromBlocks(content));
-  await env.DB.prepare("DELETE FROM note_upload_refs WHERE note_id = ?")
-    .bind(noteId)
-    .run();
-
-  if (uploadIds.length === 0) {
-    return;
-  }
-
-  await Promise.all(
-    uploadIds.map((uploadId) =>
+  await env.DB.batch([
+    env.DB.prepare("DELETE FROM note_upload_refs WHERE note_id = ?").bind(noteId),
+    ...uploadIds.map((uploadId) =>
       env.DB.prepare(
         `INSERT OR IGNORE INTO note_upload_refs (note_id, user_id, upload_id)
          VALUES (?, ?, ?)`
-      )
-        .bind(noteId, userId, uploadId)
-        .run()
+      ).bind(noteId, userId, uploadId)
     )
-  );
+  ]);
 }
 
 function getNoteContentObjectKey(userId: string, noteId: string): string {
-  return `${NOTE_CONTENT_OBJECT_PREFIX}/${userId}/${noteId}.json`;
+  return `${NOTE_CONTENT_OBJECT_PREFIX}/${userId}/${noteId}/${crypto.randomUUID()}.json`;
 }
 
 function byteLength(value: string): number {
@@ -4082,6 +4321,13 @@ function parseEmbeddedDataUrl(
 
   const isBase64 = metadata.split(";").includes("base64");
   const payload = value.slice(commaIndex + 1);
+  if (
+    (isBase64 && payload.length > Math.ceil((EMBEDDED_UPLOAD_MAX_BYTES * 4) / 3) + 8) ||
+    (!isBase64 && payload.length > EMBEDDED_UPLOAD_MAX_BYTES * 3)
+  ) {
+    return null;
+  }
+
   const bytes = isBase64 ? decodeBase64Bytes(payload) : decodeUrlEncodedBytes(payload);
 
   if (!bytes || bytes.byteLength === 0 || bytes.byteLength > EMBEDDED_UPLOAD_MAX_BYTES) {
@@ -4636,6 +4882,14 @@ async function persistUploadBlob(
   type: string,
   size: number
 ): Promise<UploadResult> {
+  const storedSize = Number(blob.size ?? size);
+  if (!Number.isFinite(storedSize) || storedSize <= 0) {
+    throw new HttpError("文件内容为空。", 400);
+  }
+  if (storedSize > UPLOAD_MAX_BYTES) {
+    throw new HttpError("单个文件不能超过 80 MB。", 413);
+  }
+
   const fileName = cleanFileName(name);
   const mimeType = detectMimeType(type, fileName);
   const uploadId = crypto.randomUUID();
@@ -4653,15 +4907,19 @@ async function persistUploadBlob(
        (id, user_id, object_key, file_name, mime_type, size, created_at)
      VALUES (?, ?, ?, ?, ?, ?, ?)`
   )
-    .bind(uploadId, userId, objectKey, fileName, mimeType, size, now)
-    .run();
+    .bind(uploadId, userId, objectKey, fileName, mimeType, storedSize, now)
+    .run()
+    .catch(async (cause) => {
+      await env.FILES.delete(objectKey);
+      throw cause;
+    });
 
   return {
     id: uploadId,
     url: `/api/files/${encodeURIComponent(uploadId)}`,
     name: fileName,
     mimeType,
-    size
+    size: storedSize
   };
 }
 
@@ -4898,14 +5156,17 @@ async function detachUploadFromUserNotes(
       const nextBlocks = stripUploadReferencesFromBlocks(currentBlocks, uploadId);
       const storedContent = await persistNoteContent(env, userId, note.id, nextBlocks, true);
       const nextSummary = extractNoteSummary(nextBlocks);
-      await env.DB.prepare(
+      const updateResult = await env.DB.prepare(
         `UPDATE notes
          SET content = ?,
              content_key = ?,
              content_size = ?,
              summary = ?,
              updated_at = ?
-         WHERE id = ?`
+         WHERE id = ?
+           AND user_id = ?
+           AND is_archived = 0
+           AND ((content_key = ?) OR (content_key IS NULL AND ? IS NULL))`
       )
         .bind(
           storedContent.dbContent,
@@ -4913,9 +5174,22 @@ async function detachUploadFromUserNotes(
           storedContent.contentSize,
           nextSummary,
           now,
-          note.id
+          note.id,
+          userId,
+          note.contentKey ?? null,
+          note.contentKey ?? null
         )
-        .run();
+        .run()
+        .catch(async (cause) => {
+          await deleteStaleNoteContent(env, storedContent.contentKey, null);
+          throw cause;
+        });
+
+      if (updateResult.meta.changes !== 1) {
+        await deleteStaleNoteContent(env, storedContent.contentKey, null);
+        throw new HttpError("页面已在其他位置更新，请刷新后重试。", 409);
+      }
+
       await deleteStaleNoteContent(env, note.contentKey, storedContent.contentKey);
       await syncNoteIndexes(env, userId, note.id, cleanNoteKind(note.kind), note.title, nextBlocks, now);
     })
@@ -5307,11 +5581,27 @@ function parseRangeHeader(value: string, totalSize: number): ByteRange | null {
 }
 
 async function readJson<T>(request: Request): Promise<T> {
+  let value: unknown;
   try {
-    return (await request.json()) as T;
+    value = await request.json();
   } catch {
-    return {} as T;
+    throw new HttpError("请求体必须是有效的 JSON。", 400);
   }
+
+  if (!isPlainObject(value)) {
+    throw new HttpError("JSON 请求体必须是普通对象。", 400);
+  }
+
+  return value as T;
+}
+
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    return false;
+  }
+
+  const prototype = Object.getPrototypeOf(value);
+  return prototype === Object.prototype || prototype === null;
 }
 
 function getCookie(request: Request, name: string): string | null {
@@ -5369,7 +5659,9 @@ function json(
     status,
     headers: {
       ...corsHeaders(),
+      "Cache-Control": "no-store",
       "Content-Type": "application/json; charset=utf-8",
+      "X-Content-Type-Options": "nosniff",
       ...extraHeaders
     }
   });

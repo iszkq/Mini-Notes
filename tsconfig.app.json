@@ -27,9 +27,11 @@
     "src/imageClipboard.ts",
     "src/main.tsx",
     "src/export.ts",
+    "src/exportWindow.ts",
     "src/shared.ts",
     "src/tenMinuteData.ts",
     "src/vite-env.d.ts",
-    "src/components/**/*.tsx"
+    "src/components/**/*.tsx",
+    "src/components/**/*.ts"
   ]
 }

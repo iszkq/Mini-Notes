@@ -3,6 +3,7 @@ import { Search, X } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
 import { loadEmojiIndex, type EmojiIndex, type EmojiItem } from "../emojiPacks";
+import { useDialogFocus } from "./useDialogFocus";
 
 type EmojiPackPickerProps = {
   open: boolean;
@@ -26,6 +27,7 @@ export function EmojiPackPicker({
   const [query, setQuery] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+  const dialogRef = useDialogFocus(open, onClose);
 
   useEffect(() => {
     if (!open) {
@@ -97,7 +99,9 @@ export function EmojiPackPicker({
         aria-modal="true"
         className="emoji-picker"
         onClick={(event) => event.stopPropagation()}
+        ref={dialogRef}
         role="dialog"
+        tabIndex={-1}
       >
         <header className="emoji-picker__header">
           <div>
@@ -112,6 +116,7 @@ export function EmojiPackPicker({
         <label className="search-box emoji-picker__search">
           <Search size={16} />
           <input
+            data-dialog-initial-focus
             onChange={(event) => setQuery(event.target.value)}
             placeholder="搜索表情"
             value={query}
@@ -119,9 +124,10 @@ export function EmojiPackPicker({
         </label>
 
         {data && !query.trim() ? (
-          <div className="emoji-picker__packs" role="tablist">
+          <div className="emoji-picker__packs" role="group" aria-label="表情包分类">
             {data.packs.map((pack) => (
               <button
+                aria-pressed={activePackId === pack.id}
                 className={clsx("emoji-picker__pack", activePackId === pack.id && "active")}
                 key={pack.id}
                 onClick={() => setActivePackId(pack.id)}

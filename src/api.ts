@@ -45,6 +45,8 @@ export class ApiError extends Error {
   }
 }
 
+const API_REQUEST_TIMEOUT_MS = 90_000;
+
 export async function getStatus(): Promise<SessionStatus> {
   return apiRequest("/api/status");
 }
@@ -386,21 +388,55 @@ async function apiRequest<T>(path: string, init: RequestInit = {}): Promise<T> {
     headers.set("Content-Type", "application/json");
   }
 
-  const response = await fetch(path, {
-    ...init,
-    credentials: "same-origin",
-    headers
-  });
-  const text = await response.text();
-  const data = tryParseJson(text);
-  const contentType = response.headers.get("Content-Type") ?? "";
-
-  if (!response.ok) {
-    const message = summarizeApiError(data, text, contentType, response.statusText);
-    throw new ApiError(message || "请求失败。", response.status);
+  const controller = new AbortController();
+  let timedOut = false;
+  const handleCallerAbort = () => controller.abort(init.signal?.reason);
+  if (init.signal?.aborted) {
+    handleCallerAbort();
+  } else {
+    init.signal?.addEventListener("abort", handleCallerAbort, { once: true });
   }
+  const timeoutId = window.setTimeout(() => {
+    timedOut = true;
+    controller.abort();
+  }, API_REQUEST_TIMEOUT_MS);
 
-  return (data ?? null) as T;
+  try {
+    const response = await fetch(path, {
+      ...init,
+      cache: "no-store",
+      credentials: "same-origin",
+      headers,
+      signal: controller.signal
+    });
+    const text = await response.text();
+    const data = tryParseJson(text);
+    const contentType = response.headers.get("Content-Type") ?? "";
+
+    if (!response.ok) {
+      const message = summarizeApiError(data, text, contentType, response.statusText);
+      throw new ApiError(message || "请求失败。", response.status);
+    }
+
+    return (data ?? null) as T;
+  } catch (cause) {
+    if (cause instanceof ApiError) {
+      throw cause;
+    }
+
+    if (timedOut) {
+      throw new ApiError("请求超时，请检查网络后重试。", 408);
+    }
+
+    if (cause instanceof DOMException && cause.name === "AbortError") {
+      throw new ApiError("请求已取消。", 499);
+    }
+
+    throw new ApiError("无法连接到服务，请检查网络后重试。", 0);
+  } finally {
+    window.clearTimeout(timeoutId);
+    init.signal?.removeEventListener("abort", handleCallerAbort);
+  }
 }
 
 function shouldSetJsonContentType(body: RequestInit["body"]): body is string {

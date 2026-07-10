@@ -1,6 +1,5 @@
 import clsx from "clsx";
 import type { PartialBlock } from "@blocknote/core";
-import "@blocknote/core/fonts/inter.css";
 import { zh } from "@blocknote/core/locales";
 import { BlockNoteView } from "@blocknote/mantine";
 import "@blocknote/mantine/style.css";
@@ -53,6 +52,12 @@ type TenMinuteReaderProps = {
   onError?: (message: string) => void;
 };
 
+type PendingTenMinuteDocumentSave = {
+  blocks: NoteBlock[];
+  lessonId: string;
+  version: number;
+};
+
 const TEN_MINUTE_DEFAULT_SETTINGS: TenMinuteReaderSettings = {
   lineSpacing: "normal",
   nameSidebarVisible: true,
@@ -76,6 +81,16 @@ const TEN_MINUTE_TEXT_SIZE_OPTIONS = [
 
 export function TenMinuteReader({ onError }: TenMinuteReaderProps) {
   const saveTimeoutRef = useRef<number | null>(null);
+  const settingsSaveTimeoutRef = useRef<number | null>(null);
+  const documentSaveQueueRef = useRef<Promise<void>>(Promise.resolve());
+  const settingsSaveQueueRef = useRef<Promise<void>>(Promise.resolve());
+  const pendingDocumentSavesRef = useRef<Map<string, PendingTenMinuteDocumentSave>>(new Map());
+  const documentSaveVersionRef = useRef(0);
+  const selectedLessonIdRef = useRef("");
+  const latestReaderSettingsRef = useRef<TenMinuteReaderSettings>(TEN_MINUTE_DEFAULT_SETTINGS);
+  const settingsLoadedRef = useRef(false);
+  const lastQueuedSettingsRef = useRef("");
+  const mountedRef = useRef(true);
   const [lessons, setLessons] = useState<TenMinuteLesson[]>([]);
   const [selectedLessonId, setSelectedLessonId] = useState("");
   const [readerSettings, setReaderSettings] = useState<TenMinuteReaderSettings>(
@@ -93,6 +108,7 @@ export function TenMinuteReader({ onError }: TenMinuteReaderProps) {
     () => lessons.find((lesson) => lesson.id === selectedLessonId) ?? lessons[0],
     [lessons, selectedLessonId]
   );
+  selectedLessonIdRef.current = selectedLesson?.id ?? "";
   const selectedLessonIndex = selectedLesson
     ? lessons.findIndex((lesson) => lesson.id === selectedLesson.id)
     : -1;
@@ -108,6 +124,94 @@ export function TenMinuteReader({ onError }: TenMinuteReaderProps) {
     [selectedLesson]
   );
 
+  const enqueueDocumentSave = useCallback(
+    (pending: PendingTenMinuteDocumentSave, reportState: boolean) => {
+      const execute = async () => {
+        try {
+          await updateTenMinuteLessonDocument(pending.lessonId, { blocks: pending.blocks });
+          if (
+            reportState &&
+            mountedRef.current &&
+            selectedLessonIdRef.current === pending.lessonId &&
+            documentSaveVersionRef.current === pending.version
+          ) {
+            setSaveStatus("saved");
+            setLocalError(null);
+          }
+        } catch (cause) {
+          const queuedRetry = pendingDocumentSavesRef.current.get(pending.lessonId);
+          if (!queuedRetry || queuedRetry.version < pending.version) {
+            pendingDocumentSavesRef.current.set(pending.lessonId, pending);
+          }
+          if (reportState && mountedRef.current) {
+            const message =
+              cause instanceof ApiError ? cause.message : "10分钟正文格式保存失败。";
+            if (selectedLessonIdRef.current === pending.lessonId) {
+              setSaveStatus("error");
+              setLocalError(message);
+            }
+            onError?.(message);
+          }
+        }
+      };
+
+      const queued = documentSaveQueueRef.current.then(execute, execute);
+      documentSaveQueueRef.current = queued;
+      return queued;
+    },
+    [onError]
+  );
+
+  const flushPendingDocumentSave = useCallback(
+    (reportState: boolean) => {
+      if (saveTimeoutRef.current !== null) {
+        window.clearTimeout(saveTimeoutRef.current);
+        saveTimeoutRef.current = null;
+      }
+
+      const pendingSaves = Array.from(pendingDocumentSavesRef.current.values()).sort(
+        (left, right) => left.version - right.version
+      );
+      if (pendingSaves.length === 0) {
+        return documentSaveQueueRef.current;
+      }
+
+      pendingDocumentSavesRef.current.clear();
+      pendingSaves.forEach((pending) => {
+        void enqueueDocumentSave(pending, reportState);
+      });
+      return documentSaveQueueRef.current;
+    },
+    [enqueueDocumentSave]
+  );
+
+  const enqueueSettingsSave = useCallback(
+    (settings: TenMinuteReaderSettings, reportState: boolean) => {
+      const signature = JSON.stringify(settings);
+      lastQueuedSettingsRef.current = signature;
+      const execute = async () => {
+        try {
+          await updateTenMinuteReaderSettings(settings);
+        } catch (cause) {
+          if (lastQueuedSettingsRef.current === signature) {
+            lastQueuedSettingsRef.current = "";
+          }
+          if (reportState && mountedRef.current) {
+            const message =
+              cause instanceof ApiError ? cause.message : "10分钟文字样式保存失败。";
+            setLocalError(message);
+            onError?.(message);
+          }
+        }
+      };
+
+      const queued = settingsSaveQueueRef.current.then(execute, execute);
+      settingsSaveQueueRef.current = queued;
+      return queued;
+    },
+    [onError]
+  );
+
   useEffect(() => {
     let cancelled = false;
 
@@ -120,6 +224,9 @@ export function TenMinuteReader({ onError }: TenMinuteReaderProps) {
         }
 
         setLessons(data.lessons);
+        latestReaderSettingsRef.current = data.settings;
+        settingsLoadedRef.current = true;
+        lastQueuedSettingsRef.current = JSON.stringify(data.settings);
         setReaderSettings(data.settings);
         setSelectedLessonId((current) =>
           data.lessons.some((lesson) => lesson.id === current)
@@ -149,23 +256,34 @@ export function TenMinuteReader({ onError }: TenMinuteReaderProps) {
   }, [onError]);
 
   useEffect(() => {
+    latestReaderSettingsRef.current = readerSettings;
     if (!settingsLoaded) {
       return;
     }
 
-    const timeoutId = window.setTimeout(() => {
-      void updateTenMinuteReaderSettings(readerSettings).catch((cause) => {
-        const message = cause instanceof ApiError ? cause.message : "10分钟文字样式保存失败。";
-        setLocalError(message);
-        onError?.(message);
-      });
+    if (JSON.stringify(readerSettings) === lastQueuedSettingsRef.current) {
+      return;
+    }
+
+    if (settingsSaveTimeoutRef.current !== null) {
+      window.clearTimeout(settingsSaveTimeoutRef.current);
+    }
+    settingsSaveTimeoutRef.current = window.setTimeout(() => {
+      settingsSaveTimeoutRef.current = null;
+      void enqueueSettingsSave(readerSettings, true);
     }, 360);
 
-    return () => window.clearTimeout(timeoutId);
-  }, [onError, readerSettings, settingsLoaded]);
+    return () => {
+      if (settingsSaveTimeoutRef.current !== null) {
+        window.clearTimeout(settingsSaveTimeoutRef.current);
+        settingsSaveTimeoutRef.current = null;
+      }
+    };
+  }, [enqueueSettingsSave, readerSettings, settingsLoaded]);
 
   useEffect(() => {
     if (!selectedLesson) {
+      void flushPendingDocumentSave(true);
       setDocumentBlocks(null);
       return;
     }
@@ -177,6 +295,11 @@ export function TenMinuteReader({ onError }: TenMinuteReaderProps) {
 
     async function loadLessonDocument(lesson: TenMinuteLesson) {
       try {
+        await flushPendingDocumentSave(true);
+        if (cancelled) {
+          return;
+        }
+
         const document = await getTenMinuteLessonDocument(lesson.id);
         if (cancelled) {
           return;
@@ -207,7 +330,7 @@ export function TenMinuteReader({ onError }: TenMinuteReaderProps) {
     return () => {
       cancelled = true;
     };
-  }, [onError, selectedLesson]);
+  }, [flushPendingDocumentSave, onError, selectedLesson]);
 
   const handleDocumentChange = useCallback(
     (blocks: NoteBlock[]) => {
@@ -219,33 +342,53 @@ export function TenMinuteReader({ onError }: TenMinuteReaderProps) {
         window.clearTimeout(saveTimeoutRef.current);
       }
 
+      const version = documentSaveVersionRef.current + 1;
+      documentSaveVersionRef.current = version;
+      pendingDocumentSavesRef.current.set(selectedLesson.id, {
+        blocks: JSON.parse(JSON.stringify(blocks)) as NoteBlock[],
+        lessonId: selectedLesson.id,
+        version
+      });
       setSaveStatus("saving");
       saveTimeoutRef.current = window.setTimeout(() => {
         saveTimeoutRef.current = null;
-        void updateTenMinuteLessonDocument(selectedLesson.id, { blocks })
-          .then(() => {
-            setSaveStatus("saved");
-            setLocalError(null);
-          })
-          .catch((cause) => {
-            const message = cause instanceof ApiError ? cause.message : "10分钟正文格式保存失败。";
-            setSaveStatus("error");
-            setLocalError(message);
-            onError?.(message);
-          });
+        void flushPendingDocumentSave(true);
       }, TEN_MINUTE_SAVE_DELAY_MS);
     },
-    [onError, selectedLesson]
+    [flushPendingDocumentSave, selectedLesson]
   );
 
-  useEffect(
-    () => () => {
+  useEffect(() => {
+    mountedRef.current = true;
+    const handlePageHide = () => {
+      void flushPendingDocumentSave(false);
+      if (
+        settingsLoadedRef.current &&
+        JSON.stringify(latestReaderSettingsRef.current) !== lastQueuedSettingsRef.current
+      ) {
+        void enqueueSettingsSave(latestReaderSettingsRef.current, false);
+      }
+    };
+
+    window.addEventListener("pagehide", handlePageHide);
+    return () => {
+      mountedRef.current = false;
+      window.removeEventListener("pagehide", handlePageHide);
       if (saveTimeoutRef.current !== null) {
         window.clearTimeout(saveTimeoutRef.current);
       }
-    },
-    []
-  );
+      if (settingsSaveTimeoutRef.current !== null) {
+        window.clearTimeout(settingsSaveTimeoutRef.current);
+      }
+      void flushPendingDocumentSave(false);
+      if (
+        settingsLoadedRef.current &&
+        JSON.stringify(latestReaderSettingsRef.current) !== lastQueuedSettingsRef.current
+      ) {
+        void enqueueSettingsSave(latestReaderSettingsRef.current, false);
+      }
+    };
+  }, [enqueueSettingsSave, flushPendingDocumentSave]);
 
   if (isLoading) {
     return (
