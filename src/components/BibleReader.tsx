@@ -1,11 +1,15 @@
 import clsx from "clsx";
 import {
+  ArrowRight,
   BookOpen,
   ChevronLeft,
   ChevronRight,
   Copy,
+  LibraryBig,
   MessageSquareText,
   Pencil,
+  RefreshCw,
+  Search,
   Trash2,
   X
 } from "lucide-react";
@@ -45,6 +49,9 @@ type ChapterTarget = {
 type BibleReaderProps = {
   onError?: (message: string) => void;
 };
+
+type BibleReaderView = "reader" | "notes";
+type BibleNotesSort = "updated" | "scripture";
 
 type BibleSelectionTarget = {
   anchorRect: BibleAnchorClientRect;
@@ -138,6 +145,8 @@ const BIBLE_NOTE_CARD_CONNECTOR_TOP = 28;
 const BIBLE_NOTE_DIAGONAL_RUN = 28;
 const BIBLE_NOTE_TEXT_CONNECTOR_OFFSET = -1;
 const BIBLE_NOTE_DRAFT_ID = "__bible_note_draft__";
+const BIBLE_NOTE_BODY_MAX_LENGTH = 6000;
+const BIBLE_NOTES_PAGE_SIZE = 60;
 const BIBLE_NOTE_SAME_LINE_THRESHOLD = 8;
 const BIBLE_NOTE_LIST_WIDTH = 260;
 
@@ -146,11 +155,18 @@ export function BibleReader({ onError }: BibleReaderProps) {
   const [loading, setLoading] = useState(true);
   const [chapterLoading, setChapterLoading] = useState(false);
   const [noteSaving, setNoteSaving] = useState(false);
+  const [readerView, setReaderView] = useState<BibleReaderView>("reader");
   const [currentCovenant, setCurrentCovenant] = useState<"old" | "new">("old");
   const [selectedBook, setSelectedBook] = useState("");
   const [selectedChapter, setSelectedChapter] = useState<number | null>(null);
   const [verses, setVerses] = useState<BibleVerse[]>([]);
   const [notes, setNotes] = useState<BibleNote[]>([]);
+  const [allNotes, setAllNotes] = useState<BibleNote[] | null>(null);
+  const [allNotesLoading, setAllNotesLoading] = useState(false);
+  const [allNotesError, setAllNotesError] = useState<string | null>(null);
+  const [notesQuery, setNotesQuery] = useState("");
+  const [notesBookFilter, setNotesBookFilter] = useState("");
+  const [notesSort, setNotesSort] = useState<BibleNotesSort>("updated");
   const [selectionTarget, setSelectionTarget] = useState<BibleSelectionTarget | null>(null);
   const [selectionToolbar, setSelectionToolbar] = useState<BibleSelectionToolbar | null>(null);
   const [activeNoteId, setActiveNoteId] = useState<string | null>(null);
@@ -164,6 +180,10 @@ export function BibleReader({ onError }: BibleReaderProps) {
   const noteCardRefs = useRef<Map<string, HTMLElement>>(new Map());
   const verseRowRefs = useRef<Map<number, HTMLElement>>(new Map());
   const versesRef = useRef<HTMLDivElement | null>(null);
+  const pendingOpenNoteIdRef = useRef<string | null>(null);
+  const allNotesRequestIdRef = useRef(0);
+  const selectedBookRef = useRef("");
+  const selectedChapterRef = useRef<number | null>(null);
 
   const activeBooks = useMemo(
     () => (data ? data.booksByCovenant[currentCovenant] ?? [] : []),
@@ -203,6 +223,85 @@ export function BibleReader({ onError }: BibleReaderProps) {
       ? chapterSequence[currentChapterIndex + 1]
       : null;
   const sortedVerses = useMemo(() => sortBibleVerses(verses), [verses]);
+  const bibleBookOrder = useMemo(() => {
+    const books = data
+      ? [...(data.booksByCovenant.old ?? []), ...(data.booksByCovenant.new ?? [])]
+      : [];
+    return new Map(books.map((book, index) => [book, index]));
+  }, [data]);
+  const allNoteBooks = useMemo(
+    () =>
+      [...new Set((allNotes ?? []).map((note) => note.bookName))].sort(
+        (left, right) =>
+          (bibleBookOrder.get(left) ?? Number.MAX_SAFE_INTEGER) -
+            (bibleBookOrder.get(right) ?? Number.MAX_SAFE_INTEGER) ||
+          left.localeCompare(right, "zh-CN")
+      ),
+    [allNotes, bibleBookOrder]
+  );
+  useEffect(() => {
+    if (notesBookFilter && !allNoteBooks.includes(notesBookFilter)) {
+      setNotesBookFilter("");
+    }
+  }, [allNoteBooks, notesBookFilter]);
+  const visibleAllNotes = useMemo(() => {
+    const tokens = notesQuery
+      .trim()
+      .toLocaleLowerCase("zh-CN")
+      .split(/\s+/)
+      .filter(Boolean);
+    const filtered = (allNotes ?? []).filter((note) => {
+      if (notesBookFilter && note.bookName !== notesBookFilter) {
+        return false;
+      }
+
+      if (tokens.length === 0) {
+        return true;
+      }
+
+      const haystack = [
+        note.bookName,
+        `${note.chapterNumber}:${note.verseStart}`,
+        formatBibleNoteReference(note),
+        note.selectedText,
+        note.body,
+        ...note.tags
+      ]
+        .join(" ")
+        .toLocaleLowerCase("zh-CN");
+      return tokens.every((token) => haystack.includes(token));
+    });
+
+    return filtered.sort((left, right) => {
+      if (notesSort === "updated") {
+        return new Date(right.updatedAt).getTime() - new Date(left.updatedAt).getTime();
+      }
+
+      const bookOrderDifference =
+        (bibleBookOrder.get(left.bookName) ?? Number.MAX_SAFE_INTEGER) -
+        (bibleBookOrder.get(right.bookName) ?? Number.MAX_SAFE_INTEGER);
+      if (bookOrderDifference !== 0) {
+        return bookOrderDifference;
+      }
+
+      const bookNameDifference = left.bookName.localeCompare(right.bookName, "zh-CN");
+      return (
+        bookNameDifference ||
+        left.chapterNumber - right.chapterNumber ||
+        left.verseStart - right.verseStart ||
+        left.verseEnd - right.verseEnd
+      );
+    });
+  }, [allNotes, bibleBookOrder, notesBookFilter, notesQuery, notesSort]);
+  const coveredChapterCount = useMemo(
+    () => new Set((allNotes ?? []).map((note) => `${note.bookName}:${note.chapterNumber}`)).size,
+    [allNotes]
+  );
+
+  useEffect(() => {
+    selectedBookRef.current = selectedBook;
+    selectedChapterRef.current = selectedChapter;
+  }, [selectedBook, selectedChapter]);
 
   useEffect(() => {
     let cancelled = false;
@@ -214,11 +313,20 @@ export function BibleReader({ onError }: BibleReaderProps) {
         }
 
         setData(nextData);
-        const covenant = "old";
-        const firstBook = nextData.booksByCovenant[covenant]?.[0] ?? "";
-        setCurrentCovenant(covenant);
-        setSelectedBook(firstBook);
-        setSelectedChapter(firstBook ? nextData.chaptersByBook[firstBook]?.[0] ?? null : null);
+        if (!selectedBookRef.current) {
+          const covenant = "old";
+          const firstBook = nextData.booksByCovenant[covenant]?.[0] ?? "";
+          const firstChapter = firstBook ? nextData.chaptersByBook[firstBook]?.[0] ?? null : null;
+          selectedBookRef.current = firstBook;
+          selectedChapterRef.current = firstChapter;
+          setCurrentCovenant(covenant);
+          setSelectedBook(firstBook);
+          setSelectedChapter(firstChapter);
+        } else {
+          setCurrentCovenant(
+            nextData.booksByCovenant.new?.includes(selectedBookRef.current) ? "new" : "old"
+          );
+        }
       })
       .catch((error) => {
         const message = error instanceof Error ? error.message : "经文加载失败。";
@@ -235,6 +343,57 @@ export function BibleReader({ onError }: BibleReaderProps) {
     };
   }, [onError]);
 
+  const loadAllBibleNotes = useCallback(async () => {
+    const requestId = allNotesRequestIdRef.current + 1;
+    allNotesRequestIdRef.current = requestId;
+    setAllNotesLoading(true);
+    setAllNotesError(null);
+    try {
+      const nextNotes: BibleNote[] = [];
+      let offset = 0;
+
+      while (true) {
+        const batch = await listBibleNotes(undefined, undefined, {
+          limit: BIBLE_NOTES_PAGE_SIZE,
+          offset
+        });
+        if (allNotesRequestIdRef.current !== requestId) {
+          return;
+        }
+
+        nextNotes.push(...batch);
+        if (batch.length < BIBLE_NOTES_PAGE_SIZE) {
+          break;
+        }
+        offset += batch.length;
+      }
+
+      setAllNotes(nextNotes);
+    } catch (error) {
+      if (allNotesRequestIdRef.current !== requestId) {
+        return;
+      }
+      const message = error instanceof Error ? error.message : "全部读经笔记加载失败。";
+      setAllNotesError(message);
+      onError?.(message);
+    } finally {
+      if (allNotesRequestIdRef.current === requestId) {
+        setAllNotesLoading(false);
+      }
+    }
+  }, [onError]);
+
+  useEffect(() => {
+    if (
+      readerView === "notes" &&
+      allNotes === null &&
+      !allNotesLoading &&
+      !allNotesError
+    ) {
+      void loadAllBibleNotes();
+    }
+  }, [allNotes, allNotesError, allNotesLoading, loadAllBibleNotes, readerView]);
+
   useEffect(() => {
     if (!selectedBook || selectedChapter == null) {
       setVerses([]);
@@ -244,6 +403,8 @@ export function BibleReader({ onError }: BibleReaderProps) {
 
     let cancelled = false;
     setChapterLoading(true);
+    setVerses([]);
+    setNotes([]);
     setEditingNoteId(null);
     setEditingBody("");
     setComposerBody("");
@@ -280,6 +441,25 @@ export function BibleReader({ onError }: BibleReaderProps) {
       cancelled = true;
     };
   }, [onError, selectedBook, selectedChapter]);
+
+  useEffect(() => {
+    const pendingNoteId = pendingOpenNoteIdRef.current;
+    if (readerView !== "reader" || !pendingNoteId) {
+      return;
+    }
+
+    if (!notes.some((note) => note.id === pendingNoteId)) {
+      return;
+    }
+
+    pendingOpenNoteIdRef.current = null;
+    setActiveNoteId(pendingNoteId);
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() =>
+        scrollBibleNoteCardIntoView(noteCardRefs.current, pendingNoteId)
+      );
+    });
+  }, [notes, readerView]);
 
   const noteListItems = useMemo<BibleNoteListItem[]>(() => {
     const items: BibleNoteListItem[] = notes.map((note) => ({
@@ -442,6 +622,8 @@ export function BibleReader({ onError }: BibleReaderProps) {
   }, [selectionTarget, composerBody]);
 
   const goToChapter = (target: ChapterTarget) => {
+    selectedBookRef.current = target.book;
+    selectedChapterRef.current = target.chapter;
     setCurrentCovenant(target.covenant);
     setSelectedBook(target.book);
     setSelectedChapter(target.chapter);
@@ -449,10 +631,41 @@ export function BibleReader({ onError }: BibleReaderProps) {
 
   const selectCovenant = (covenant: "old" | "new") => {
     const nextBook = data?.booksByCovenant[covenant]?.[0] ?? "";
+    const nextChapter = nextBook ? data?.chaptersByBook[nextBook]?.[0] ?? null : null;
+    selectedBookRef.current = nextBook;
+    selectedChapterRef.current = nextChapter;
     setCurrentCovenant(covenant);
     setSelectedBook(nextBook);
-    setSelectedChapter(nextBook ? data?.chaptersByBook[nextBook]?.[0] ?? null : null);
+    setSelectedChapter(nextChapter);
   };
+
+  const syncAllNotes = useCallback((note: BibleNote) => {
+    allNotesRequestIdRef.current += 1;
+    setAllNotesLoading(false);
+    setAllNotes((current) => {
+      if (current === null) {
+        return current;
+      }
+
+      return [note, ...current.filter((item) => item.id !== note.id)];
+    });
+  }, []);
+
+  const openNoteInReader = useCallback(
+    (note: BibleNote) => {
+      const covenant = data?.booksByCovenant.new?.includes(note.bookName) ? "new" : "old";
+      pendingOpenNoteIdRef.current = note.id;
+      selectedBookRef.current = note.bookName;
+      selectedChapterRef.current = note.chapterNumber;
+      setEditingNoteId(null);
+      setEditingBody("");
+      setCurrentCovenant(covenant);
+      setSelectedBook(note.bookName);
+      setSelectedChapter(note.chapterNumber);
+      setReaderView("reader");
+    },
+    [data]
+  );
 
   const handleBibleTextSelection = useCallback(() => {
     if (!selectedBook || selectedChapter == null) {
@@ -590,7 +803,7 @@ export function BibleReader({ onError }: BibleReaderProps) {
   }, []);
 
   const saveComposer = async () => {
-    if (!selectionTarget || !selectedBook || selectedChapter == null) {
+    if (!selectionTarget) {
       return;
     }
 
@@ -605,30 +818,46 @@ export function BibleReader({ onError }: BibleReaderProps) {
       const matchingNote = findMatchingBibleNote(notes, selectionTarget);
       if (matchingNote) {
         const updated = await updateBibleNote(matchingNote.id, { body });
-        setNotes((current) =>
-          sortBibleNotes(current.map((item) => (item.id === updated.id ? updated : item)))
-        );
+        const isCurrentChapter =
+          selectedBookRef.current === updated.bookName &&
+          selectedChapterRef.current === updated.chapterNumber;
+        if (isCurrentChapter) {
+          setNotes((current) =>
+            sortBibleNotes(current.map((item) => (item.id === updated.id ? updated : item)))
+          );
+        }
+        syncAllNotes(updated);
         setComposerBody("");
         setSelectionTarget(null);
-        setActiveNoteId(updated.id);
-        setEditingNoteId(updated.id);
-        setEditingBody(updated.body);
+        if (isCurrentChapter) {
+          setActiveNoteId(updated.id);
+          setEditingNoteId(updated.id);
+          setEditingBody(updated.body);
+        }
         return;
       }
 
       const created = await createBibleNote({
         body,
-        bookName: selectedBook,
-        chapterNumber: selectedChapter,
+        bookName: selectionTarget.bookName,
+        chapterNumber: selectionTarget.chapterNumber,
         selectedText: selectionTarget.selectedText,
         selectedVerses: selectionTarget.selectedVerses,
         verseEnd: selectionTarget.verseEnd,
         verseStart: selectionTarget.verseStart
       });
-      setNotes((current) => sortBibleNotes([...current, created]));
+      const isCurrentChapter =
+        selectedBookRef.current === created.bookName &&
+        selectedChapterRef.current === created.chapterNumber;
+      if (isCurrentChapter) {
+        setNotes((current) => sortBibleNotes([...current, created]));
+      }
+      syncAllNotes(created);
       setComposerBody("");
       setSelectionTarget(null);
-      setActiveNoteId(created.id);
+      if (isCurrentChapter) {
+        setActiveNoteId(created.id);
+      }
     } catch (error) {
       onError?.(error instanceof Error ? error.message : "保存读经笔记失败。");
     } finally {
@@ -649,6 +878,7 @@ export function BibleReader({ onError }: BibleReaderProps) {
       setNotes((current) =>
         sortBibleNotes(current.map((item) => (item.id === updated.id ? updated : item)))
       );
+      syncAllNotes(updated);
       setActiveNoteId(updated.id);
       setEditingNoteId(null);
       setEditingBody("");
@@ -671,7 +901,12 @@ export function BibleReader({ onError }: BibleReaderProps) {
     setNoteSaving(true);
     try {
       await deleteBibleNote(pendingDeleteNoteId);
+      allNotesRequestIdRef.current += 1;
+      setAllNotesLoading(false);
       setNotes((current) => current.filter((item) => item.id !== pendingDeleteNoteId));
+      setAllNotes((current) =>
+        current?.filter((item) => item.id !== pendingDeleteNoteId) ?? current
+      );
       if (activeNoteId === pendingDeleteNoteId) {
         setActiveNoteId(null);
       }
@@ -695,17 +930,323 @@ export function BibleReader({ onError }: BibleReaderProps) {
       <header className="bible-reader-hero">
         <div>
           <span className="bible-reader-eyebrow">
-            <BookOpen size={15} />
-            读经
+            {readerView === "notes" ? <LibraryBig size={15} /> : <BookOpen size={15} />}
+            {readerView === "notes" ? "读经笔记" : "读经"}
           </span>
-          <h1>{selectedBook && selectedChapter ? `${selectedBook} 第 ${selectedChapter} 章` : "读经"}</h1>
+          <h1>
+            {readerView === "notes"
+              ? "我的笔记"
+              : selectedBook && selectedChapter
+                ? `${selectedBook} 第 ${selectedChapter} 章`
+                : "读经"}
+          </h1>
         </div>
-        <div className="bible-reader-stats">
-          <strong>{notes.length}</strong>
-          <span>本章笔记</span>
+        <div className="bible-reader-hero-actions">
+          <nav className="bible-reader-view-switch" aria-label="读经视图">
+            <button
+              aria-pressed={readerView === "reader"}
+              className={clsx(readerView === "reader" && "active")}
+              onClick={() => setReaderView("reader")}
+              type="button"
+            >
+              <BookOpen size={15} />
+              读经
+            </button>
+            <button
+              aria-pressed={readerView === "notes"}
+              className={clsx(readerView === "notes" && "active")}
+              onClick={() => setReaderView("notes")}
+              type="button"
+            >
+              <LibraryBig size={15} />
+              我的笔记
+            </button>
+          </nav>
+          <div className="bible-reader-stats">
+            <strong>
+              {readerView === "notes" ? (allNotes === null ? "—" : allNotes.length) : notes.length}
+            </strong>
+            <span>{readerView === "notes" ? "全部笔记" : "本章笔记"}</span>
+          </div>
         </div>
       </header>
 
+      {readerView === "notes" ? (
+        <section
+          className="bible-notes-library"
+          aria-busy={allNotesLoading}
+          aria-label="我的读经笔记"
+        >
+          <div className="bible-notes-overview">
+            <article>
+              <span>笔记总数</span>
+              <strong>{allNotes?.length ?? "—"}</strong>
+              <small>记录下的阅读亮光</small>
+            </article>
+            <article>
+              <span>覆盖范围</span>
+              <strong>{allNoteBooks.length}</strong>
+              <small>{coveredChapterCount} 个章节</small>
+            </article>
+            <article>
+              <span>最近整理</span>
+              <strong className="is-date">
+                {allNotes?.[0] ? formatBibleNoteDay(allNotes[0].updatedAt) : "暂无"}
+              </strong>
+              <small>{allNotes?.[0] ? formatBibleNoteReference(allNotes[0]) : "从一段经文开始"}</small>
+            </article>
+          </div>
+
+          <div className="bible-notes-controls">
+            <div className="bible-notes-search" role="search">
+              <Search size={17} />
+              <input
+                aria-label="搜索读经笔记"
+                onChange={(event) => setNotesQuery(event.target.value)}
+                placeholder="搜索笔记、经文摘录或出处…"
+                type="search"
+                value={notesQuery}
+              />
+              {notesQuery ? (
+                <button
+                  aria-label="清空搜索"
+                  onClick={() => setNotesQuery("")}
+                  type="button"
+                >
+                  <X size={14} />
+                </button>
+              ) : null}
+            </div>
+
+            <label className="bible-notes-book-filter">
+              <span>经卷</span>
+              <select
+                onChange={(event) => setNotesBookFilter(event.target.value)}
+                value={notesBookFilter}
+              >
+                <option value="">全部经卷</option>
+                {allNoteBooks.map((book) => (
+                  <option key={book} value={book}>
+                    {book}
+                  </option>
+                ))}
+              </select>
+            </label>
+
+            <div className="bible-notes-sort" aria-label="笔记排序" role="group">
+              <button
+                aria-pressed={notesSort === "updated"}
+                className={clsx(notesSort === "updated" && "active")}
+                onClick={() => setNotesSort("updated")}
+                type="button"
+              >
+                最近更新
+              </button>
+              <button
+                aria-pressed={notesSort === "scripture"}
+                className={clsx(notesSort === "scripture" && "active")}
+                onClick={() => setNotesSort("scripture")}
+                type="button"
+              >
+                经文顺序
+              </button>
+            </div>
+
+            <button
+              aria-label="刷新全部笔记"
+              className="bible-notes-refresh"
+              disabled={allNotesLoading}
+              onClick={() => void loadAllBibleNotes()}
+              title="刷新全部笔记"
+              type="button"
+            >
+              <RefreshCw className={clsx(allNotesLoading && "is-spinning")} size={16} />
+            </button>
+          </div>
+
+          {allNotesError && allNotes !== null ? (
+            <div className="bible-notes-sync-error" role="alert">
+              <span>同步失败，当前显示上次成功加载的内容。</span>
+              <button onClick={() => void loadAllBibleNotes()} type="button">
+                重新同步
+              </button>
+            </div>
+          ) : null}
+
+          {allNotesError && allNotes === null ? (
+            <div className="bible-notes-empty is-filtered">
+              <RefreshCw size={24} />
+              <h2>笔记暂时没有加载出来</h2>
+              <p>{allNotesError}</p>
+              <button
+                className="toolbar-button"
+                onClick={() => void loadAllBibleNotes()}
+                type="button"
+              >
+                重新加载
+              </button>
+            </div>
+          ) : allNotesLoading && allNotes === null ? (
+            <div
+              className="bible-notes-loading"
+              aria-label="正在加载全部笔记"
+              aria-live="polite"
+              role="status"
+            >
+              {[0, 1, 2].map((item) => (
+                <div key={item} />
+              ))}
+            </div>
+          ) : allNotes?.length === 0 ? (
+            <div className="bible-notes-empty">
+              <div>
+                <LibraryBig size={25} />
+              </div>
+              <h2>你的读经笔记会汇集在这里</h2>
+              <p>回到经文，选中触动你的句子，就可以写下第一条笔记。</p>
+              <button className="toolbar-button" onClick={() => setReaderView("reader")} type="button">
+                去读经
+                <ArrowRight size={15} />
+              </button>
+            </div>
+          ) : visibleAllNotes.length === 0 ? (
+            <div className="bible-notes-empty is-filtered">
+              <Search size={24} />
+              <h2>没有找到匹配的笔记</h2>
+              <p>试试更短的关键词，或切换到“全部经卷”。</p>
+              <button
+                className="toolbar-button"
+                onClick={() => {
+                  setNotesQuery("");
+                  setNotesBookFilter("");
+                }}
+                type="button"
+              >
+                清除筛选
+              </button>
+            </div>
+          ) : (
+            <>
+              <div className="bible-notes-results-head">
+                <p>
+                  共 <strong>{visibleAllNotes.length}</strong> 条笔记
+                  {notesBookFilter ? ` · ${notesBookFilter}` : ""}
+                </p>
+                {allNotesLoading ? (
+                  <span>正在同步…</span>
+                ) : allNotesError ? (
+                  <span>显示上次同步结果</span>
+                ) : (
+                  <span>内容已完整展开</span>
+                )}
+              </div>
+              <div className="bible-notes-grid">
+                {visibleAllNotes.map((note) => {
+                  const isEditing = editingNoteId === note.id;
+                  return (
+                    <article className="bible-notes-card" key={note.id}>
+                      <header className="bible-notes-card__head">
+                        <button onClick={() => openNoteInReader(note)} type="button">
+                          <BookOpen size={14} />
+                          {formatBibleNoteReference(note)}
+                        </button>
+                        <time dateTime={note.updatedAt} title={formatBibleNoteFullTime(note.updatedAt)}>
+                          {formatBibleNoteRelativeTime(note.updatedAt)}
+                        </time>
+                      </header>
+
+                      {note.selectedText ? (
+                        <blockquote className="bible-notes-card__excerpt">
+                          <span>经文摘录</span>
+                          {note.selectedText}
+                        </blockquote>
+                      ) : null}
+
+                      {isEditing ? (
+                        <div className="bible-notes-card__editor">
+                          <textarea
+                            aria-label={`编辑 ${formatBibleNoteReference(note)} 的笔记内容`}
+                            autoFocus
+                            maxLength={BIBLE_NOTE_BODY_MAX_LENGTH}
+                            onChange={(event) => setEditingBody(event.target.value)}
+                            value={editingBody}
+                          />
+                          <small className="bible-note-length">
+                            {editingBody.length.toLocaleString("zh-CN")} / {BIBLE_NOTE_BODY_MAX_LENGTH.toLocaleString("zh-CN")}
+                          </small>
+                          <div className="bible-reader-note-actions">
+                            <button
+                              className="note-comment-card__button primary"
+                              disabled={noteSaving || !editingBody.trim()}
+                              onClick={() => void saveEditingNote(note)}
+                              type="button"
+                            >
+                              保存
+                            </button>
+                            <button
+                              className="note-comment-card__button"
+                              disabled={noteSaving}
+                              onClick={() => {
+                                setEditingNoteId(null);
+                                setEditingBody("");
+                              }}
+                              type="button"
+                            >
+                              取消
+                            </button>
+                          </div>
+                        </div>
+                      ) : (
+                        <p className="bible-notes-card__body">{note.body}</p>
+                      )}
+
+                      {note.tags.length > 0 ? (
+                        <div className="bible-notes-card__tags">
+                          {note.tags.map((tag) => (
+                            <span key={tag}>#{tag}</span>
+                          ))}
+                        </div>
+                      ) : null}
+
+                      {!isEditing ? (
+                        <footer className="bible-notes-card__footer">
+                          <button onClick={() => openNoteInReader(note)} type="button">
+                            查看原文
+                            <ArrowRight size={14} />
+                          </button>
+                          <div>
+                            <button
+                              aria-label={`编辑 ${formatBibleNoteReference(note)} 的笔记`}
+                              disabled={noteSaving}
+                              onClick={() => {
+                                setEditingNoteId(note.id);
+                                setEditingBody(note.body);
+                              }}
+                              title="编辑笔记"
+                              type="button"
+                            >
+                              <Pencil size={14} />
+                            </button>
+                            <button
+                              aria-label={`删除 ${formatBibleNoteReference(note)} 的笔记`}
+                              disabled={noteSaving}
+                              onClick={() => requestRemoveNote(note)}
+                              title="删除笔记"
+                              type="button"
+                            >
+                              <Trash2 size={14} />
+                            </button>
+                          </div>
+                        </footer>
+                      ) : null}
+                    </article>
+                  );
+                })}
+              </div>
+            </>
+          )}
+        </section>
+      ) : (
       <div className="bible-reader-layout">
         <aside className="bible-reader-sidebar" aria-label="读经卷章">
           <div className="bible-reader-segment">
@@ -733,8 +1274,11 @@ export function BibleReader({ onError }: BibleReaderProps) {
                   className={clsx(selectedBook === book && "active")}
                   key={book}
                   onClick={() => {
+                    const firstChapter = data?.chaptersByBook[book]?.[0] ?? null;
+                    selectedBookRef.current = book;
+                    selectedChapterRef.current = firstChapter;
                     setSelectedBook(book);
-                    setSelectedChapter(data?.chaptersByBook[book]?.[0] ?? null);
+                    setSelectedChapter(firstChapter);
                   }}
                   type="button"
                 >
@@ -751,7 +1295,10 @@ export function BibleReader({ onError }: BibleReaderProps) {
                 <button
                   className={clsx(selectedChapter === chapter && "active")}
                   key={`${selectedBook}-${chapter}`}
-                  onClick={() => setSelectedChapter(chapter)}
+                  onClick={() => {
+                    selectedChapterRef.current = chapter;
+                    setSelectedChapter(chapter);
+                  }}
                   type="button"
                 >
                   {chapter}
@@ -881,11 +1428,16 @@ export function BibleReader({ onError }: BibleReaderProps) {
                         {selectionTarget.selectedText}
                       </blockquote>
                       <textarea
+                        aria-label="新读经笔记内容"
+                        maxLength={BIBLE_NOTE_BODY_MAX_LENGTH}
                         onChange={(event) => setComposerBody(event.target.value)}
                         placeholder="写下感触、问题、祷告或其他..."
                         ref={composerRef}
                         value={composerBody}
                       />
+                      <small className="bible-note-length">
+                        {composerBody.length.toLocaleString("zh-CN")} / {BIBLE_NOTE_BODY_MAX_LENGTH.toLocaleString("zh-CN")}
+                      </small>
                       <button
                         className="note-comment-card__button primary"
                         disabled={noteSaving || !composerBody.trim()}
@@ -930,10 +1482,15 @@ export function BibleReader({ onError }: BibleReaderProps) {
                     {isEditing ? (
                       <>
                         <textarea
+                          aria-label={`编辑 ${formatBibleNoteReference(note)} 的笔记内容`}
                           autoFocus
+                          maxLength={BIBLE_NOTE_BODY_MAX_LENGTH}
                           onChange={(event) => setEditingBody(event.target.value)}
                           value={editingBody}
                         />
+                        <small className="bible-note-length">
+                          {editingBody.length.toLocaleString("zh-CN")} / {BIBLE_NOTE_BODY_MAX_LENGTH.toLocaleString("zh-CN")}
+                        </small>
                         <div className="bible-reader-note-actions">
                           <button
                             className="note-comment-card__button primary"
@@ -961,6 +1518,7 @@ export function BibleReader({ onError }: BibleReaderProps) {
                         <div className="bible-reader-note-actions">
                           <button
                             className="note-comment-card__icon-button"
+                            disabled={noteSaving}
                             onClick={(event) => {
                               event.stopPropagation();
                               setSelectionTarget(null);
@@ -976,6 +1534,7 @@ export function BibleReader({ onError }: BibleReaderProps) {
                           </button>
                           <button
                             className="note-comment-card__icon-button"
+                            disabled={noteSaving}
                             onClick={(event) => {
                               event.stopPropagation();
                               requestRemoveNote(note);
@@ -1015,6 +1574,7 @@ export function BibleReader({ onError }: BibleReaderProps) {
           ) : null}
         </section>
       </div>
+      )}
       <ConfirmDialog
         confirmLabel="删除"
         danger
@@ -1046,6 +1606,56 @@ function formatBibleNoteTime(value: string): string {
     hour: "2-digit",
     minute: "2-digit"
   }).format(new Date(value));
+}
+
+function formatBibleNoteReference(note: BibleNote): string {
+  const verseRange =
+    note.verseStart === note.verseEnd
+      ? String(note.verseStart)
+      : `${note.verseStart}–${note.verseEnd}`;
+  return `${note.bookName} ${note.chapterNumber}:${verseRange}`;
+}
+
+function formatBibleNoteDay(value: string): string {
+  return new Intl.DateTimeFormat("zh-CN", {
+    month: "short",
+    day: "numeric"
+  }).format(new Date(value));
+}
+
+function formatBibleNoteFullTime(value: string): string {
+  return new Intl.DateTimeFormat("zh-CN", {
+    year: "numeric",
+    month: "long",
+    day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit"
+  }).format(new Date(value));
+}
+
+function formatBibleNoteRelativeTime(value: string): string {
+  const elapsed = Date.now() - new Date(value).getTime();
+  const minute = 60_000;
+  const hour = minute * 60;
+  const day = hour * 24;
+
+  if (!Number.isFinite(elapsed) || elapsed < 0) {
+    return formatBibleNoteDay(value);
+  }
+  if (elapsed < minute) {
+    return "刚刚";
+  }
+  if (elapsed < hour) {
+    return `${Math.floor(elapsed / minute)} 分钟前`;
+  }
+  if (elapsed < day) {
+    return `${Math.floor(elapsed / hour)} 小时前`;
+  }
+  if (elapsed < day * 7) {
+    return `${Math.floor(elapsed / day)} 天前`;
+  }
+
+  return formatBibleNoteDay(value);
 }
 
 function getBibleNotesForVerse(notes: BibleNote[], verseNumber: number): BibleNote[] {
@@ -1617,7 +2227,7 @@ function clearBrowserSelection() {
 
 function scrollBibleNoteCardIntoView(cardRefs: Map<string, HTMLElement>, noteId: string) {
   cardRefs.get(noteId)?.scrollIntoView({
-    behavior: "smooth",
+    behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth",
     block: "nearest"
   });
 }

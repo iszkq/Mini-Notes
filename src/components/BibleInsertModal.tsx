@@ -319,7 +319,10 @@ export function BibleInsertModal({ open, onClose, onConfirm }: BibleInsertModalP
     setFocusedVerseId(pendingFocusVerseId);
     window.requestAnimationFrame(() => {
       const target = contentSectionRef.current?.querySelector(`[data-verse-id="${pendingFocusVerseId}"]`);
-      target?.scrollIntoView({ block: "center", behavior: "smooth" });
+      target?.scrollIntoView({
+        block: "center",
+        behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth"
+      });
     });
 
     if (focusTimerRef.current) {
@@ -487,7 +490,10 @@ export function BibleInsertModal({ open, onClose, onConfirm }: BibleInsertModalP
     setCurrentPage(nextPage);
     setShowJumpInput(false);
     setJumpPageInput("");
-    contentSectionRef.current?.scrollTo({ top: 0, behavior: "smooth" });
+    contentSectionRef.current?.scrollTo({
+      top: 0,
+      behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth"
+    });
   };
 
   const handleConfirm = () => {

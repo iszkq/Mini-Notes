@@ -2882,7 +2882,13 @@ function App() {
   }
 
   return (
-    <main className={clsx("app-shell", sidebarCollapsed && "sidebar-collapsed")}>
+    <main
+      className={clsx(
+        "app-shell",
+        sidebarCollapsed && "sidebar-collapsed",
+        workspaceView !== "notes" && "workspace-focused"
+      )}
+    >
       <aside className="sidebar" aria-label="页面侧边栏">
         <div className="brand-row">
           <div className="brand-mark">MN</div>

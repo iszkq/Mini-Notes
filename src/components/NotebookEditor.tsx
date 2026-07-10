@@ -2876,7 +2876,7 @@ function getCommentEmptyCopy(
 function scrollCommentIntoView(root: HTMLElement | null, commentId: string) {
   const marker = root?.querySelector<HTMLElement>(getCommentMarkerSelector(commentId));
   marker?.scrollIntoView({
-    behavior: "smooth",
+    behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth",
     block: "center"
   });
 }

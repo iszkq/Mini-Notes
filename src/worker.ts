@@ -672,13 +672,27 @@ async function listBibleNotes(
 ): Promise<Response> {
   const bookName = cleanBibleBookName(url.searchParams.get("book") ?? "");
   const chapterNumber = Number(url.searchParams.get("chapter") ?? 0);
+  const hasBookFilter = Boolean(bookName);
+  const hasChapterFilter = url.searchParams.has("chapter");
+  const requestedLimit = Number(url.searchParams.get("limit") ?? 60);
+  const requestedOffset = Number(url.searchParams.get("offset") ?? 0);
+  const pageLimit =
+    Number.isInteger(requestedLimit) && requestedLimit > 0
+      ? Math.min(requestedLimit, 100)
+      : 60;
+  const pageOffset =
+    Number.isInteger(requestedOffset) && requestedOffset >= 0
+      ? requestedOffset
+      : 0;
 
-  if (!bookName || !Number.isInteger(chapterNumber) || chapterNumber <= 0) {
+  if (
+    hasBookFilter !== hasChapterFilter ||
+    (hasChapterFilter && (!Number.isInteger(chapterNumber) || chapterNumber <= 0))
+  ) {
     return error("请选择有效的卷名和章节。", 400);
   }
 
-  const { results } = await env.DB.prepare(
-    `SELECT id,
+  const selectSql = `SELECT id,
             book_name AS bookName,
             chapter_number AS chapterNumber,
             verse_start AS verseStart,
@@ -692,13 +706,20 @@ async function listBibleNotes(
             content_key AS contentKey,
             content_size AS contentSize
      FROM bible_notes
-     WHERE user_id = ?
-       AND book_name = ?
-       AND chapter_number = ?
-     ORDER BY verse_start ASC, verse_end ASC, updated_at DESC`
-  )
-    .bind(userId, bookName, chapterNumber)
-    .all<DbBibleNoteRow>();
+     WHERE user_id = ?`;
+  const statement = hasBookFilter
+    ? env.DB.prepare(
+        `${selectSql}
+         AND book_name = ?
+         AND chapter_number = ?
+         ORDER BY verse_start ASC, verse_end ASC, updated_at DESC, id DESC`
+      ).bind(userId, bookName, chapterNumber)
+    : env.DB.prepare(
+        `${selectSql}
+         ORDER BY updated_at DESC, created_at DESC, id DESC
+         LIMIT ? OFFSET ?`
+      ).bind(userId, pageLimit, pageOffset);
+  const { results } = await statement.all<DbBibleNoteRow>();
 
   const notes = await Promise.all(
     results.map((row) => materializeBibleNote(env, userId, row))

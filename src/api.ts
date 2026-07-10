@@ -116,14 +116,26 @@ export async function disableShare(id: string): Promise<Note> {
 }
 
 export async function listBibleNotes(
-  bookName: string,
-  chapterNumber: number
+  bookName?: string,
+  chapterNumber?: number,
+  options?: { limit?: number; offset?: number }
 ): Promise<BibleNote[]> {
-  const params = new URLSearchParams({
-    book: bookName,
-    chapter: String(chapterNumber)
-  });
-  return apiRequest(`/api/bible/notes?${params}`);
+  const params = new URLSearchParams();
+  if (bookName) {
+    params.set("book", bookName);
+  }
+  if (chapterNumber != null) {
+    params.set("chapter", String(chapterNumber));
+  }
+  if (options?.limit != null) {
+    params.set("limit", String(options.limit));
+  }
+  if (options?.offset != null) {
+    params.set("offset", String(options.offset));
+  }
+
+  const query = params.toString();
+  return apiRequest(`/api/bible/notes${query ? `?${query}` : ""}`);
 }
 
 export async function createBibleNote(input: BibleNoteCreateInput): Promise<BibleNote> {
