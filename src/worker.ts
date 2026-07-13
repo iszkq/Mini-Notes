@@ -201,8 +201,8 @@ let emojiIndexPromise: Promise<string> | null = null;
 
 const SESSION_COOKIE_NAME = "cloud_notes_session";
 const SESSION_TTL_SECONDS = 60 * 60 * 24 * 30;
-const PBKDF2_ITERATIONS = 210000;
-const LEGACY_PBKDF2_ITERATIONS = [60000];
+const PBKDF2_ITERATIONS = 60000;
+const LEGACY_PBKDF2_ITERATIONS = [210000];
 const NOTE_CONTENT_OBJECT_PREFIX = "note-content";
 const BIBLE_NOTE_CONTENT_OBJECT_PREFIX = "bible-note-content";
 const TEN_MINUTE_CONTENT_OBJECT_KEY = "ten-minute/content.json";
