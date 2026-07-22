@@ -6,6 +6,7 @@ import {
   Check,
   ChevronDown,
   ChevronRight,
+  Copy,
   FolderPlus,
   HelpCircle,
   Layers3,
@@ -102,6 +103,7 @@ export function RevelationQaLibrary({ onError }: RevelationQaLibraryProps) {
   const itemsContextRef = useRef("");
   const itemsRequestIdRef = useRef(0);
   const loadMorePendingRef = useRef(false);
+  const copyFeedbackTimerRef = useRef<number | null>(null);
   const [library, setLibrary] = useState<RevelationQaLibraryData>(EMPTY_LIBRARY);
   const [itemsPage, setItemsPage] = useState<RevelationQaItemsPage>(EMPTY_ITEMS_PAGE);
   const [isLoading, setIsLoading] = useState(true);
@@ -117,6 +119,7 @@ export function RevelationQaLibrary({ onError }: RevelationQaLibraryProps) {
   const [deleteTarget, setDeleteTarget] = useState<DeleteTarget>(null);
   const [query, setQuery] = useState("");
   const [editingItemId, setEditingItemId] = useState<string | null>(null);
+  const [copiedItemId, setCopiedItemId] = useState<string | null>(null);
   const [itemDraft, setItemDraft] = useState<ItemDraft>(() => createEmptyItemDraft());
   const itemsContextKey = `${selectedSecondaryId ?? ""}\u0000${query}`;
 
@@ -125,6 +128,15 @@ export function RevelationQaLibrary({ onError }: RevelationQaLibraryProps) {
     itemsRequestIdRef.current += 1;
     loadMorePendingRef.current = false;
   }, [itemsContextKey]);
+
+  useEffect(
+    () => () => {
+      if (copyFeedbackTimerRef.current !== null) {
+        window.clearTimeout(copyFeedbackTimerRef.current);
+      }
+    },
+    []
+  );
 
   const reportError = useCallback(
     (cause: unknown, fallback: string) => {
@@ -725,6 +737,26 @@ export function RevelationQaLibrary({ onError }: RevelationQaLibraryProps) {
     setItemDraft(createEmptyItemDraft(selectedSecondaryId ?? ""));
   }
 
+  async function handleCopyItem(item: RevelationQaItem) {
+    const copied = await copyText(formatQaItemText(item));
+    if (!copied) {
+      const message = "复制失败，请手动复制题目和答案。";
+      setLocalError(message);
+      onError?.(message);
+      return;
+    }
+
+    setCopiedItemId(item.id);
+    setLocalError(null);
+    if (copyFeedbackTimerRef.current !== null) {
+      window.clearTimeout(copyFeedbackTimerRef.current);
+    }
+    copyFeedbackTimerRef.current = window.setTimeout(() => {
+      setCopiedItemId(null);
+      copyFeedbackTimerRef.current = null;
+    }, 1400);
+  }
+
   function updateAnswer(index: number, value: string) {
     setItemDraft((current) => ({
       ...current,
@@ -1070,10 +1102,26 @@ export function RevelationQaLibrary({ onError }: RevelationQaLibraryProps) {
                       </span>
                     </button>
                     <div className="qa-library-item-actions">
-                      <button className="qa-library-icon-button" onClick={() => beginEditItem(item)} type="button">
+                      <button
+                        aria-label={copiedItemId === item.id ? "已复制题目和答案" : "复制题目和答案"}
+                        className={clsx("qa-library-icon-button", copiedItemId === item.id && "copied")}
+                        onClick={() => void handleCopyItem(item)}
+                        title={copiedItemId === item.id ? "已复制" : "复制题目和答案"}
+                        type="button"
+                      >
+                        {copiedItemId === item.id ? <Check size={13} /> : <Copy size={13} />}
+                      </button>
+                      <button
+                        aria-label="编辑问答"
+                        className="qa-library-icon-button"
+                        onClick={() => beginEditItem(item)}
+                        title="编辑问答"
+                        type="button"
+                      >
                         <Pencil size={13} />
                       </button>
                       <button
+                        aria-label="删除问答"
                         className="qa-library-icon-button danger"
                         onClick={() =>
                           setDeleteTarget({
@@ -1083,6 +1131,7 @@ export function RevelationQaLibrary({ onError }: RevelationQaLibraryProps) {
                             type: "item"
                           })
                         }
+                        title="删除问答"
                         type="button"
                       >
                         <Trash2 size={13} />
@@ -1330,6 +1379,41 @@ function splitTags(value: string): string[] {
         .slice(0, 12)
     )
   );
+}
+
+function formatQaItemText(item: RevelationQaItem): string {
+  const answers = item.answers
+    .map((answer, index) => `${index + 1}. ${answer.trim()}`)
+    .join("\n");
+
+  return `问题：${item.question.trim()}\n\n答案：\n${answers}`;
+}
+
+async function copyText(text: string): Promise<boolean> {
+  const value = text.trim();
+  if (!value) {
+    return false;
+  }
+
+  try {
+    await navigator.clipboard.writeText(value);
+    return true;
+  } catch {
+    const textarea = document.createElement("textarea");
+    try {
+      textarea.value = value;
+      textarea.setAttribute("readonly", "true");
+      textarea.style.position = "fixed";
+      textarea.style.opacity = "0";
+      document.body.appendChild(textarea);
+      textarea.select();
+      return document.execCommand("copy");
+    } catch {
+      return false;
+    } finally {
+      textarea.remove();
+    }
+  }
 }
 
 function adjustQaItemCount(
