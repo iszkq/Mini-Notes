@@ -4902,8 +4902,11 @@ html {
   place-items: center;
   width: 18px;
   height: 30px;
+  padding: 0;
+  border: 0;
   border-radius: 6px;
   color: #99958d;
+  background: transparent;
   cursor: grab;
   opacity: 0.42;
   transition:
@@ -6701,6 +6704,16 @@ button.note-breadcrumb__item:hover {
     -webkit-overflow-scrolling: touch;
   }
 
+  .public-shell {
+    width: 100%;
+    height: 100dvh;
+    min-height: 100dvh;
+    overflow-x: hidden;
+    overflow-y: auto;
+    overscroll-behavior-y: contain;
+    -webkit-overflow-scrolling: touch;
+  }
+
   .app-shell .sidebar,
   .app-shell.sidebar-collapsed .sidebar,
   .app-shell.workspace-focused .sidebar {
@@ -6832,6 +6845,29 @@ button.note-breadcrumb__item:hover {
     padding-bottom: 8px;
     overflow-y: auto;
     -webkit-overflow-scrolling: touch;
+  }
+
+  .note-row,
+  .category-row {
+    touch-action: pan-y;
+  }
+
+  .sidebar-drag-handle {
+    width: 32px;
+    height: 38px;
+    margin-right: -5px;
+    opacity: 0.72;
+    touch-action: none;
+    -webkit-user-select: none;
+    user-select: none;
+  }
+
+  .note-list.is-dragging .sidebar-drag-handle,
+  .note-row.dragging .sidebar-drag-handle,
+  .category-row.dragging .sidebar-drag-handle {
+    color: var(--ui-accent-strong);
+    background: rgba(47, 111, 115, 0.1);
+    opacity: 1;
   }
 
   .sidebar-collapse-button {

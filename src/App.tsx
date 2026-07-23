@@ -41,6 +41,7 @@ import {
   type DragEvent as ReactDragEvent,
   type FormEvent,
   type MouseEvent as ReactMouseEvent,
+  type PointerEvent as ReactPointerEvent,
   type ReactNode,
   lazy,
   useCallback,
@@ -291,6 +292,7 @@ function App() {
   const noteListRef = useRef<HTMLElement | null>(null);
   const dragAutoScrollFrameRef = useRef<number | null>(null);
   const dragAutoScrollStateRef = useRef<DragAutoScrollState | null>(null);
+  const touchDragPointerRef = useRef<number | null>(null);
   const notesRef = useRef<NoteSummary[]>([]);
   const noteSaveQueueRef = useRef<Promise<boolean>>(Promise.resolve(true));
   const noteSavePendingCountRef = useRef(0);
@@ -2188,6 +2190,125 @@ function App() {
     moveDraggedRecord(parentId, null);
   };
 
+  const startTouchRecordDrag = (
+    event: ReactPointerEvent<HTMLElement>,
+    record: NoteSummary
+  ) => {
+    if (event.pointerType === "mouse" || query.trim() || editingCategoryId === record.id) {
+      return;
+    }
+
+    event.preventDefault();
+    event.stopPropagation();
+    touchDragPointerRef.current = event.pointerId;
+    event.currentTarget.setPointerCapture(event.pointerId);
+    setDraggedNoteId(record.id);
+    draggedNoteIdRef.current = record.id;
+    suppressNoteClickRef.current = true;
+    updateDropTarget(null);
+    clearDragExpandTimer();
+    stopDragAutoScroll();
+    if (typeof navigator.vibrate === "function") {
+      navigator.vibrate(12);
+    }
+  };
+
+  const updateTouchRecordDrag = (event: ReactPointerEvent<HTMLElement>) => {
+    if (
+      touchDragPointerRef.current !== event.pointerId ||
+      !draggedNoteIdRef.current ||
+      typeof document === "undefined"
+    ) {
+      return;
+    }
+
+    event.preventDefault();
+    updateDragAutoScroll(event.clientY);
+    const hovered = document.elementFromPoint(event.clientX, event.clientY) as HTMLElement | null;
+    const recordElement = hovered?.closest<HTMLElement>("[data-sidebar-record-id]") ?? null;
+    const recordId = recordElement?.dataset.sidebarRecordId;
+
+    if (recordElement && recordId) {
+      const hoveredRecord = notesRef.current.find((record) => record.id === recordId);
+      if (!hoveredRecord) {
+        updateDropTarget(null);
+        return;
+      }
+
+      const pointerEvent = {
+        clientY: event.clientY,
+        currentTarget: recordElement
+      } as ReactDragEvent<HTMLElement>;
+      const nextTarget =
+        hoveredRecord.kind === "category"
+          ? getCategoryDropTarget(pointerEvent, hoveredRecord)
+          : getNoteDropTarget(pointerEvent, hoveredRecord);
+      updateDropTarget(nextTarget);
+
+      if (hoveredRecord.kind === "category" && nextTarget?.position === "inside") {
+        scheduleCategoryAutoExpand(hoveredRecord.id);
+      } else {
+        clearDragExpandTimer();
+      }
+      return;
+    }
+
+    const groupElement = hovered?.closest<HTMLElement>("[data-touch-drop-group]") ?? null;
+    if (!groupElement) {
+      clearDragExpandTimer();
+      updateDropTarget(null);
+      return;
+    }
+
+    const parentId = groupElement.dataset.touchDropParentId || null;
+    const anchorId = groupElement.dataset.touchDropAnchorId || null;
+    const draggedRecord = notesRef.current.find(
+      (record) => record.id === draggedNoteIdRef.current
+    );
+    const targetParent = parentId
+      ? notesRef.current.find((record) => record.id === parentId) ?? null
+      : null;
+    if (
+      !draggedRecord ||
+      (draggedRecord.kind === "category" && parentId !== null && targetParent?.kind !== "category") ||
+      (parentId && isDescendantRecord(parentId, draggedRecord.id))
+    ) {
+      clearDragExpandTimer();
+      updateDropTarget(null);
+      return;
+    }
+
+    updateDropTarget({ anchorId, parentId, beforeId: null, position: "append" });
+    scheduleCategoryAutoExpand(parentId);
+  };
+
+  const finishTouchRecordDrag = (
+    event: ReactPointerEvent<HTMLElement>,
+    cancelled = false
+  ) => {
+    if (touchDragPointerRef.current !== event.pointerId) {
+      return;
+    }
+
+    event.preventDefault();
+    event.stopPropagation();
+    touchDragPointerRef.current = null;
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+      event.currentTarget.releasePointerCapture(event.pointerId);
+    }
+
+    const target = dropTargetRef.current;
+    if (!cancelled && target) {
+      moveDraggedRecord(target.parentId, target.beforeId);
+    } else {
+      handleDragEnd();
+    }
+
+    window.setTimeout(() => {
+      suppressNoteClickRef.current = false;
+    }, 120);
+  };
+
   const createNewNote = useCallback(async (parentId: string | null = null) => {
     const sessionEpoch = authSessionEpochRef.current;
     const navigationIntent = navigationIntentRef.current + 1;
@@ -3383,9 +3504,23 @@ function App() {
               {category.title}
             </button>
           )}
-          <span aria-hidden="true" className="sidebar-drag-handle" title="按住拖动分类">
+          <button
+            aria-label={`拖动分类：${category.title}`}
+            className="sidebar-drag-handle"
+            draggable={false}
+            onDragStart={(event) => {
+              event.preventDefault();
+              event.stopPropagation();
+            }}
+            onPointerCancel={(event) => finishTouchRecordDrag(event, true)}
+            onPointerDown={(event) => startTouchRecordDrag(event, category)}
+            onPointerMove={updateTouchRecordDrag}
+            onPointerUp={(event) => finishTouchRecordDrag(event)}
+            title="按住拖动分类"
+            type="button"
+          >
             <GripVertical size={14} />
-          </span>
+          </button>
         </div>
 
         {!isCollapsed ? (
@@ -3405,6 +3540,9 @@ function App() {
                   ? "放到文件夹末尾"
                   : undefined
             }
+            data-touch-drop-anchor-id={category.id}
+            data-touch-drop-group="true"
+            data-touch-drop-parent-id={category.id}
             onDragOver={(event) => handleGroupDragOver(event, category.id, category.id)}
             onDrop={(event) => handleGroupDrop(event, category.id, category.id)}
           >
@@ -3500,9 +3638,23 @@ function App() {
               </span>
             </span>
           </button>
-          <span aria-hidden="true" className="sidebar-drag-handle" title="按住拖动页面">
+          <button
+            aria-label={`拖动页面：${note.title}`}
+            className="sidebar-drag-handle"
+            draggable={false}
+            onDragStart={(event) => {
+              event.preventDefault();
+              event.stopPropagation();
+            }}
+            onPointerCancel={(event) => finishTouchRecordDrag(event, true)}
+            onPointerDown={(event) => startTouchRecordDrag(event, note)}
+            onPointerMove={updateTouchRecordDrag}
+            onPointerUp={(event) => finishTouchRecordDrag(event)}
+            title="按住拖动页面"
+            type="button"
+          >
             <GripVertical size={14} />
-          </span>
+          </button>
         </div>
         {childNotes.length > 0 ? (
           <div
@@ -3518,6 +3670,9 @@ function App() {
               showDropAfterAtSubtreeEnd && depth > 1 && "drop-after-subtree-deep"
             )}
             data-drop-label={draggedRecord?.kind === "page" ? "放为子页面" : undefined}
+            data-touch-drop-anchor-id={note.id}
+            data-touch-drop-group="true"
+            data-touch-drop-parent-id={note.id}
             onDragOver={(event) => handleGroupDragOver(event, note.id, note.id)}
             onDrop={(event) => handleGroupDrop(event, note.id, note.id)}
             style={showDropAfterAtSubtreeEnd ? depthStyle : undefined}
@@ -4005,6 +4160,9 @@ function App() {
                       ? "放到未分类"
                       : undefined
                 }
+                data-touch-drop-anchor-id={UNCATEGORIZED_GROUP_KEY}
+                data-touch-drop-group="true"
+                data-touch-drop-parent-id=""
                 onDragOver={(event) =>
                   handleGroupDragOver(event, null, UNCATEGORIZED_GROUP_KEY)
                 }
