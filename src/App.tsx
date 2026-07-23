@@ -19,6 +19,7 @@ import {
   Link2,
   Lock,
   LogOut,
+  Menu,
   PanelLeftClose,
   PanelLeftOpen,
   Pencil,
@@ -256,6 +257,7 @@ function App() {
 
     return window.localStorage.getItem(SIDEBAR_COLLAPSED_STORAGE_KEY) === "true";
   });
+  const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
   const [collapsedCategoryIds, setCollapsedCategoryIds] = useState<string[]>([]);
   const [editingCategoryId, setEditingCategoryId] = useState<string | null>(null);
   const [editingCategoryTitle, setEditingCategoryTitle] = useState("");
@@ -372,6 +374,25 @@ function App() {
     window.localStorage.setItem(SIDEBAR_COLLAPSED_STORAGE_KEY, String(sidebarCollapsed));
   }, [sidebarCollapsed]);
 
+  useEffect(() => {
+    if (!mobileSidebarOpen) {
+      return;
+    }
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        setMobileSidebarOpen(false);
+      }
+    };
+
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [mobileSidebarOpen]);
+
+  useEffect(() => {
+    setMobileSidebarOpen(false);
+  }, [selectedId, workspaceView]);
+
   const handleLoggedOut = useCallback((nextHasUsers = true) => {
     authSessionEpochRef.current += 1;
     navigationIntentRef.current += 1;
@@ -397,6 +418,7 @@ function App() {
     setExportPending(false);
     setExportSelection([]);
     setWorkspaceView("notes");
+    setMobileSidebarOpen(false);
     setNotesBrowserLocation({ kind: "page" });
     setCollapsedCategoryIds([]);
     setEditingCategoryId(null);
@@ -1358,6 +1380,7 @@ function App() {
       const navigationIntent = navigationIntentRef.current + 1;
       navigationIntentRef.current = navigationIntent;
       setWorkspaceView("notes");
+      setMobileSidebarOpen(false);
       if (id === draftRef.current?.id && !isLoadingNote) {
         setNotesBrowserLocation({ kind: "page" });
         return;
@@ -1420,6 +1443,7 @@ function App() {
     (categoryId: string | null = null) => {
       navigationIntentRef.current += 1;
       setWorkspaceView("notes");
+      setMobileSidebarOpen(false);
       setSidebarCollapsed(false);
       setQuery("");
       setShareOpen(false);
@@ -2169,6 +2193,7 @@ function App() {
     const navigationIntent = navigationIntentRef.current + 1;
     navigationIntentRef.current = navigationIntent;
     setWorkspaceView("notes");
+    setMobileSidebarOpen(false);
     setSidebarCollapsed(false);
     setCategoryActionMenu(null);
     if (draft && dirty) {
@@ -3778,9 +3803,17 @@ function App() {
       className={clsx(
         "app-shell",
         sidebarCollapsed && "sidebar-collapsed",
+        mobileSidebarOpen && "mobile-sidebar-open",
         workspaceView !== "notes" && "workspace-focused"
       )}
     >
+      <button
+        aria-label="关闭页面列表"
+        className="mobile-sidebar-backdrop"
+        onClick={() => setMobileSidebarOpen(false)}
+        tabIndex={mobileSidebarOpen ? 0 : -1}
+        type="button"
+      />
       <aside className="sidebar" aria-label="页面侧边栏">
         <div className="brand-row">
           <div className="brand-mark">MN</div>
@@ -3788,6 +3821,14 @@ function App() {
             <strong>Mini Notes</strong>
             <span>{sessionUser?.username ?? "当前账号"} · {noteCount} 篇</span>
           </div>
+          <button
+            aria-label="关闭页面列表"
+            className="icon-button mobile-sidebar-close"
+            onClick={() => setMobileSidebarOpen(false)}
+            type="button"
+          >
+            <PanelLeftClose size={18} />
+          </button>
         </div>
 
         <button
@@ -3843,7 +3884,10 @@ function App() {
         <div className="sidebar-view-toggle">
           <button
             className={clsx("toolbar-button sidebar-view-button", workspaceView === "notes" && "active")}
-            onClick={() => setWorkspaceView("notes")}
+            onClick={() => {
+              setWorkspaceView("notes");
+              setMobileSidebarOpen(false);
+            }}
             title="笔记"
             type="button"
           >
@@ -3852,7 +3896,10 @@ function App() {
           </button>
           <button
             className={clsx("toolbar-button sidebar-view-button", workspaceView === "bible" && "active")}
-            onClick={() => setWorkspaceView("bible")}
+            onClick={() => {
+              setWorkspaceView("bible");
+              setMobileSidebarOpen(false);
+            }}
             title="读经"
             type="button"
           >
@@ -3861,7 +3908,10 @@ function App() {
           </button>
           <button
             className={clsx("toolbar-button sidebar-view-button", workspaceView === "ten-minute" && "active")}
-            onClick={() => setWorkspaceView("ten-minute")}
+            onClick={() => {
+              setWorkspaceView("ten-minute");
+              setMobileSidebarOpen(false);
+            }}
             title="10分钟"
             type="button"
           >
@@ -3870,7 +3920,10 @@ function App() {
           </button>
           <button
             className={clsx("toolbar-button sidebar-view-button", workspaceView === "revelation-qa" && "active")}
-            onClick={() => setWorkspaceView("revelation-qa")}
+            onClick={() => {
+              setWorkspaceView("revelation-qa");
+              setMobileSidebarOpen(false);
+            }}
             title="启示录问答库"
             type="button"
           >
@@ -3880,7 +3933,10 @@ function App() {
           {sessionUser?.isAdmin ? (
             <button
               className={clsx("toolbar-button sidebar-view-button", workspaceView === "admin" && "active")}
-              onClick={() => setWorkspaceView("admin")}
+              onClick={() => {
+                setWorkspaceView("admin");
+                setMobileSidebarOpen(false);
+              }}
               title="管理"
               type="button"
             >
@@ -3986,7 +4042,16 @@ function App() {
       </aside>
 
       <section className="workspace">
-        <header className="topbar">
+        <header className={clsx("topbar", !draft && "is-compact")}>
+          <button
+            aria-expanded={mobileSidebarOpen}
+            aria-label="打开页面列表"
+            className="icon-button mobile-sidebar-trigger"
+            onClick={() => setMobileSidebarOpen(true)}
+            type="button"
+          >
+            <Menu size={19} />
+          </button>
           <div className="topbar-left">
             {!isAdminView &&
             !isBibleView &&

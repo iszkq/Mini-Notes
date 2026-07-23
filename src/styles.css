@@ -6655,3 +6655,528 @@ button.note-breadcrumb__item:hover {
     transform: none;
   }
 }
+
+/* Mobile app shell: content first, with a Notion-style slide-over page browser. */
+.mobile-sidebar-trigger,
+.mobile-sidebar-close,
+.mobile-sidebar-backdrop {
+  display: none;
+}
+
+@media (max-width: 760px) {
+  html,
+  body,
+  #root {
+    width: 100%;
+    height: 100%;
+    min-height: 100%;
+    overflow: hidden;
+  }
+
+  body {
+    min-width: 0;
+    overscroll-behavior: none;
+  }
+
+  .app-shell,
+  .app-shell.sidebar-collapsed,
+  .app-shell.workspace-focused {
+    --sidebar-width: 100%;
+    display: block;
+    width: 100%;
+    height: 100dvh;
+    min-height: 100dvh;
+    padding: 0;
+    overflow: hidden;
+    background: var(--ui-canvas);
+  }
+
+  .workspace {
+    width: 100%;
+    height: 100dvh;
+    min-height: 0;
+    overflow-x: hidden;
+    overflow-y: auto;
+    overscroll-behavior-y: contain;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .app-shell .sidebar,
+  .app-shell.sidebar-collapsed .sidebar,
+  .app-shell.workspace-focused .sidebar {
+    position: fixed;
+    inset: 0 auto 0 0;
+    z-index: 81;
+    display: flex;
+    align-items: stretch;
+    gap: 12px;
+    width: min(90vw, 380px);
+    height: 100dvh;
+    min-height: 0;
+    max-height: none;
+    padding: max(14px, env(safe-area-inset-top)) 14px max(14px, env(safe-area-inset-bottom));
+    overflow: hidden;
+    visibility: hidden;
+    border: 0;
+    border-right: 1px solid var(--ui-line);
+    background: rgba(244, 243, 239, 0.985);
+    box-shadow: 24px 0 64px rgba(25, 36, 33, 0.18);
+    transform: translate3d(-104%, 0, 0);
+    transition:
+      transform 260ms var(--ui-ease),
+      visibility 260ms step-end;
+    overscroll-behavior: contain;
+  }
+
+  .app-shell.mobile-sidebar-open .sidebar {
+    visibility: visible;
+    transform: translate3d(0, 0, 0);
+    transition:
+      transform 260ms var(--ui-ease),
+      visibility 0ms step-start;
+  }
+
+  .mobile-sidebar-backdrop {
+    position: fixed;
+    inset: 0;
+    z-index: 80;
+    display: block;
+    padding: 0;
+    border: 0;
+    opacity: 0;
+    visibility: hidden;
+    background: rgba(24, 30, 28, 0.28);
+    backdrop-filter: blur(2px);
+    transition:
+      opacity 220ms ease,
+      visibility 220ms step-end;
+  }
+
+  .mobile-sidebar-open .mobile-sidebar-backdrop {
+    opacity: 1;
+    visibility: visible;
+    transition:
+      opacity 220ms ease,
+      visibility 0ms step-start;
+  }
+
+  .app-shell.sidebar-collapsed .brand-row,
+  .app-shell.workspace-focused .brand-row {
+    justify-content: flex-start;
+    width: 100%;
+    min-height: 44px;
+    padding: 0 0 4px;
+  }
+
+  .app-shell.sidebar-collapsed .brand-copy,
+  .app-shell.sidebar-collapsed .search-box input,
+  .app-shell.sidebar-collapsed .sidebar-action-label,
+  .app-shell.sidebar-collapsed .note-list,
+  .app-shell.workspace-focused .brand-copy,
+  .app-shell.workspace-focused .search-box,
+  .app-shell.workspace-focused .new-page-button,
+  .app-shell.workspace-focused .new-category-button,
+  .app-shell.workspace-focused .note-list {
+    display: initial;
+  }
+
+  .app-shell.sidebar-collapsed .brand-copy,
+  .app-shell.workspace-focused .brand-copy {
+    display: block;
+  }
+
+  .app-shell.sidebar-collapsed .search-box,
+  .app-shell.sidebar-collapsed .new-page-button,
+  .app-shell.sidebar-collapsed .new-category-button,
+  .app-shell.workspace-focused .search-box,
+  .app-shell.workspace-focused .new-page-button,
+  .app-shell.workspace-focused .new-category-button {
+    display: flex;
+    justify-content: center;
+    width: 100%;
+    min-width: 0;
+    height: 44px;
+    min-height: 44px;
+    padding-inline: 12px;
+    gap: 8px;
+  }
+
+  .app-shell.sidebar-collapsed .search-box {
+    justify-content: flex-start;
+    cursor: text;
+  }
+
+  .app-shell.sidebar-collapsed .sidebar-view-toggle,
+  .app-shell.workspace-focused .sidebar-view-toggle {
+    display: flex;
+    grid-template-columns: none;
+    gap: 4px;
+    width: 100%;
+    padding: 3px;
+  }
+
+  .app-shell.sidebar-collapsed .sidebar-view-button,
+  .app-shell.workspace-focused .sidebar-view-button {
+    flex: 1 1 0;
+    width: auto;
+    min-width: 0;
+    min-height: 42px;
+    padding: 0;
+    gap: 0;
+    font-size: 0;
+  }
+
+  .app-shell .note-list {
+    display: flex;
+    min-height: 0;
+    padding-bottom: 8px;
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .sidebar-collapse-button {
+    display: none;
+  }
+
+  .mobile-sidebar-close {
+    display: inline-grid;
+    flex: 0 0 auto;
+    margin-left: auto;
+    width: 40px;
+    height: 40px;
+    border-radius: 10px;
+  }
+
+  .topbar {
+    top: 0;
+    display: flex;
+    flex-wrap: wrap;
+    align-content: start;
+    justify-content: flex-start;
+    gap: 0 8px;
+    width: 100%;
+    height: auto;
+    min-height: calc(96px + env(safe-area-inset-top));
+    padding: max(7px, env(safe-area-inset-top)) 10px 7px;
+    overflow: hidden;
+    border-bottom: 1px solid var(--ui-line);
+    background: rgba(248, 247, 243, 0.94);
+    backdrop-filter: blur(20px) saturate(1.25);
+  }
+
+  .mobile-sidebar-trigger {
+    display: inline-grid;
+    flex: 0 0 auto;
+    width: 40px;
+    height: 40px;
+    border-color: transparent;
+    background: transparent;
+    box-shadow: none;
+  }
+
+  .topbar-left {
+    flex: 1 1 0;
+    width: auto;
+    min-width: 0;
+    height: 40px;
+  }
+
+  .note-breadcrumb__item,
+  .note-breadcrumb__item.current {
+    max-width: min(46vw, 180px);
+  }
+
+  .topbar-actions {
+    flex: 1 0 100%;
+    order: 3;
+    display: flex;
+    justify-content: flex-start;
+    width: calc(100% + 20px);
+    min-width: 0;
+    margin: 3px -10px -1px;
+    padding: 4px 10px 2px;
+    gap: 6px;
+    overflow-x: auto;
+    overflow-y: hidden;
+    scrollbar-width: none;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .topbar-actions::-webkit-scrollbar {
+    display: none;
+  }
+
+  .topbar.is-compact {
+    flex-wrap: nowrap;
+    min-height: calc(54px + env(safe-area-inset-top));
+    padding-bottom: 7px;
+  }
+
+  .topbar.is-compact .topbar-actions {
+    flex: 0 0 auto;
+    order: initial;
+    width: auto;
+    margin: 0;
+    padding: 0;
+    overflow: visible;
+  }
+
+  .topbar-actions .toolbar-button,
+  .topbar-actions .icon-button {
+    flex: 0 0 40px;
+    width: 40px;
+    min-width: 40px;
+    height: 40px;
+    min-height: 40px;
+    padding: 0;
+    gap: 0;
+    overflow: hidden;
+    border-radius: 10px;
+    font-size: 0;
+  }
+
+  .topbar-actions .topbar-category-button {
+    flex-basis: auto;
+    width: auto;
+    max-width: 132px;
+    padding: 0 10px;
+    gap: 6px;
+    font-size: 0.78rem;
+  }
+
+  .topbar-category-button > svg:last-child {
+    display: none;
+  }
+
+  .topbar-category-menu {
+    position: fixed;
+    top: calc(98px + env(safe-area-inset-top));
+    right: 10px;
+    left: 10px;
+    width: auto;
+    max-height: min(58dvh, 420px);
+  }
+
+  .page {
+    width: 100%;
+    padding: 22px 16px calc(72px + env(safe-area-inset-bottom));
+  }
+
+  .page.has-comments {
+    width: 100%;
+  }
+
+  .page-heading-layout,
+  .page.has-comments .page-heading-layout {
+    display: block;
+  }
+
+  .page-meta {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    width: 100%;
+    padding: 0 0 2px;
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
+
+  .page-meta::-webkit-scrollbar {
+    display: none;
+  }
+
+  .page-meta-field {
+    display: block;
+    flex: 0 0 auto;
+  }
+
+  .page-meta-label {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+    border: 0;
+  }
+
+  .page-icon-picker-button {
+    min-height: 40px;
+    padding: 4px 11px 4px 5px;
+  }
+
+  .page-title-size-option {
+    min-height: 40px;
+    padding-inline: 10px;
+    font-size: 0.78rem;
+  }
+
+  .title-input,
+  .title-input.title-size-h2,
+  .title-input.title-size-h3 {
+    margin: 18px 0 12px;
+    letter-spacing: -0.03em;
+  }
+
+  .title-input {
+    font-size: clamp(2rem, 9vw, 2.35rem);
+    line-height: 1.12;
+  }
+
+  .title-input.title-size-h2 {
+    font-size: clamp(1.72rem, 7.6vw, 2rem);
+  }
+
+  .title-input.title-size-h3 {
+    font-size: clamp(1.45rem, 6.5vw, 1.72rem);
+  }
+
+  .note-editor {
+    min-height: 46vh;
+  }
+
+  .note-editor-layout,
+  .note-editor-layout.has-comments,
+  .page.has-comments .note-editor-layout.has-comments:not(.is-readonly) {
+    width: 100%;
+    margin: 0;
+    transform: none;
+  }
+
+  .note-editor .bn-editor {
+    padding-inline: 0;
+  }
+
+  .notes-overview {
+    width: 100%;
+    padding: 22px 14px calc(48px + env(safe-area-inset-bottom));
+  }
+
+  .notes-overview__hero {
+    gap: 18px;
+    margin-bottom: 16px;
+    padding-bottom: 18px;
+  }
+
+  .notes-overview__identity {
+    gap: 12px;
+  }
+
+  .notes-overview__icon {
+    width: 44px;
+    height: 44px;
+    border-radius: 12px;
+  }
+
+  .notes-overview__identity h1 {
+    font-size: 1.75rem;
+  }
+
+  .notes-overview__actions {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    width: 100%;
+  }
+
+  .notes-overview__actions > * {
+    width: 100%;
+    min-height: 44px;
+  }
+
+  .notes-overview__grid {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 9px;
+  }
+
+  .notes-overview-card {
+    min-height: 70px;
+    padding: 11px 12px;
+  }
+
+  .error-strip {
+    width: calc(100% - 24px);
+    margin-top: 10px;
+  }
+
+  input,
+  textarea,
+  select {
+    font-size: max(16px, 1em);
+  }
+}
+
+@media (display-mode: standalone) and (max-width: 760px) {
+  .topbar {
+    padding-top: max(8px, env(safe-area-inset-top));
+  }
+
+  .share-panel,
+  .export-panel {
+    padding-bottom: max(16px, env(safe-area-inset-bottom));
+  }
+}
+
+/* Keep authentication stable when iOS Safari expands/collapses its bottom bar. */
+@media (max-width: 760px) {
+  .lock-screen {
+    place-items: start center;
+    width: 100%;
+    height: 100dvh;
+    min-height: 100dvh;
+    padding:
+      max(36px, calc(env(safe-area-inset-top) + 22px))
+      14px
+      max(24px, calc(env(safe-area-inset-bottom) + 18px));
+    overflow-x: hidden;
+    overflow-y: auto;
+    overscroll-behavior-y: contain;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .auth-shell {
+    width: min(100%, 420px);
+    max-width: 420px;
+    border-radius: 22px;
+  }
+
+  .auth-surface {
+    gap: 16px;
+    padding: 24px 18px 22px;
+  }
+
+  .auth-surface h2 {
+    font-size: clamp(1.85rem, 9vw, 2.2rem);
+  }
+
+  .auth-tabs,
+  .token-input,
+  .auth-submit {
+    min-height: 48px;
+  }
+
+  .auth-submit {
+    width: 100%;
+  }
+}
+
+@media (max-width: 760px) and (max-height: 680px) {
+  .lock-screen {
+    padding-top: max(14px, env(safe-area-inset-top));
+  }
+
+  .auth-surface {
+    gap: 12px;
+    padding-block: 18px;
+  }
+
+  .auth-surface-top {
+    gap: 5px;
+  }
+}
+
+@media (display-mode: standalone) and (max-width: 760px) {
+  .lock-screen {
+    padding-top: max(28px, calc(env(safe-area-inset-top) + 18px));
+  }
+}
