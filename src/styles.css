@@ -7216,3 +7216,253 @@ button.note-breadcrumb__item:hover {
     padding-top: max(28px, calc(env(safe-area-inset-top) + 18px));
   }
 }
+
+.revelation-memorization-page {
+  width: min(1120px, 100%);
+  margin: 0 auto;
+  padding: 30px 34px 56px;
+}
+
+.revelation-memorization-hero,
+.revelation-memorization-controls,
+.revelation-memorization-score,
+.revelation-memorization-verse,
+.revelation-memorization-empty {
+  border: 1px solid var(--ui-line, #e5e0d7);
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.82);
+  box-shadow: var(--ui-shadow-sm, 0 5px 14px rgba(38, 65, 59, 0.07));
+}
+
+.revelation-memorization-hero {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 20px;
+  padding: 25px 26px;
+}
+
+.revelation-memorization-eyebrow {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: #2f6f73;
+  font-size: 0.78rem;
+  font-weight: 800;
+}
+
+.revelation-memorization-hero h1 {
+  margin: 8px 0 7px;
+  color: #263d3d;
+  font-size: clamp(1.65rem, 4vw, 2.25rem);
+  letter-spacing: -0.035em;
+}
+
+.revelation-memorization-hero p {
+  margin: 0;
+  color: #6b7280;
+  font-size: 0.88rem;
+}
+
+.revelation-memorization-stat {
+  display: grid;
+  flex: 0 0 auto;
+  min-width: 94px;
+  padding: 10px 14px;
+  border-radius: 10px;
+  color: #2f6f73;
+  background: #e8f3f1;
+  text-align: center;
+}
+
+.revelation-memorization-stat strong {
+  font-size: 1.35rem;
+}
+
+.revelation-memorization-stat span {
+  font-size: 0.72rem;
+  font-weight: 750;
+}
+
+.revelation-memorization-controls {
+  display: flex;
+  align-items: end;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 14px;
+  margin-top: 16px;
+  padding: 14px 16px;
+}
+
+.revelation-memorization-controls label {
+  display: grid;
+  gap: 5px;
+  color: #5f6773;
+  font-size: 0.75rem;
+  font-weight: 800;
+}
+
+.revelation-memorization-controls select {
+  min-width: 170px;
+  min-height: 36px;
+  padding: 0 10px;
+  border: 1px solid #d8d3c8;
+  border-radius: 8px;
+  color: #374151;
+  background: #fff;
+}
+
+.revelation-memorization-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.revelation-memorization-actions button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.revelation-memorization-score {
+  margin-top: 14px;
+  padding: 12px 16px;
+  border-color: rgba(47, 111, 115, 0.25);
+  color: #245e62;
+  background: #e8f3f1;
+  font-size: 0.9rem;
+  font-weight: 800;
+}
+
+.revelation-memorization-verses {
+  display: grid;
+  gap: 10px;
+  margin-top: 16px;
+}
+
+.revelation-memorization-verse {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: start;
+  gap: 12px;
+  padding: 15px 16px;
+}
+
+.revelation-memorization-reference {
+  padding-top: 3px;
+  color: #2f6f73;
+  font-size: 0.8rem;
+  font-weight: 850;
+  white-space: nowrap;
+}
+
+.revelation-memorization-verse p {
+  margin: 0;
+  color: #374151;
+  font-size: 0.98rem;
+  line-height: 2.15;
+}
+
+.revelation-memorization-blank-wrap {
+  display: inline-flex;
+  position: relative;
+  align-items: baseline;
+  margin: 0 2px;
+}
+
+.revelation-memorization-blank-wrap input {
+  min-width: 4.25em;
+  height: 1.85em;
+  padding: 0 5px;
+  border: 0;
+  border-bottom: 2px solid #75a7a1;
+  border-radius: 0;
+  outline: 0;
+  color: #254b4d;
+  background: #f2f8f7;
+  font: inherit;
+  text-align: center;
+}
+
+.revelation-memorization-blank-wrap input:focus {
+  border-bottom-color: #2f6f73;
+  box-shadow: 0 3px 0 rgba(47, 111, 115, 0.12);
+}
+
+.revelation-memorization-blank-wrap input.is-correct {
+  border-bottom-color: #23905c;
+  color: #176b44;
+  background: #ecf8f1;
+}
+
+.revelation-memorization-blank-wrap input.is-wrong {
+  border-bottom-color: #db625b;
+  color: #9d3631;
+  background: #fff1ee;
+}
+
+.revelation-memorization-blank-wrap small {
+  position: absolute;
+  z-index: 1;
+  top: calc(100% + 2px);
+  left: 50%;
+  max-width: 16rem;
+  padding: 2px 5px;
+  border-radius: 4px;
+  font-size: 0.68rem;
+  line-height: 1.3;
+  transform: translateX(-50%);
+  white-space: nowrap;
+}
+
+.revelation-memorization-blank-wrap small.is-correct {
+  color: #176b44;
+  background: #ecf8f1;
+}
+
+.revelation-memorization-blank-wrap small.is-wrong {
+  color: #9d3631;
+  background: #fff1ee;
+}
+
+.revelation-memorization-empty {
+  margin-top: 16px;
+  padding: 42px 20px;
+  color: #6b7280;
+  text-align: center;
+}
+
+@media (max-width: 760px) {
+  .revelation-memorization-page {
+    padding: 18px 14px 38px;
+  }
+
+  .revelation-memorization-hero {
+    display: grid;
+    padding: 20px;
+  }
+
+  .revelation-memorization-stat,
+  .revelation-memorization-controls label,
+  .revelation-memorization-controls select,
+  .revelation-memorization-actions,
+  .revelation-memorization-actions button {
+    width: 100%;
+  }
+
+  .revelation-memorization-actions button {
+    justify-content: center;
+  }
+
+  .revelation-memorization-verse {
+    grid-template-columns: 1fr;
+    gap: 4px;
+    padding: 13px;
+  }
+
+  .revelation-memorization-verse p {
+    font-size: 0.95rem;
+    line-height: 2.45;
+  }
+}

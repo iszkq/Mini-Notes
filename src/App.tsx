@@ -93,13 +93,24 @@ const RevelationQaLibrary = lazy(() =>
     default: module.RevelationQaLibrary
   }))
 );
+const RevelationMemorization = lazy(() =>
+  import("./components/RevelationMemorization").then((module) => ({
+    default: module.RevelationMemorization
+  }))
+);
 const TenMinuteReader = lazy(() =>
   import("./components/TenMinuteReader").then((module) => ({ default: module.TenMinuteReader }))
 );
 
 type SaveStatus = "idle" | "saving" | "saved" | "error";
 type AuthMode = "login" | "register";
-type WorkspaceView = "notes" | "bible" | "ten-minute" | "revelation-qa" | "admin";
+type WorkspaceView =
+  | "notes"
+  | "bible"
+  | "ten-minute"
+  | "revelation-qa"
+  | "revelation-memorization"
+  | "admin";
 
 type NotesBrowserLocation =
   | { kind: "page" }
@@ -305,6 +316,7 @@ function App() {
   const isBibleView = workspaceView === "bible";
   const isTenMinuteView = workspaceView === "ten-minute";
   const isRevelationQaView = workspaceView === "revelation-qa";
+  const isRevelationMemorizationView = workspaceView === "revelation-memorization";
 
   useEffect(() => {
     selectedIdRef.current = selectedId;
@@ -4085,6 +4097,21 @@ function App() {
             <LibraryBig size={16} />
             问答库
           </button>
+          <button
+            className={clsx(
+              "toolbar-button sidebar-view-button",
+              workspaceView === "revelation-memorization" && "active"
+            )}
+            onClick={() => {
+              setWorkspaceView("revelation-memorization");
+              setMobileSidebarOpen(false);
+            }}
+            title="启示录背诵默写"
+            type="button"
+          >
+            <Pencil size={16} />
+            背诵默写
+          </button>
           {sessionUser?.isAdmin ? (
             <button
               className={clsx("toolbar-button sidebar-view-button", workspaceView === "admin" && "active")}
@@ -4290,6 +4317,8 @@ function App() {
                   <Timer size={17} />
                 ) : isRevelationQaView ? (
                   <LibraryBig size={17} />
+                ) : isRevelationMemorizationView ? (
+                  <Pencil size={17} />
                 ) : (
                   <FileText size={17} />
                 )}
@@ -4302,6 +4331,8 @@ function App() {
                         ? "10分钟"
                         : isRevelationQaView
                           ? "启示录问答库"
+                          : isRevelationMemorizationView
+                            ? "启示录背诵默写"
                           : noteCount > 0
                             ? "选择页面"
                             : "还没有页面"}
@@ -4322,7 +4353,7 @@ function App() {
                   返回笔记
                 </button>
               </>
-            ) : isBibleView || isTenMinuteView || isRevelationQaView ? (
+            ) : isBibleView || isTenMinuteView || isRevelationQaView || isRevelationMemorizationView ? (
               <>
                 <button
                   className="toolbar-button"
@@ -4531,6 +4562,8 @@ function App() {
           <TenMinuteReader onError={setAppError} />
         ) : isRevelationQaView ? (
           <RevelationQaLibrary onError={setAppError} />
+        ) : isRevelationMemorizationView ? (
+          <RevelationMemorization onError={setAppError} />
         ) : isNotesOverview ? (
           <section className="notes-overview">
             <header className="notes-overview__hero">
