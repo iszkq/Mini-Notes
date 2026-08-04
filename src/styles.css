@@ -7407,28 +7407,31 @@ button.note-breadcrumb__item:hover {
   background: #fff1ee;
 }
 
-.revelation-memorization-blank-wrap small {
-  position: absolute;
-  z-index: 1;
-  top: calc(100% + 2px);
-  left: 50%;
-  max-width: 16rem;
-  padding: 2px 5px;
-  border-radius: 4px;
-  font-size: 0.68rem;
-  line-height: 1.3;
-  transform: translateX(-50%);
-  white-space: nowrap;
-}
-
-.revelation-memorization-blank-wrap small.is-correct {
-  color: #176b44;
-  background: #ecf8f1;
-}
-
-.revelation-memorization-blank-wrap small.is-wrong {
+.revelation-memorization-answers {
+  display: grid;
+  gap: 6px;
+  margin-top: 12px;
+  padding: 9px 11px;
+  border-left: 3px solid #dc6760;
+  border-radius: 0 8px 8px 0;
   color: #9d3631;
-  background: #fff1ee;
+  background: #fff4f2;
+  font-size: 0.82rem;
+  line-height: 1.65;
+}
+
+.revelation-memorization-answers strong {
+  font-size: 0.74rem;
+}
+
+.revelation-memorization-answers > div {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px 10px;
+}
+
+.revelation-memorization-answers span {
+  overflow-wrap: anywhere;
 }
 
 .revelation-memorization-empty {

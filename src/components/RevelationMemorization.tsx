@@ -233,12 +233,30 @@ export function RevelationMemorization({ onError }: RevelationMemorizationProps)
 
       {grade && gradePercent ? <div className="revelation-memorization-score" role="status">本章共 {grade.total} 个空，答对 {grade.correct} 个，正确率：{gradePercent}%</div> : null}
       {loading ? <div className="revelation-memorization-empty">正在加载默写题目…</div> : exercise.length === 0 ? <div className="revelation-memorization-empty">暂时没有可用于默写的经文。</div> : <div className="revelation-memorization-verses">
-        {exercise.map(({ chunks, verse }) => <article className="revelation-memorization-verse" key={verse.id}><span className="revelation-memorization-reference">{verse.chapterNumber}:{verse.verseNumber}</span><p>{chunks.map((chunk, index) => {
-          if (chunk.kind === "text") return <span key={`${verse.id}-text-${index}`}>{chunk.value}</span>;
-          const isCorrect = normalizeAnswer(answers[chunk.id] ?? "") === normalizeAnswer(chunk.answer);
-          const hasAnswer = Boolean((answers[chunk.id] ?? "").trim());
-          return <span className="revelation-memorization-blank-wrap" key={chunk.id}><MemorizationBlank answer={chunk.answer} className={hasAnswer && isCorrect ? "is-correct" : grade ? "is-wrong" : ""} label={`${verse.chapterNumber}:${verse.verseNumber} 填空`} onChange={(value) => { setAnswers((current) => ({ ...current, [chunk.id]: value })); setGrade(null); }} value={answers[chunk.id] ?? ""} />{grade && !isCorrect ? <small className="is-wrong">答案：{chunk.answer}</small> : null}</span>;
-        })}</p></article>)}
+        {exercise.map(({ chunks, verse }) => {
+          const wrongAnswers = grade
+            ? chunks.flatMap((chunk) =>
+                chunk.kind === "blank" && normalizeAnswer(answers[chunk.id] ?? "") !== normalizeAnswer(chunk.answer)
+                  ? [chunk.answer]
+                  : []
+              )
+            : [];
+
+          return (
+            <article className="revelation-memorization-verse" key={verse.id}>
+              <span className="revelation-memorization-reference">{verse.chapterNumber}:{verse.verseNumber}</span>
+              <div>
+                <p>{chunks.map((chunk, index) => {
+                  if (chunk.kind === "text") return <span key={`${verse.id}-text-${index}`}>{chunk.value}</span>;
+                  const isCorrect = normalizeAnswer(answers[chunk.id] ?? "") === normalizeAnswer(chunk.answer);
+                  const hasAnswer = Boolean((answers[chunk.id] ?? "").trim());
+                  return <span className="revelation-memorization-blank-wrap" key={chunk.id}><MemorizationBlank answer={chunk.answer} className={hasAnswer && isCorrect ? "is-correct" : grade ? "is-wrong" : ""} label={`${verse.chapterNumber}:${verse.verseNumber} 填空`} onChange={(value) => { setAnswers((current) => ({ ...current, [chunk.id]: value })); setGrade(null); }} value={answers[chunk.id] ?? ""} /></span>;
+                })}</p>
+                {wrongAnswers.length > 0 ? <div className="revelation-memorization-answers"><strong>参考答案</strong><div>{wrongAnswers.map((answer, index) => <span key={`${answer}-${index}`}>{answer}</span>)}</div></div> : null}
+              </div>
+            </article>
+          );
+        })}
       </div>}
 
       {toast ? <div className="revelation-memorization-toast" role="status">{toast}</div> : null}
