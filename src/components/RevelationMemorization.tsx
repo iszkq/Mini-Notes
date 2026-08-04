@@ -269,9 +269,16 @@ export function RevelationMemorization({ onError }: RevelationMemorizationProps)
 }
 
 function createExerciseVerse(verse: BibleVerse, mode: ExerciseMode): ExerciseVerse {
+  const protectedRanges = Array.from(verse.content.matchAll(/[（(][^（）()]*[）)]/g)).map((match) => ({
+    end: (match.index ?? 0) + match[0].length,
+    start: match.index ?? 0
+  }));
   const ranges = Array.from(verse.content.matchAll(/[\u4e00-\u9fa5]+/g)).flatMap((match, index) => {
-    const shouldBlank = mode === "recite" || Math.random() > 0.5;
-    return shouldBlank ? [{ end: (match.index ?? 0) + match[0].length, id: `${verse.id}-blank-${index}`, start: match.index ?? 0 }] : [];
+    const start = match.index ?? 0;
+    const end = start + match[0].length;
+    const isInParentheses = protectedRanges.some((range) => start >= range.start && end <= range.end);
+    const shouldBlank = !isInParentheses && (mode === "recite" || Math.random() > 0.5);
+    return shouldBlank ? [{ end, id: `${verse.id}-blank-${index}`, start }] : [];
   });
   const chunks: BlankChunk[] = [];
   let cursor = 0;
