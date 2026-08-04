@@ -7433,6 +7433,225 @@ button.note-breadcrumb__item:hover {
   text-align: center;
 }
 
+.revelation-memorization-toast {
+  position: fixed;
+  z-index: 70;
+  right: 24px;
+  bottom: 24px;
+  max-width: min(360px, calc(100vw - 32px));
+  padding: 12px 16px;
+  border-radius: 10px;
+  color: #fff;
+  background: #245e62;
+  box-shadow: 0 14px 32px rgba(31, 62, 63, 0.26);
+  font-size: 0.88rem;
+  font-weight: 750;
+}
+
+.revelation-puzzle-backdrop {
+  position: fixed;
+  z-index: 60;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  padding: 20px;
+  background: rgba(20, 39, 40, 0.62);
+}
+
+.revelation-puzzle-modal {
+  position: relative;
+  width: min(920px, 100%);
+  max-height: min(760px, calc(100dvh - 40px));
+  overflow: auto;
+  border: 1px solid rgba(255, 255, 255, 0.28);
+  border-radius: 18px;
+  background: #fcfcf9;
+  box-shadow: 0 24px 64px rgba(16, 32, 33, 0.34);
+}
+
+.revelation-puzzle-close {
+  position: absolute;
+  z-index: 1;
+  top: 14px;
+  right: 14px;
+  display: grid;
+  width: 36px;
+  height: 36px;
+  place-items: center;
+  border: 0;
+  border-radius: 50%;
+  color: #536563;
+  background: #edf2f0;
+}
+
+.revelation-puzzle-close:hover {
+  color: #fff;
+  background: #b24a45;
+}
+
+.revelation-puzzle-loading,
+.revelation-puzzle-difficulty,
+.revelation-puzzle-game {
+  padding: clamp(28px, 6vw, 54px);
+}
+
+.revelation-puzzle-loading,
+.revelation-puzzle-difficulty {
+  display: grid;
+  justify-items: center;
+  gap: 18px;
+  min-height: 360px;
+  align-content: center;
+  text-align: center;
+}
+
+.revelation-puzzle-difficulty h2 {
+  margin: 0;
+  color: #245e62;
+  font-size: clamp(1.8rem, 5vw, 2.7rem);
+}
+
+.revelation-puzzle-difficulty p {
+  max-width: 36rem;
+  margin: 0;
+  color: #64716f;
+  line-height: 1.7;
+}
+
+.revelation-puzzle-difficulty fieldset {
+  display: flex;
+  justify-content: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 12px;
+  border: 1px solid #d9e4e1;
+  border-radius: 10px;
+}
+
+.revelation-puzzle-difficulty legend {
+  padding: 0 5px;
+  color: #536563;
+  font-size: 0.78rem;
+  font-weight: 800;
+}
+
+.revelation-puzzle-difficulty label {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-height: 34px;
+  padding: 0 9px;
+  border-radius: 7px;
+  color: #40504f;
+  background: #f2f6f5;
+  font-size: 0.84rem;
+  font-weight: 750;
+}
+
+.revelation-puzzle-game > header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  color: #64716f;
+  font-size: 0.82rem;
+  font-weight: 800;
+}
+
+.revelation-puzzle-game > header > div {
+  display: flex;
+  gap: 8px;
+}
+
+.revelation-puzzle-game > header span {
+  padding: 7px 10px;
+  border-radius: 999px;
+  color: #245e62;
+  background: #e8f3f1;
+}
+
+.revelation-puzzle-game h2 {
+  margin: 32px 0 16px;
+  color: #263d3d;
+  font-size: 1.05rem;
+  text-align: center;
+}
+
+.revelation-puzzle-blanks {
+  display: flex;
+  justify-content: center;
+  flex-wrap: wrap;
+  gap: 9px;
+  min-height: 88px;
+  padding: 18px;
+  border: 1px dashed #b8cbc7;
+  border-radius: 12px;
+  background: #f8fbfa;
+}
+
+.revelation-puzzle-blanks button {
+  min-height: 39px;
+  padding: 7px 10px;
+  border: 1px dashed #8aa9a4;
+  border-radius: 7px;
+  color: #245e62;
+  background: #fff;
+  font-size: 0.92rem;
+}
+
+.revelation-puzzle-blanks button.is-filled {
+  border-style: solid;
+  background: #e8f3f1;
+}
+
+.revelation-puzzle-blanks button.is-correct {
+  border-color: #2e9665;
+  color: #166540;
+  background: #eaf8f0;
+}
+
+.revelation-puzzle-blanks button.is-wrong {
+  border-color: #dc6760;
+  color: #a03b36;
+  background: #fff0ee;
+}
+
+.revelation-puzzle-tokens {
+  display: flex;
+  justify-content: center;
+  flex-wrap: wrap;
+  gap: 9px;
+  margin-top: 20px;
+}
+
+.revelation-puzzle-tokens button {
+  min-height: 38px;
+  padding: 7px 12px;
+  border: 0;
+  border-radius: 8px;
+  color: #fff;
+  background: #397b78;
+  box-shadow: 0 3px 0 #245e62;
+  font-size: 0.9rem;
+  font-weight: 750;
+}
+
+.revelation-puzzle-tokens button:hover:not(:disabled) {
+  background: #245e62;
+  transform: translateY(-1px);
+}
+
+.revelation-puzzle-tokens button.is-used {
+  opacity: 0.3;
+  box-shadow: none;
+}
+
+.revelation-puzzle-game footer {
+  display: flex;
+  justify-content: center;
+  margin-top: 32px;
+}
+
 @media (max-width: 760px) {
   .revelation-memorization-page {
     padding: 18px 14px 38px;
