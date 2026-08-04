@@ -237,7 +237,7 @@ export function RevelationMemorization({ onError }: RevelationMemorizationProps)
           if (chunk.kind === "text") return <span key={`${verse.id}-text-${index}`}>{chunk.value}</span>;
           const isCorrect = normalizeAnswer(answers[chunk.id] ?? "") === normalizeAnswer(chunk.answer);
           const hasAnswer = Boolean((answers[chunk.id] ?? "").trim());
-          return <span className="revelation-memorization-blank-wrap" key={chunk.id}><input aria-label={`${verse.chapterNumber}:${verse.verseNumber} 填空`} className={hasAnswer && isCorrect ? "is-correct" : grade ? "is-wrong" : ""} onChange={(event) => { setAnswers((current) => ({ ...current, [chunk.id]: event.target.value })); setGrade(null); }} size={Math.max(4, Math.min(18, chunk.answer.length))} type="text" value={answers[chunk.id] ?? ""} />{grade && !isCorrect ? <small className="is-wrong">答案：{chunk.answer}</small> : null}</span>;
+          return <span className="revelation-memorization-blank-wrap" key={chunk.id}><MemorizationBlank answer={chunk.answer} className={hasAnswer && isCorrect ? "is-correct" : grade ? "is-wrong" : ""} label={`${verse.chapterNumber}:${verse.verseNumber} 填空`} onChange={(value) => { setAnswers((current) => ({ ...current, [chunk.id]: value })); setGrade(null); }} value={answers[chunk.id] ?? ""} />{grade && !isCorrect ? <small className="is-wrong">答案：{chunk.answer}</small> : null}</span>;
         })}</p></article>)}
       </div>}
 
@@ -270,3 +270,41 @@ function splitVerseIntoSegments(text: string): string[] {
 
 function shuffle<T>(items: T[]): T[] { return [...items].sort(() => Math.random() - 0.5); }
 function normalizeAnswer(value: string): string { return value.replace(/\s+/g, "").trim(); }
+
+function MemorizationBlank({
+  answer,
+  className,
+  label,
+  onChange,
+  value
+}: {
+  answer: string;
+  className: string;
+  label: string;
+  onChange: (value: string) => void;
+  value: string;
+}) {
+  const elementRef = useRef<HTMLSpanElement | null>(null);
+
+  useEffect(() => {
+    if (elementRef.current && elementRef.current.textContent !== value) {
+      elementRef.current.textContent = value;
+    }
+  }, [value]);
+
+  return (
+    <span
+      aria-label={label}
+      className={`revelation-memorization-editable ${className}`}
+      contentEditable
+      data-answer-length={answer.length}
+      onInput={(event) => onChange(event.currentTarget.textContent ?? "")}
+      ref={elementRef}
+      role="textbox"
+      suppressContentEditableWarning
+      tabIndex={0}
+    >
+      {value}
+    </span>
+  );
+}

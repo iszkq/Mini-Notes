@@ -7365,16 +7365,18 @@ button.note-breadcrumb__item:hover {
 }
 
 .revelation-memorization-blank-wrap {
-  display: inline-flex;
+  display: inline-block;
   position: relative;
-  align-items: baseline;
   margin: 0 2px;
+  vertical-align: baseline;
 }
 
-.revelation-memorization-blank-wrap input {
+.revelation-memorization-editable {
+  display: inline-block;
   min-width: 4.25em;
-  height: 1.85em;
-  padding: 0 5px;
+  max-width: min(100%, 38rem);
+  min-height: 1.85em;
+  padding: 0 6px 1px;
   border: 0;
   border-bottom: 2px solid #75a7a1;
   border-radius: 0;
@@ -7383,20 +7385,23 @@ button.note-breadcrumb__item:hover {
   background: #f2f8f7;
   font: inherit;
   text-align: center;
+  vertical-align: baseline;
+  white-space: normal;
+  overflow-wrap: anywhere;
 }
 
-.revelation-memorization-blank-wrap input:focus {
+.revelation-memorization-editable:focus {
   border-bottom-color: #2f6f73;
   box-shadow: 0 3px 0 rgba(47, 111, 115, 0.12);
 }
 
-.revelation-memorization-blank-wrap input.is-correct {
+.revelation-memorization-editable.is-correct {
   border-bottom-color: #23905c;
   color: #176b44;
   background: #ecf8f1;
 }
 
-.revelation-memorization-blank-wrap input.is-wrong {
+.revelation-memorization-editable.is-wrong {
   border-bottom-color: #db625b;
   color: #9d3631;
   background: #fff1ee;
