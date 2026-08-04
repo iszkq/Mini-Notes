@@ -303,6 +303,7 @@ function MemorizationBlank({
   value: string;
 }) {
   const elementRef = useRef<HTMLSpanElement | null>(null);
+  const isComposingRef = useRef(false);
 
   useEffect(() => {
     if (elementRef.current && elementRef.current.textContent !== value) {
@@ -316,7 +317,18 @@ function MemorizationBlank({
       className={`revelation-memorization-editable ${className}`}
       contentEditable
       data-answer-length={answer.length}
-      onInput={(event) => onChange(event.currentTarget.textContent ?? "")}
+      onCompositionEnd={(event) => {
+        isComposingRef.current = false;
+        onChange(event.currentTarget.textContent ?? "");
+      }}
+      onCompositionStart={() => {
+        isComposingRef.current = true;
+      }}
+      onInput={(event) => {
+        if (!isComposingRef.current) {
+          onChange(event.currentTarget.textContent ?? "");
+        }
+      }}
       ref={elementRef}
       role="textbox"
       suppressContentEditableWarning
