@@ -333,8 +333,6 @@ function MemorizationBlank({
       role="textbox"
       suppressContentEditableWarning
       tabIndex={0}
-    >
-      {value}
-    </span>
+    />
   );
 }
