@@ -15,11 +15,13 @@ import {
   FolderPlus,
   Globe2,
   GripVertical,
+  Home,
   LibraryBig,
   Link2,
   Lock,
   LogOut,
   Menu,
+  MoreHorizontal,
   PanelLeftClose,
   PanelLeftOpen,
   Pencil,
@@ -4226,6 +4228,56 @@ function App() {
         </nav>
       </aside>
 
+      <nav className="mobile-bottom-nav" aria-label="移动端主导航">
+        <button
+          className={clsx("mobile-bottom-nav__item", workspaceView === "notes" && isNotesOverview && "active")}
+          onClick={() => {
+            setWorkspaceView("notes");
+            openNotesOverview();
+            setMobileSidebarOpen(false);
+          }}
+          type="button"
+        >
+          <Home size={20} strokeWidth={2.1} />
+          <span>首页</span>
+        </button>
+        <button
+          className={clsx("mobile-bottom-nav__item", workspaceView === "notes" && !isNotesOverview && "active")}
+          onClick={() => setMobileSidebarOpen(true)}
+          type="button"
+        >
+          <FileText size={20} strokeWidth={2.1} />
+          <span>笔记</span>
+        </button>
+        <button
+          aria-label="新建页面"
+          className="mobile-bottom-nav__compose"
+          onClick={() => void createNewNote()}
+          type="button"
+        >
+          <Plus size={24} strokeWidth={2.4} />
+        </button>
+        <button
+          className={clsx("mobile-bottom-nav__item", workspaceView === "bible" && "active")}
+          onClick={() => {
+            setWorkspaceView("bible");
+            setMobileSidebarOpen(false);
+          }}
+          type="button"
+        >
+          <BookOpen size={20} strokeWidth={2.1} />
+          <span>读经</span>
+        </button>
+        <button
+          className="mobile-bottom-nav__item"
+          onClick={() => setMobileSidebarOpen(true)}
+          type="button"
+        >
+          <MoreHorizontal size={20} strokeWidth={2.1} />
+          <span>更多</span>
+        </button>
+      </nav>
+
       <section className="workspace">
         <header className={clsx("topbar", !draft && "is-compact")}>
           <button
@@ -4728,13 +4780,36 @@ function App() {
           <section className="workspace-empty">
             <div className="workspace-empty-panel">
               <div className="workspace-empty-copy">
+                <span className="workspace-empty-kicker">
+                  <Sparkles size={14} /> 个人工作区
+                </span>
                 <h2>还没有页面</h2>
-                <p>这里先保持空白。需要的时候，再手动创建第一篇笔记。</p>
+                <p>把灵感、资料和每日记录放在一个安静的空间里。现在就创建第一篇笔记吧。</p>
               </div>
-              <button className="primary-button workspace-empty-action" onClick={() => void createNewNote()} type="button">
-                <Plus size={16} />
-                新建第一页
-              </button>
+              <div className="workspace-empty-actions">
+                <button className="primary-button workspace-empty-action" onClick={() => void createNewNote()} type="button">
+                  <Plus size={16} />
+                  新建第一页
+                </button>
+                <button className="toolbar-button workspace-empty-secondary" onClick={() => setWorkspaceView("bible")} type="button">
+                  <BookOpen size={16} />
+                  先去读经
+                </button>
+              </div>
+              <div className="workspace-empty-hints" aria-label="Mini Notes 特点">
+                <div>
+                  <span className="workspace-empty-hint-icon"><Pencil size={15} /></span>
+                  <span><strong>块编辑</strong><small>标题、待办、表格随手插入</small></span>
+                </div>
+                <div>
+                  <span className="workspace-empty-hint-icon"><Clock3 size={15} /></span>
+                  <span><strong>自动保存</strong><small>编辑过程持续同步状态</small></span>
+                </div>
+                <div>
+                  <span className="workspace-empty-hint-icon"><LibraryBig size={15} /></span>
+                  <span><strong>一处整理</strong><small>页面、分类和资料清晰归档</small></span>
+                </div>
+              </div>
             </div>
           </section>
           ) : (

@@ -7,6 +7,9 @@
     "dev": "vite --host 127.0.0.1",
     "build": "tsc -b && vite build",
     "check": "pnpm build",
+    "android:sync": "pnpm build && cap sync android",
+    "android:open": "cap open android",
+    "android:build": "pnpm android:sync && cap build android",
     "cf:config": "node scripts/prepare-wrangler.mjs",
     "preview": "vite preview --host 127.0.0.1",
     "cf:dev": "pnpm db:migrate:local && pnpm build && wrangler dev",
@@ -17,17 +20,20 @@
     "db:migrate:local": "wrangler d1 migrations apply DB --local"
   },
   "dependencies": {
+    "@capacitor/android": "^7.4.0",
     "@blocknote/core": "^0.51.4",
     "@blocknote/mantine": "^0.51.4",
     "@blocknote/react": "^0.51.4",
     "@mantine/core": "^9.4.1",
     "@mantine/hooks": "^9.4.1",
+    "@capacitor/core": "^7.4.0",
     "clsx": "^2.1.1",
     "lucide-react": "^1.22.0",
     "react": "^19.2.7",
     "react-dom": "^19.2.7"
   },
   "devDependencies": {
+    "@capacitor/cli": "^7.4.0",
     "@cloudflare/workers-types": "^4.20260629.1",
     "@types/react": "^19.2.17",
     "@types/react-dom": "^19.2.3",

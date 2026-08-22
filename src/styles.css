@@ -6666,6 +6666,10 @@ button.note-breadcrumb__item:hover {
   display: none;
 }
 
+.mobile-bottom-nav {
+  display: none;
+}
+
 @media (max-width: 760px) {
   html,
   body,
@@ -6702,6 +6706,64 @@ button.note-breadcrumb__item:hover {
     overflow-y: auto;
     overscroll-behavior-y: contain;
     -webkit-overflow-scrolling: touch;
+  }
+
+  .mobile-bottom-nav {
+    position: fixed;
+    right: 0;
+    bottom: 0;
+    left: 0;
+    z-index: 70;
+    display: grid;
+    grid-template-columns: repeat(5, minmax(0, 1fr));
+    align-items: end;
+    height: calc(68px + env(safe-area-inset-bottom));
+    padding: 6px 8px max(7px, env(safe-area-inset-bottom));
+    border-top: 1px solid rgba(92, 104, 99, 0.14);
+    background: rgba(248, 247, 243, 0.94);
+    box-shadow: 0 -12px 34px rgba(31, 45, 40, 0.1);
+    backdrop-filter: blur(18px) saturate(1.25);
+  }
+
+  .mobile-bottom-nav__item {
+    display: grid;
+    place-items: center;
+    align-content: center;
+    gap: 3px;
+    min-width: 0;
+    min-height: 52px;
+    padding: 4px 2px;
+    border: 0;
+    border-radius: 14px;
+    color: var(--ui-muted);
+    background: transparent;
+    font-size: 0.68rem;
+    font-weight: 750;
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  .mobile-bottom-nav__item.active {
+    color: var(--ui-accent-strong);
+    background: var(--ui-accent-soft);
+  }
+
+  .mobile-bottom-nav__compose {
+    display: grid;
+    place-items: center;
+    justify-self: center;
+    width: 50px;
+    height: 50px;
+    margin-bottom: 9px;
+    border: 0;
+    border-radius: 17px;
+    color: #fff;
+    background: var(--ui-accent);
+    box-shadow: 0 8px 20px rgba(47, 111, 115, 0.28);
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  .mobile-bottom-nav__compose:active {
+    transform: translateY(1px) scale(0.97);
   }
 
   .public-shell {
@@ -6995,7 +7057,7 @@ button.note-breadcrumb__item:hover {
 
   .page {
     width: 100%;
-    padding: 22px 16px calc(72px + env(safe-area-inset-bottom));
+    padding: 22px 16px calc(92px + env(safe-area-inset-bottom));
   }
 
   .page.has-comments {
@@ -7086,7 +7148,7 @@ button.note-breadcrumb__item:hover {
 
   .notes-overview {
     width: 100%;
-    padding: 22px 14px calc(48px + env(safe-area-inset-bottom));
+    padding: 22px 14px calc(94px + env(safe-area-inset-bottom));
   }
 
   .notes-overview__hero {
