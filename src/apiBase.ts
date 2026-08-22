@@ -4,9 +4,10 @@ const runtimeImportMeta = import.meta as ImportMeta & {
 };
 
 const configuredBaseUrl = (runtimeImportMeta.env?.VITE_API_BASE_URL ?? "").trim();
-// This is the default workers.dev address for the repository's Worker. It is
-// only used by a Capacitor build; normal web deployments remain same-origin.
-const DEFAULT_MOBILE_API_BASE_URL = "https://mini-notes.iszkq.workers.dev";
+// Cloudflare Pages serves the web app and `/api/*` through the same project.
+// This fallback is only used by a Capacitor build; web deployments remain
+// same-origin. It can be replaced at build time with VITE_API_BASE_URL.
+const DEFAULT_MOBILE_API_BASE_URL = "https://mini-notes.pages.dev";
 const runtimeLocation = (globalThis as { location?: { protocol?: string } }).location;
 const isCapacitorRuntime = runtimeLocation?.protocol === "capacitor:";
 
