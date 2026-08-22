@@ -1,0 +1,94 @@
+name: Android Release
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "要发布的版本标签，例如 v0.2.1"
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  build-android:
+    name: 构建 Android APK
+    runs-on: ubuntu-latest
+    env:
+      RELEASE_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref }}
+
+      - name: Setup Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+          cache: gradle
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - name: Install web dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build web assets and sync Capacitor
+        run: pnpm android:sync
+
+      - name: Build debug APK
+        working-directory: android
+        run: ./gradlew assembleDebug --no-daemon
+
+      - name: Prepare release files
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p release-files
+          cp android/app/build/outputs/apk/debug/app-debug.apk "release-files/Mini-Notes-${RELEASE_TAG}-测试版.apk"
+          sha256sum "release-files/Mini-Notes-${RELEASE_TAG}-测试版.apk" > "release-files/Mini-Notes-${RELEASE_TAG}-SHA256.txt"
+
+      - name: Create Chinese GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ env.RELEASE_TAG }}
+          name: Mini Notes ${{ env.RELEASE_TAG }}
+          body: |
+            ## Mini Notes ${{ env.RELEASE_TAG }}
+
+            这是 Mini Notes 的移动端与网页端体验优化版本。
+
+            ### 本次更新
+
+            - 新增 Capacitor Android 原生工程，可构建 Android APK。
+            - 新增移动端底部导航、左侧页面抽屉和悬浮新建按钮。
+            - 优化手机端编辑器工具栏、输入区域和安全区适配。
+            - 优化网页端首次进入工作区、桌面侧栏和空白状态页面。
+            - 保留页面树、分类、块编辑、读经和自动保存能力。
+
+            ### 安装说明
+
+            `Mini-Notes-${{ env.RELEASE_TAG }}-测试版.apk` 为可直接安装的测试 APK。首次安装时请允许浏览器或文件管理器安装应用。
+
+            该 APK 使用 GitHub Actions 自动构建，适合测试和个人使用；正式上架应用商店前还需要配置 Android 签名密钥。
+          files: |
+            release-files/Mini-Notes-${{ env.RELEASE_TAG }}-测试版.apk
+            release-files/Mini-Notes-${{ env.RELEASE_TAG }}-SHA256.txt
+          draft: false
+          prerelease: false
+          make_latest: true

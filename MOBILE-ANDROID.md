@@ -29,3 +29,14 @@ pnpm android:build
 ```
 
 输出通常位于 `android/app/build/outputs/apk/`。如果只需要网页/PWA，继续使用 `pnpm build`，生成的 `dist` 也可以部署到 Cloudflare Workers。
+
+## GitHub 自动发布 APK
+
+仓库已配置 `.github/workflows/android-release.yml`。向仓库推送 `v*` 格式的 tag 后，GitHub Actions 会自动完成网页构建、Capacitor 同步和 Android APK 构建，并创建中文 GitHub Release，附带测试 APK 和 SHA-256 校验文件：
+
+```bash
+git tag -a v0.2.1 -m "Mini Notes 0.2.1：移动端体验优化"
+git push origin v0.2.1
+```
+
+当前工作流生成的是可直接安装的 debug 测试包。正式发布到应用商店前，需要在 GitHub Secrets 中配置签名密钥并改为签名 release 构建。
