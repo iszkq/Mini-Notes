@@ -6234,8 +6234,8 @@ button.note-breadcrumb__item:hover {
   .bn-menu-dropdown.bn-color-picker-dropdown {
     width: min(224px, calc(100vw - 20px));
     min-width: min(224px, calc(100vw - 20px));
-    height: min(420px, calc(100dvh - 160px)) !important;
-    max-height: min(420px, calc(100dvh - 160px)) !important;
+    height: 360px !important;
+    max-height: 360px !important;
   }
 }
 
