@@ -6193,6 +6193,48 @@ button.note-breadcrumb__item:hover {
   animation: ui-opacity-in 140ms ease-out backwards;
 }
 
+/* The color picker contains two complete palettes. Keep it wide enough for
+   Chinese labels and let the whole panel scroll as one unit on phones, so the
+   editor text cannot show through the narrow right edge of the menu. */
+.bn-mantine .bn-color-picker-dropdown,
+.bn-color-picker-dropdown {
+  box-sizing: border-box;
+  width: min(236px, calc(100vw - 24px));
+  min-width: min(236px, calc(100vw - 24px));
+  max-width: calc(100vw - 24px);
+  max-height: min(70dvh, 560px);
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 8px;
+  background: var(--bn-colors-menu-background, #fff);
+}
+
+.bn-color-picker-dropdown .mantine-Menu-item,
+.bn-color-picker-dropdown .bn-menu-item {
+  min-height: 42px;
+  width: 100%;
+  box-sizing: border-box;
+  white-space: nowrap;
+}
+
+.bn-color-picker-dropdown .mantine-Menu-itemLabel,
+.bn-color-picker-dropdown .bn-menu-item-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+@media (max-width: 560px) {
+  .bn-mantine .bn-color-picker-dropdown,
+  .bn-color-picker-dropdown {
+    width: min(224px, calc(100vw - 20px));
+    min-width: min(224px, calc(100vw - 20px));
+    max-height: min(64dvh, 500px);
+  }
+}
+
 @keyframes ui-page-in {
   from {
     opacity: 0;

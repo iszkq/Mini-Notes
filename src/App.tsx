@@ -535,8 +535,16 @@ function App() {
         handleLoggedOut(hasUsers);
       } else if (error instanceof ApiError) {
         setAppError(error.message);
+        // Never leave the user in an empty workspace when the API is
+        // unreachable. Keep the authentication screen visible so the next
+        // action is obvious and the error can be retried after connectivity
+        // returns.
+        setAuthMode("login");
+        setIsLocked(true);
       } else {
         setAppError("工作区初始化失败。");
+        setAuthMode("login");
+        setIsLocked(true);
       }
     } finally {
       setIsBooting(false);
