@@ -261,6 +261,7 @@ function App() {
   const [publicPending, setPublicPending] = useState(isPublicView);
   const [publicError, setPublicError] = useState<string | null>(null);
   const [workspaceView, setWorkspaceView] = useState<WorkspaceView>("notes");
+  const [workspaceSidebarExpanded, setWorkspaceSidebarExpanded] = useState(false);
   const [notesBrowserLocation, setNotesBrowserLocation] = useState<NotesBrowserLocation>({
     kind: "page"
   });
@@ -3973,7 +3974,7 @@ function App() {
         "app-shell",
         sidebarCollapsed && "sidebar-collapsed",
         mobileSidebarOpen && "mobile-sidebar-open",
-        workspaceView !== "notes" && "workspace-focused"
+        workspaceView !== "notes" && !workspaceSidebarExpanded && "workspace-focused"
       )}
     >
       <button
@@ -4001,14 +4002,36 @@ function App() {
         </div>
 
         <button
-          aria-label={sidebarCollapsed ? "展开侧边栏" : "收起侧边栏"}
-          aria-pressed={sidebarCollapsed}
+          aria-label={
+            sidebarCollapsed || (workspaceView !== "notes" && !workspaceSidebarExpanded)
+              ? "展开侧边栏"
+              : "收起侧边栏"
+          }
+          aria-pressed={sidebarCollapsed || (workspaceView !== "notes" && !workspaceSidebarExpanded)}
           className="sidebar-collapse-button"
-          onClick={() => setSidebarCollapsed((current) => !current)}
-          title={sidebarCollapsed ? "展开侧边栏" : "收起侧边栏"}
+          onClick={() => {
+            if (workspaceView !== "notes" && !workspaceSidebarExpanded) {
+              setWorkspaceSidebarExpanded(true);
+              setSidebarCollapsed(false);
+              return;
+            }
+
+            setSidebarCollapsed((current) => !current);
+          }}
+          title={
+            workspaceView !== "notes" && !workspaceSidebarExpanded
+              ? "展开侧边栏"
+              : sidebarCollapsed
+                ? "展开侧边栏"
+                : "收起侧边栏"
+          }
           type="button"
         >
-          {sidebarCollapsed ? <PanelLeftOpen size={17} /> : <PanelLeftClose size={17} />}
+          {sidebarCollapsed || (workspaceView !== "notes" && !workspaceSidebarExpanded) ? (
+            <PanelLeftOpen size={17} />
+          ) : (
+            <PanelLeftClose size={17} />
+          )}
         </button>
 
         <label

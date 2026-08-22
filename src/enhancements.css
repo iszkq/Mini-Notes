@@ -2880,6 +2880,90 @@ button.collapsible-content-block__toggle:hover {
 }
 
 /* Web workspace refinement: calmer hierarchy and a more useful first-run state. */
+.bn-menu-dropdown.bn-color-picker-dropdown {
+  width: 236px;
+  max-width: min(236px, calc(100vw - 24px));
+  padding: 8px;
+  overflow: hidden;
+  border: 1px solid rgba(92, 104, 99, 0.16);
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.98);
+  box-shadow: 0 18px 46px rgba(31, 45, 40, 0.16);
+}
+
+.bn-color-picker-dropdown .mantine-Menu-label,
+.bn-color-picker-dropdown [role="separator"] {
+  width: 100%;
+}
+
+.bn-color-picker-dropdown .mantine-Menu-label {
+  margin: 2px 4px 5px;
+  padding: 3px 4px;
+  color: #74807c;
+  font-size: 0.72rem;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+}
+
+.bn-color-picker-dropdown .bn-menu-item,
+.bn-color-picker-dropdown .mantine-Menu-item {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  min-height: 36px;
+  padding: 5px 7px;
+  gap: 8px;
+  border-radius: 9px;
+  color: #3f4b48;
+  white-space: nowrap;
+  word-break: keep-all;
+}
+
+.bn-color-picker-dropdown .bn-menu-item:hover,
+.bn-color-picker-dropdown .mantine-Menu-item:hover {
+  background: rgba(47, 111, 115, 0.08);
+}
+
+.bn-color-picker-dropdown .mantine-Menu-itemSection {
+  display: inline-flex;
+  align-items: center;
+  flex: 0 0 auto;
+}
+
+.bn-color-picker-dropdown .bn-color-icon {
+  width: 26px;
+  height: 26px;
+  flex: 0 0 26px;
+  border-color: rgba(92, 104, 99, 0.2);
+  border-radius: 8px;
+  background: #fff;
+}
+
+.bn-color-picker-dropdown .mantine-Menu-itemLabel {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  word-break: keep-all;
+  font-size: 0.84rem;
+  line-height: 1.2;
+}
+
+.bn-color-picker-dropdown .mantine-Menu-itemSection[data-position="right"] {
+  margin-left: auto;
+}
+
+@media (max-width: 760px) {
+  .bn-menu-dropdown.bn-color-picker-dropdown {
+    width: min(236px, calc(100vw - 20px));
+  }
+
+  .bn-color-picker-dropdown .bn-menu-item,
+  .bn-color-picker-dropdown .mantine-Menu-item {
+    min-height: 42px;
+  }
+}
+
 .workspace-empty-panel {
   position: relative;
   width: min(100%, 880px);

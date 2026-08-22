@@ -5164,8 +5164,7 @@ html {
   .workspace-focused .search-box,
   .workspace-focused .new-page-button,
   .workspace-focused .new-category-button,
-  .workspace-focused .note-list,
-  .workspace-focused .sidebar-collapse-button {
+  .workspace-focused .note-list {
     display: none;
   }
 
@@ -6565,8 +6564,7 @@ button.note-breadcrumb__item:hover {
   .workspace-focused .search-box,
   .workspace-focused .new-page-button,
   .workspace-focused .new-category-button,
-  .workspace-focused .note-list,
-  .workspace-focused .sidebar-collapse-button {
+  .workspace-focused .note-list {
     display: none;
   }
 
