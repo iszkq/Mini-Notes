@@ -1,3 +1,5 @@
+import { apiUrl } from "./apiBase";
+
 export type BibleVerse = {
   id: string;
   covenant: "old" | "new";
@@ -209,7 +211,7 @@ export function parseBibleCsv(input: string): BibleData {
 }
 
 async function requestBibleJson<T>(url: string): Promise<T> {
-  const response = await fetch(url);
+  const response = await fetch(apiUrl(url));
 
   if (!response.ok) {
     const fallback = `经文数据加载失败（${response.status}）`;

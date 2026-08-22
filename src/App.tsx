@@ -477,6 +477,8 @@ function App() {
         if (error instanceof ApiError && error.status === 401) {
           handleLoggedOut(hasUsers);
           setAppError("登录状态已失效，请重新登录。");
+        } else if (error instanceof ApiError) {
+          setAppError(error.message);
         } else {
           setAppError("页面加载失败。");
         }
@@ -531,6 +533,8 @@ function App() {
     } catch (error) {
       if (error instanceof ApiError && error.status === 401) {
         handleLoggedOut(hasUsers);
+      } else if (error instanceof ApiError) {
+        setAppError(error.message);
       } else {
         setAppError("工作区初始化失败。");
       }

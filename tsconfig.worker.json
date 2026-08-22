@@ -15,6 +15,7 @@
   },
   "include": [
     "src/worker.ts",
+    "src/apiBase.ts",
     "src/shared.ts",
     "src/bible.ts",
     "src/tenMinuteData.ts",

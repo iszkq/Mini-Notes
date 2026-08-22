@@ -39,6 +39,7 @@ import {
   type RefObject
 } from "react";
 import { importImageAsset, uploadAsset } from "../api";
+import { apiUrl } from "../apiBase";
 import {
   formatBibleReference,
   parseBibleVersePayload,
@@ -263,7 +264,8 @@ export function NotebookEditor({
         splitCells: true
       },
       extensions: [collapsibleEnterExtension],
-      uploadFile: handleUpload
+      uploadFile: handleUpload,
+      resolveFileUrl: async (url: string) => apiUrl(url)
     },
     [dictionary, handleUpload, note.id]
   );
@@ -2244,7 +2246,7 @@ async function loadImageCropSource(
 ): Promise<CropImageSource> {
   const sourceUrl = block.props.url;
   const resolvedUrl = editor.resolveFileUrl ? await editor.resolveFileUrl(sourceUrl) : sourceUrl;
-  const response = await fetch(new URL(resolvedUrl, window.location.href), {
+  const response = await fetch(apiUrl(resolvedUrl), {
     credentials: "include"
   });
 

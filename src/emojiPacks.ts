@@ -1,3 +1,5 @@
+import { apiUrl } from "./apiBase";
+
 export type EmojiPack = {
   id: string;
   name: string;
@@ -26,7 +28,7 @@ let emojiIndexPromise: Promise<EmojiIndex> | null = null;
 
 export async function loadEmojiIndex(): Promise<EmojiIndex> {
   if (!emojiIndexPromise) {
-    emojiIndexPromise = fetch(EMOJI_INDEX_URL)
+    emojiIndexPromise = fetch(apiUrl(EMOJI_INDEX_URL))
       .then(async (response) => {
         if (!response.ok) {
           throw new Error(`表情包加载失败（${response.status}）`);

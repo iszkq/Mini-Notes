@@ -35,6 +35,7 @@ import type {
   TenMinuteLessonDocumentUpdateInput,
   UploadResult
 } from "./shared";
+import { apiUrl } from "./apiBase";
 
 export class ApiError extends Error {
   constructor(
@@ -46,6 +47,13 @@ export class ApiError extends Error {
 }
 
 const API_REQUEST_TIMEOUT_MS = 90_000;
+
+/**
+ * The web build talks to the Worker on the current origin.  A Capacitor APK
+ * is served from `capacitor://localhost`, so it must be given the public
+ * Worker origin at build time (`VITE_API_BASE_URL`).
+ */
+export { API_BASE_URL, apiUrl } from "./apiBase";
 
 export async function getStatus(): Promise<SessionStatus> {
   return apiRequest("/api/status");
@@ -304,17 +312,19 @@ export async function uploadAsset(file: File): Promise<UploadResult> {
   const formData = new FormData();
   formData.append("file", file);
 
-  return apiRequest("/api/uploads", {
+  const result = await apiRequest<UploadResult>("/api/uploads", {
     method: "POST",
     body: formData
   });
+  return normalizeUploadResult(result);
 }
 
 export async function importImageAsset(url: string): Promise<UploadResult> {
-  return apiRequest("/api/uploads/import", {
+  const result = await apiRequest<UploadResult>("/api/uploads/import", {
     method: "POST",
     body: JSON.stringify({ url })
   });
+  return normalizeUploadResult(result);
 }
 
 export async function listAdminUsers(): Promise<AdminUsersResponse> {
@@ -353,17 +363,23 @@ export async function deleteAdminUser(id: string): Promise<{ ok: true }> {
 }
 
 export async function listAdminUploads(userId: string): Promise<AdminUpload[]> {
-  return apiRequest(`/api/admin/users/${encodeURIComponent(userId)}/uploads`);
+  const uploads = await apiRequest<AdminUpload[]>(`/api/admin/users/${encodeURIComponent(userId)}/uploads`);
+  return uploads.map((upload) => ({ ...upload, url: apiUrl(upload.url) }));
 }
 
 export async function createAdminUpload(userId: string, file: File): Promise<AdminUpload> {
   const formData = new FormData();
   formData.append("file", file);
 
-  return apiRequest(`/api/admin/users/${encodeURIComponent(userId)}/uploads`, {
+  const result = await apiRequest<AdminUpload>(`/api/admin/users/${encodeURIComponent(userId)}/uploads`, {
     method: "POST",
     body: formData
   });
+  return { ...result, url: apiUrl(result.url) };
+}
+
+function normalizeUploadResult(result: UploadResult): UploadResult {
+  return { ...result, url: apiUrl(result.url) };
 }
 
 export async function updateAdminUpload(
@@ -402,10 +418,12 @@ async function apiRequest<T>(path: string, init: RequestInit = {}): Promise<T> {
   }, API_REQUEST_TIMEOUT_MS);
 
   try {
-    const response = await fetch(path, {
+    const response = await fetch(apiUrl(path), {
       ...init,
       cache: "no-store",
-      credentials: "same-origin",
+      // `include` is required for the session cookie when the APK talks to
+      // the Worker on a different origin. It is harmless for same-origin web.
+      credentials: "include",
       headers,
       signal: controller.signal
     });

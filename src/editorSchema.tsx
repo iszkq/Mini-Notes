@@ -8,6 +8,7 @@ import {
 import { createReactBlockSpec, createReactStyleSpec } from "@blocknote/react";
 import { ChevronDown, CircleDot, FileText, Heading, Plus, Trash2 } from "lucide-react";
 import { formatBibleReference, parseBibleVersePayload } from "./bible";
+import { apiUrl } from "./apiBase";
 import { parseNoteComment } from "./comments";
 
 const FONT_SIZE_VALUES = new Set(["12px", "14px", "16px", "18px", "20px", "24px", "28px", "32px"]);
@@ -948,7 +949,7 @@ const pageLinkBlock = createReactBlockSpec(
           type="button"
         >
           <span className="page-link-block__icon" aria-hidden="true">
-            {isImageIconValue(icon) ? <img alt="" src={icon} /> : icon}
+            {isImageIconValue(icon) ? <img alt="" src={apiUrl(icon)} /> : icon}
           </span>
           <span className="page-link-block__title">{title}</span>
         </button>
@@ -958,7 +959,7 @@ const pageLinkBlock = createReactBlockSpec(
       <div className="page-link-block">
         <span className="page-link-block__icon" aria-hidden="true">
           {isImageIconValue(String(block.props.icon || "")) ? (
-            <img alt="" src={String(block.props.icon)} />
+            <img alt="" src={apiUrl(String(block.props.icon))} />
           ) : (
             block.props.icon || <FileText size={16} />
           )}

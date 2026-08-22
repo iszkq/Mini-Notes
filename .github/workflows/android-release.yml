@@ -20,6 +20,7 @@ jobs:
     runs-on: ubuntu-latest
     env:
       RELEASE_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
+      VITE_API_BASE_URL: https://mini-notes.iszkq.workers.dev
 
     steps:
       - name: Checkout

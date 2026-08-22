@@ -20,6 +20,7 @@
   "include": [
     "src/App.tsx",
     "src/api.ts",
+    "src/apiBase.ts",
     "src/bible.ts",
     "src/comments.ts",
     "src/emojiPacks.ts",

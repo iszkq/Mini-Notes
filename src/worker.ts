@@ -262,14 +262,14 @@ export default {
 
     if (url.pathname.startsWith("/api/")) {
       try {
-        return await handleApi(request, env, url);
+        return withCors(await handleApi(request, env, url), request);
       } catch (cause) {
         if (cause instanceof HttpError) {
-          return error(cause.message, cause.status);
+          return withCors(error(cause.message, cause.status), request);
         }
 
         console.error(cause);
-        return error("请求失败。", 500);
+        return withCors(error("请求失败。", 500), request);
       }
     }
 
@@ -5631,7 +5631,9 @@ function buildSessionCookie(
     `${SESSION_COOKIE_NAME}=${token}`,
     "HttpOnly",
     "Path=/",
-    "SameSite=Lax",
+    // Capacitor runs the UI on a different origin than the Worker. None is
+    // required for the session cookie to be sent by the Android WebView.
+    "SameSite=None",
     `Expires=${expiresAt.toUTCString()}`,
     `Max-Age=${SESSION_TTL_SECONDS}${secure}`
   ].join("; ");
@@ -5644,7 +5646,7 @@ function clearSessionCookie(request: Request): string {
     `${SESSION_COOKIE_NAME}=`,
     "HttpOnly",
     "Path=/",
-    "SameSite=Lax",
+    "SameSite=None",
     "Expires=Thu, 01 Jan 1970 00:00:00 GMT",
     `Max-Age=0${secure}`
   ].join("; ");
@@ -5677,6 +5679,24 @@ function corsHeaders(): HeadersInit {
     "Access-Control-Allow-Headers": "Content-Type",
     "Access-Control-Allow-Methods": "GET, POST, PUT, PATCH, DELETE, HEAD, OPTIONS"
   };
+}
+
+function withCors(response: Response, request: Request): Response {
+  const headers = new Headers(response.headers);
+  const origin = request.headers.get("Origin");
+  // Echo the requesting origin for credentialed APK/web clients. Requests
+  // without an Origin (normal same-origin navigation and server tools) keep
+  // the permissive header for backwards compatibility.
+  headers.set("Access-Control-Allow-Origin", origin || "*");
+  headers.set("Access-Control-Allow-Credentials", "true");
+  headers.set("Access-Control-Allow-Headers", "Content-Type");
+  headers.set("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, HEAD, OPTIONS");
+  headers.set("Vary", "Origin");
+  return new Response(response.body, {
+    status: response.status,
+    statusText: response.statusText,
+    headers
+  });
 }
 
 type ByteRange = {

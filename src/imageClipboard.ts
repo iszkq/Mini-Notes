@@ -1,4 +1,5 @@
 import type { BlockNoteEditor, PartialBlock } from "@blocknote/core";
+import { apiUrl } from "./apiBase";
 
 export type EditorImageBlock = {
   id: string;
@@ -243,7 +244,7 @@ async function getClipboardImageBlob(
   imageUrl: string
 ): Promise<Blob> {
   const resolvedUrl = editor.resolveFileUrl ? await editor.resolveFileUrl(imageUrl) : imageUrl;
-  const response = await fetch(new URL(resolvedUrl, window.location.href), {
+  const response = await fetch(apiUrl(resolvedUrl), {
     credentials: "include"
   });
 
