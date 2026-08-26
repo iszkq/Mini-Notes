@@ -1305,7 +1305,8 @@ export const collapsibleEnterExtension = createExtension({
     Backspace: ({ editor }) => preserveColorBlockOnIconDelete(editor),
     Delete: ({ editor }) => preserveColorBlockOnIconDelete(editor),
     Enter: ({ editor }) => insertHardBreakInEmbeddedCard(editor),
-    "Shift-Enter": ({ editor }) => insertHardBreakInEmbeddedCard(editor)
+    "Shift-Enter": ({ editor }) => insertHardBreakInEmbeddedCard(editor),
+    Tab: ({ editor }) => insertColorBlockFirstLineIndent(editor)
   }
 });
 
@@ -1844,6 +1845,24 @@ function preserveColorBlockOnIconDelete(editor: BlockNoteEditor<any, any, any>):
 
     // At the beginning of a color block Backspace is reserved for removing
     // the optional icon.  It must never unwrap the block into a paragraph.
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function insertColorBlockFirstLineIndent(editor: BlockNoteEditor<any, any, any>): boolean {
+  if (!editor.isEditable) return false;
+
+  try {
+    const currentBlock = editor.getTextCursorPosition().block;
+    if (currentBlock?.type !== "colorBlock") return false;
+
+    const state = editor.prosemirrorState;
+    const indent = state.schema.text("\u3000\u3000");
+    editor.prosemirrorView.dispatch(
+      state.tr.replaceSelectionWith(indent).scrollIntoView()
+    );
     return true;
   } catch {
     return false;
