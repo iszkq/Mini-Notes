@@ -3656,8 +3656,153 @@ button:disabled {
 }
 
 .public-password-card {
-  width: min(100%, 520px);
-  padding: 46px 34px;
+  display: grid;
+  grid-template-columns: minmax(240px, 0.9fr) minmax(320px, 1.1fr);
+  width: min(900px, calc(100vw - 44px));
+  min-height: 500px;
+  overflow: hidden;
+  border: 1px solid rgba(210, 224, 220, 0.9);
+  border-radius: 30px;
+  background: rgba(255, 255, 255, 0.94);
+  box-shadow: 0 28px 80px rgba(31, 62, 60, 0.14);
+}
+
+.public-password-art {
+  position: relative;
+  display: grid;
+  place-items: center;
+  overflow: hidden;
+  padding: 40px;
+  background: linear-gradient(145deg, #dff2ed 0%, #c9e8e2 48%, #a8d4ce 100%);
+}
+
+.public-password-orb {
+  position: absolute;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.32);
+  filter: blur(1px);
+}
+
+.public-password-orb-one { top: -78px; right: -54px; width: 220px; height: 220px; }
+.public-password-orb-two { bottom: -110px; left: -90px; width: 280px; height: 280px; background: rgba(53, 125, 123, 0.18); }
+
+.public-password-art-card {
+  position: relative;
+  display: grid;
+  justify-items: start;
+  gap: 15px;
+  width: min(230px, 100%);
+  padding: 24px;
+  border: 1px solid rgba(255, 255, 255, 0.7);
+  border-radius: 22px;
+  background: rgba(255, 255, 255, 0.68);
+  box-shadow: 0 18px 38px rgba(35, 89, 86, 0.16);
+  transform: rotate(-5deg);
+}
+
+.public-password-art-lock {
+  display: grid;
+  width: 52px;
+  height: 52px;
+  place-items: center;
+  border-radius: 16px;
+  color: #236d6c;
+  background: #fff;
+  box-shadow: 0 8px 18px rgba(35, 89, 86, 0.12);
+}
+
+.public-password-art-line {
+  display: block;
+  width: 76%;
+  height: 8px;
+  border-radius: 99px;
+  background: rgba(35, 109, 108, 0.2);
+}
+
+.public-password-art-line.long { width: 92%; }
+.public-password-art-line.short { width: 54%; }
+
+.public-password-art-chip {
+  margin-top: 8px;
+  padding: 6px 9px;
+  border-radius: 99px;
+  color: #236d6c;
+  background: rgba(255, 255, 255, 0.78);
+  font-size: 0.62rem;
+  font-weight: 850;
+  letter-spacing: 0.12em;
+}
+
+.public-password-form {
+  display: grid;
+  align-content: center;
+  gap: 16px;
+  padding: 56px clamp(30px, 6vw, 74px);
+}
+
+.public-password-kicker {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: #347d79;
+  font-size: 0.7rem;
+  font-weight: 850;
+  letter-spacing: 0.16em;
+}
+
+.public-password-kicker span {
+  width: 22px;
+  height: 3px;
+  border-radius: 99px;
+  background: #347d79;
+}
+
+.public-password-form h1 {
+  margin: 4px 0 0;
+  color: #203d3c;
+  font-size: clamp(2rem, 4vw, 3rem);
+  letter-spacing: -0.045em;
+  line-height: 1.08;
+}
+
+.public-password-form p {
+  margin: -4px 0 10px;
+  color: #6a7d79;
+  font-size: 0.96rem;
+  line-height: 1.75;
+}
+
+.public-password-input-wrap input {
+  width: 100%;
+  height: 52px;
+  padding: 0 48px 0 16px;
+  border: 1px solid #cbded9;
+  border-radius: 13px;
+  outline: 0;
+  color: #234a48;
+  background: #f8fcfb;
+  font-size: 1rem;
+  transition: border-color .2s ease, box-shadow .2s ease, background .2s ease;
+}
+
+.public-password-input-wrap input:focus {
+  border-color: #4d9b95;
+  background: #fff;
+  box-shadow: 0 0 0 4px rgba(77, 155, 149, .14);
+}
+
+.public-password-submit {
+  width: 100%;
+  min-height: 50px;
+  margin-top: 2px;
+  border-radius: 13px;
+  font-size: .95rem;
+}
+
+.public-password-hint {
+  color: #94a7a3;
+  font-size: .74rem;
+  text-align: center;
 }
 
 .public-note {
@@ -5452,11 +5597,11 @@ button.note-breadcrumb__item:hover {
 .qsl-standalone .qsl-waiting-overlay span { color: #7892ae; font-size: .84rem; }
 .mind-elixir-header label { display:flex; align-items:center; gap:6px; color:#5f7775; font-size:12px; }
 .mind-elixir-header select { border:1px solid #d4e3e0; border-radius:7px; padding:5px 8px; background:#fff; color:#315f60; }
-.mind-elixir-host { width:100%; height:560px; min-height:420px; border:1px solid #dce9e7; border-radius:12px; overflow:hidden; background:#f8fbfb; cursor:grab; }
+.mind-elixir-host { width:100%; height:560px; min-height:420px; border:1px solid #dce9e7; border-radius:12px; overflow:hidden; background:#f8fbfb; cursor:grab; touch-action:none; user-select:none; overscroll-behavior:contain; }
 .mind-elixir-host:active, .mind-elixir-host .map-container:active { cursor:grabbing; }
 .mind-elixir-host .map-canvas { cursor:grab; }
 .mind-elixir-host .map-canvas:active { cursor:grabbing; }
-.mind-elixir-host .map-container { width:100%; height:100%; cursor:grab; }
+.mind-elixir-host .map-container { width:100%; height:100%; cursor:grab; touch-action:none; }
 .mind-elixir-host .map-container .map-canvas { cursor:grab; }
 .mind-elixir-host .map-container:active, .mind-elixir-host .map-container .map-canvas:active { cursor:grabbing; }
 .mind-elixir-host.is-panning, .mind-elixir-host.is-panning * { cursor:grabbing !important; }
@@ -8014,6 +8159,62 @@ button.note-breadcrumb__item:hover {
 .qsl-host-waiting p { max-width:32rem; }
 .qsl-standalone > .revelation-memorization-hero, .qsl-standalone > .revelation-memorization-controls, .qsl-standalone > .revelation-memorization-score { display:none; }
 .qsl-standalone { padding-top:18px; }
+
+@media (max-width: 760px) {
+  .public-password-page {
+    min-height: 100dvh;
+    padding: 18px 14px;
+  }
+
+  .public-password-card {
+    grid-template-columns: 1fr;
+    width: min(100%, 460px);
+    min-height: 0;
+    border-radius: 24px;
+  }
+
+  .public-password-art {
+    min-height: 190px;
+    padding: 28px;
+  }
+
+  .public-password-art-card {
+    width: 190px;
+    padding: 16px;
+    gap: 10px;
+    transform: rotate(-3deg);
+  }
+
+  .public-password-art-lock {
+    width: 42px;
+    height: 42px;
+    border-radius: 13px;
+  }
+
+  .public-password-form {
+    gap: 13px;
+    padding: 30px 24px 26px;
+  }
+
+  .public-password-form h1 {
+    font-size: 2rem;
+  }
+
+  .public-password-form p {
+    margin-bottom: 6px;
+  }
+}
+
+@media (max-width: 380px) {
+  .public-password-art { min-height: 160px; }
+  .public-password-form { padding-inline: 18px; }
+}
+
+@media (min-width: 761px) {
+  .public-password-page {
+    padding: 38px 22px;
+  }
+}
 
 @media (max-width: 760px) {
   .revelation-memorization-page {

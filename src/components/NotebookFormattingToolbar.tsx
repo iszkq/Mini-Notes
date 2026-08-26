@@ -390,11 +390,21 @@ const TABLE_COLOR_OPTIONS = [
   { label: "紫色", value: "purple", swatch: "#eae4f2" },
   { label: "粉色", value: "pink", swatch: "#f4dfeb" }
 ];
-const TABLE_TEXT_COLOR_OPTIONS = TABLE_COLOR_OPTIONS.map(({ label, value, swatch }) => ({
-  label,
-  value,
-  swatch: value === "default" ? "#4b5553" : swatch
-}));
+// Text colors use a separate, higher-contrast palette.  Reusing the pastel
+// cell-fill colors here made the `A` swatches look washed out and also made
+// the selected text hard to read in the table toolbar.
+const TABLE_TEXT_COLOR_OPTIONS = [
+  { label: "自动", value: "default", swatch: "#4b5553" },
+  { label: "灰色", value: "gray", swatch: "#69757d" },
+  { label: "棕色", value: "brown", swatch: "#865b48" },
+  { label: "红色", value: "red", swatch: "#d04444" },
+  { label: "橙色", value: "orange", swatch: "#c46a1a" },
+  { label: "黄色", value: "yellow", swatch: "#9a7600" },
+  { label: "绿色", value: "green", swatch: "#2f7b60" },
+  { label: "蓝色", value: "blue", swatch: "#2e6f9f" },
+  { label: "紫色", value: "purple", swatch: "#7551a5" },
+  { label: "粉色", value: "pink", swatch: "#b44383" }
+];
 
 export function TableAwareColorStyleButton() {
   const Components = useComponentsContext();

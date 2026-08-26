@@ -53,6 +53,7 @@ function toMindData(payload: unknown): MindElixirData {
 export function MindElixirMindMap({ block, editor }: { block: any; editor: any }) {
   const hostRef = useRef<HTMLDivElement | null>(null);
   const mindRef = useRef<MindElixir | null>(null);
+  const panGestureRef = useRef<{ pointerId: number; x: number; y: number } | null>(null);
   const lastPayload = useRef(String(block.props.payload || ""));
   const [template, setTemplate] = useState<"default" | "project" | "study">("default");
 
@@ -74,6 +75,71 @@ export function MindElixirMindMap({ block, editor }: { block: any; editor: any }
     });
     mindRef.current = mind;
     void mind.init(toMindData(block.props.payload));
+
+    // Keep native drags inside the embedded canvas. Without this boundary,
+    // BlockNote can interpret a node/canvas gesture as dragging the whole
+    // custom block and create another mind-map block at the drop position.
+    const containNativeDrag = (event: DragEvent) => event.stopPropagation();
+    const containPointerGesture = (event: PointerEvent) => event.stopPropagation();
+    const startCanvasPan = (event: PointerEvent) => {
+      if (event.button !== 0 && event.pointerType !== "touch") return;
+      const target = event.target instanceof Element ? event.target : null;
+      if (!target || target.closest(".me-tpc, .me-epd, .mind-elixir-toolbar")) return;
+      panGestureRef.current = { pointerId: event.pointerId, x: event.clientX, y: event.clientY };
+      host.setPointerCapture?.(event.pointerId);
+      event.preventDefault();
+      event.stopPropagation();
+    };
+    const moveCanvasPan = (event: PointerEvent) => {
+      const pan = panGestureRef.current;
+      if (!pan || pan.pointerId !== event.pointerId || !mindRef.current) return;
+      const dx = event.clientX - pan.x;
+      const dy = event.clientY - pan.y;
+      pan.x = event.clientX;
+      pan.y = event.clientY;
+      if (dx || dy) mindRef.current.move(dx, dy);
+      event.preventDefault();
+      event.stopPropagation();
+    };
+    const endCanvasPan = (event: PointerEvent) => {
+      if (!panGestureRef.current || panGestureRef.current.pointerId !== event.pointerId) return;
+      panGestureRef.current = null;
+      if (host.hasPointerCapture?.(event.pointerId)) host.releasePointerCapture(event.pointerId);
+      event.stopPropagation();
+    };
+    host.addEventListener("dragstart", containNativeDrag);
+    host.addEventListener("dragover", containNativeDrag);
+    host.addEventListener("drop", containNativeDrag);
+    host.addEventListener("dragend", containNativeDrag);
+    host.addEventListener("pointerdown", containPointerGesture);
+    host.addEventListener("pointermove", containPointerGesture);
+    host.addEventListener("pointerup", containPointerGesture);
+    host.addEventListener("pointercancel", containPointerGesture);
+    host.addEventListener("pointerdown", startCanvasPan, true);
+    host.addEventListener("pointermove", moveCanvasPan, true);
+    host.addEventListener("pointerup", endCanvasPan, true);
+    host.addEventListener("pointercancel", endCanvasPan, true);
+
+    let wasFullscreen = document.fullscreenElement === host;
+    let centerTimer: number | null = null;
+    const fitAfterLayout = () => {
+      window.requestAnimationFrame(() => {
+        window.requestAnimationFrame(() => {
+          if (!mindRef.current || !host.isConnected) return;
+          mindRef.current.scaleFit();
+          mindRef.current.toCenter();
+        });
+      });
+    };
+    const handleFullscreenChange = () => {
+      const isFullscreen = document.fullscreenElement === host;
+      if (wasFullscreen && !isFullscreen) {
+        fitAfterLayout();
+        centerTimer = window.setTimeout(fitAfterLayout, 120);
+      }
+      wasFullscreen = isFullscreen;
+    };
+    document.addEventListener("fullscreenchange", handleFullscreenChange);
     const onOperation = () => {
       if (!editor.isEditable) return;
       const payload = JSON.stringify(mind.getData());
@@ -81,7 +147,25 @@ export function MindElixirMindMap({ block, editor }: { block: any; editor: any }
       editor.updateBlock(block, { props: { payload } });
     };
     mind.bus.addListener("operation", onOperation);
-    return () => { mind.bus.removeListener("operation", onOperation); mind.destroy(); mindRef.current = null; };
+    return () => {
+      if (centerTimer !== null) window.clearTimeout(centerTimer);
+      document.removeEventListener("fullscreenchange", handleFullscreenChange);
+      host.removeEventListener("dragstart", containNativeDrag);
+      host.removeEventListener("dragover", containNativeDrag);
+      host.removeEventListener("drop", containNativeDrag);
+      host.removeEventListener("dragend", containNativeDrag);
+      host.removeEventListener("pointerdown", containPointerGesture);
+      host.removeEventListener("pointermove", containPointerGesture);
+      host.removeEventListener("pointerup", containPointerGesture);
+      host.removeEventListener("pointercancel", containPointerGesture);
+      host.removeEventListener("pointerdown", startCanvasPan, true);
+      host.removeEventListener("pointermove", moveCanvasPan, true);
+      host.removeEventListener("pointerup", endCanvasPan, true);
+      host.removeEventListener("pointercancel", endCanvasPan, true);
+      mind.bus.removeListener("operation", onOperation);
+      mind.destroy();
+      mindRef.current = null;
+    };
   }, [block.id, editor]);
 
   useEffect(() => {

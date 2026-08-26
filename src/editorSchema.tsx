@@ -1437,11 +1437,28 @@ export const tableCellStyleExtension = createExtension({
           new ProseMirrorPlugin({
             props: {
               handleDOMEvents: {
+                pointerout(view, event) {
+                  const target = event.target instanceof Element ? event.target : null;
+                  const related = event.relatedTarget instanceof Node ? event.relatedTarget : null;
+                  if (!target || (related && target.contains(related))) return false;
+                  const row = target.closest('tr[data-row-resize-hover]') as HTMLElement | null;
+                  row?.removeAttribute("data-row-resize-hover");
+                  return false;
+                },
                 pointermove(view, event) {
                   const target = event.target instanceof Element ? event.target : null;
                   const cell = target?.closest("td, th") as HTMLElement | null;
-                  if (!cell || !view.dom.contains(cell)) return false;
+                  const table = cell?.closest('[data-content-type="table"]') as HTMLElement | null;
+                  if (!cell || !table || !view.dom.contains(cell)) return false;
+                  table.querySelectorAll<HTMLElement>('tr[data-row-resize-hover]').forEach((row) => {
+                    if (row !== cell.closest("tr")) row.removeAttribute("data-row-resize-hover");
+                  });
+                  const row = cell.closest("tr") as HTMLElement | null;
                   const nearBottom = cell.getBoundingClientRect().bottom - event.clientY <= 7;
+                  if (row) {
+                    if (nearBottom) row.setAttribute("data-row-resize-hover", "true");
+                    else row.removeAttribute("data-row-resize-hover");
+                  }
                   cell.style.cursor = nearBottom ? "row-resize" : "";
                   return false;
                 },
@@ -1465,6 +1482,7 @@ export const tableCellStyleExtension = createExtension({
                   const startY = event.clientY;
                   const startHeight = row.getBoundingClientRect().height;
                   const previousCursor = document.body.style.cursor;
+                  row.setAttribute("data-row-resize-active", "true");
                   document.body.style.cursor = "row-resize";
 
                   const resize = (moveEvent: PointerEvent) => {
@@ -1481,6 +1499,8 @@ export const tableCellStyleExtension = createExtension({
                   };
                   const finish = () => {
                     document.body.style.cursor = previousCursor;
+                    row.removeAttribute("data-row-resize-active");
+                    row.removeAttribute("data-row-resize-hover");
                     window.removeEventListener("pointermove", resize);
                     window.removeEventListener("pointerup", finish);
                     window.removeEventListener("pointercancel", finish);

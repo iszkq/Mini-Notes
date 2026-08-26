@@ -3807,9 +3807,21 @@ function App() {
     if (publicPasswordRequired) {
       return (
         <main className="public-shell">
-          <section className="public-page public-password-page">
+          <section className="public-password-page">
+            <div className="public-password-card">
+              <div className="public-password-art" aria-hidden="true">
+                <div className="public-password-orb public-password-orb-one" />
+                <div className="public-password-orb public-password-orb-two" />
+                <div className="public-password-art-card">
+                  <div className="public-password-art-lock"><Lock size={24} /></div>
+                  <span className="public-password-art-line long" />
+                  <span className="public-password-art-line" />
+                  <span className="public-password-art-line short" />
+                  <div className="public-password-art-chip">PRIVATE NOTE</div>
+                </div>
+              </div>
             <form
-              className="public-empty public-password-card"
+              className="public-password-form"
               onSubmit={(event) => {
                 event.preventDefault();
                 if (initialShareToken && publicPassword.trim()) {
@@ -3817,15 +3829,15 @@ function App() {
                 }
               }}
             >
-              <Lock size={24} />
-              <h1>此分享页面受密码保护</h1>
-              <p>请输入分享者提供的密码后查看内容。</p>
+              <div className="public-password-kicker"><span /> MINI NOTES</div>
+              <h1>这是一个私密页面</h1>
+              <p>输入分享者提供的密码，解锁这份笔记内容。</p>
               <div className="public-password-input-wrap">
                 <input
                   autoComplete="current-password"
                   autoFocus
                   onChange={(event) => setPublicPassword(event.target.value)}
-                  placeholder="分享密码"
+                  placeholder="输入访问密码"
                   type={showPublicPassword ? "text" : "password"}
                   value={publicPassword}
                 />
@@ -3838,10 +3850,12 @@ function App() {
                   {showPublicPassword ? <EyeOff size={18} /> : <Eye size={18} />}
                 </button>
               </div>
-              <button className="primary-button" disabled={!publicPassword.trim()} type="submit">
-                查看页面
+              <button className="primary-button public-password-submit" disabled={!publicPassword.trim()} type="submit">
+                解锁并查看
               </button>
+              <small className="public-password-hint">密码仅用于本次访问，不会被保存。</small>
             </form>
+            </div>
           </section>
         </main>
       );

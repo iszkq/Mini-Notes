@@ -2059,7 +2059,8 @@ button.collapsible-content-block__toggle:hover {
 
 .bn-side-menu[data-block-type="contentTimeline"] [data-test="dragHandleAdd"],
 .bn-side-menu[data-block-type="contentSteps"] [data-test="dragHandleAdd"],
-.bn-side-menu[data-block-type="contentComparison"] [data-test="dragHandleAdd"] {
+.bn-side-menu[data-block-type="contentComparison"] [data-test="dragHandleAdd"],
+.bn-side-menu[data-block-type="contentMindMap"] [data-test="dragHandleAdd"] {
   display: none;
 }
 
@@ -3122,7 +3123,8 @@ button.collapsible-content-block__toggle:hover {
 .bn-editor .selectedCell { overflow:visible !important; outline:2px solid rgba(77,145,224,.9) !important; outline-offset:-1px !important; }
 .bn-editor .selectedCell:after { position:absolute !important; z-index:30 !important; inset:0 !important; width:100% !important; height:100% !important; box-sizing:border-box !important; border:2px solid rgba(77,145,224,.9) !important; border-radius:1px !important; background:rgba(77,145,224,.2) !important; pointer-events:none !important; }
 
-/* Drag the lower edge of any row to increase its height. */
+/* Row resizing mirrors BlockNote's column-resize affordance: the guide only
+   appears while the pointer is within the lower edge hit area. */
 .bn-editor [data-content-type="table"] tr[data-row-height] {
   height: attr(data-row-height px);
 }
@@ -3130,24 +3132,27 @@ button.collapsible-content-block__toggle:hover {
 .bn-editor [data-content-type="table"] th {
   transition: height .12s ease;
 }
-.bn-editor [data-content-type="table"] tr:hover > td::after,
-.bn-editor [data-content-type="table"] tr:hover > th::after {
-  position:absolute;
-  right:0;
-  bottom:-3px;
-  left:0;
-  z-index:25;
-  height:6px;
-  content:"";
-  background:#4d8df7;
-  border-radius:3px;
-  opacity:.72;
-  pointer-events:none;
-  cursor:row-resize;
+.bn-editor [data-content-type="table"] tr[data-row-resize-hover] > td::after,
+.bn-editor [data-content-type="table"] tr[data-row-resize-hover] > th::after {
+  position: absolute;
+  right: 0;
+  bottom: -3px;
+  left: 0;
+  z-index: 25;
+  height: 6px;
+  border-radius: 3px;
+  background: #4d8df7;
+  box-shadow: 0 0 0 1px rgba(77, 141, 247, .14);
+  content: "";
+  opacity: .9;
+  pointer-events: none;
 }
-.bn-editor [data-content-type="table"] tr:hover > td:hover::after,
-.bn-editor [data-content-type="table"] tr:hover > th:hover::after { opacity:1; }
-.bn-editor [data-content-type="table"] .bn-table-drop-cursor { z-index:40 !important; display:block !important; background:#4d8df7 !important; opacity:1 !important; }
+.bn-editor [data-content-type="table"] tr[data-row-resize-active] > td::after,
+.bn-editor [data-content-type="table"] tr[data-row-resize-active] > th::after {
+  opacity: 1;
+  box-shadow: 0 0 0 2px rgba(77, 141, 247, .2);
+}
+.bn-editor [data-content-type="table"] .bn-table-drop-cursor { z-index: 40 !important; display: block !important; background: #4d8df7 !important; opacity: 1 !important; }
 
 .table-cell-color-swatch {
   display:inline-block;
