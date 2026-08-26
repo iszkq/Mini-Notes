@@ -1,10 +1,10 @@
 import { BookOpen, Check, Puzzle, RefreshCw, RotateCcw, X } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { type BibleData, type BibleVerse, loadBibleChapter, loadBibleData, sortBibleVerses } from "../bible";
-import { createQslPuzzleRoom, getQslPuzzleLeaderboard, joinQslPuzzleRoom, updateQslPuzzleProgress } from "../api";
+import { createQslPuzzleRoom, getQslPuzzleLeaderboard, getQslPuzzleRoom, joinQslPuzzleRoom, startQslPuzzleRoom, updateQslPuzzleProgress } from "../api";
 import type { QslPuzzlePlayer } from "../shared";
 
-type RevelationMemorizationProps = { onError?: (message: string) => void; standaloneRoomId?: string; standalonePlayerToken?: string; standaloneNickname?: string };
+type RevelationMemorizationProps = { onError?: (message: string) => void; standaloneRoomId?: string; standalonePlayerToken?: string; standaloneNickname?: string; standaloneRoomSeed?: number; standaloneRoomStatus?: "waiting" | "started" | "finished" };
 type ExerciseMode = "fill-in-blank" | "recite";
 type PuzzleDifficulty = 25 | 17 | 10;
 type PuzzlePhase = "difficulty" | "playing" | "result" | "complete";
@@ -23,7 +23,7 @@ const ENCOURAGEMENTS = [
   "很有进步，继续完成这一章吧！"
 ];
 
-export function RevelationMemorization({ onError, standaloneRoomId, standalonePlayerToken, standaloneNickname }: RevelationMemorizationProps) {
+export function RevelationMemorization({ onError, standaloneRoomId, standalonePlayerToken, standaloneNickname, standaloneRoomSeed, standaloneRoomStatus }: RevelationMemorizationProps) {
   const [data, setData] = useState<BibleData | null>(null);
   const [bookName, setBookName] = useState("");
   const [chapter, setChapter] = useState(1);
@@ -47,6 +47,8 @@ export function RevelationMemorization({ onError, standaloneRoomId, standalonePl
   const [puzzleScore, setPuzzleScore] = useState(0);
   const [roundCorrect, setRoundCorrect] = useState(false);
   const [qslRoomId, setQslRoomId] = useState<string | null>(standaloneRoomId ?? null);
+  const [qslSeed, setQslSeed] = useState<number | null>(standaloneRoomSeed ?? null);
+  const [qslStatus, setQslStatus] = useState<"waiting" | "started" | "finished">(standaloneRoomStatus ?? "waiting");
   const [leaderboard, setLeaderboard] = useState<QslPuzzlePlayer[]>([]);
   const requestIdRef = useRef(0);
   const toastTimerRef = useRef<number | null>(null);
@@ -128,10 +130,11 @@ export function RevelationMemorization({ onError, standaloneRoomId, standalonePl
   const resetExercise = useCallback(() => generateExercise(verses, mode), [generateExercise, mode, verses]);
 
   const createPuzzleRound = useCallback((nextRoundNumber: number, sourceVerses = puzzleVerses) => {
-    const verse = sourceVerses[Math.floor(Math.random() * sourceVerses.length)];
+    const random = seededRandom((qslSeed ?? Date.now()) + nextRoundNumber * 7919);
+    const verse = sourceVerses[Math.floor(random() * sourceVerses.length)];
     if (!verse) return;
     const segments = splitVerseIntoSegments(verse.content);
-    const tokens = shuffle(segments.map((value, index) => ({ id: `${nextRoundNumber}-${index}-${Math.random().toString(36).slice(2)}`, value })));
+    const tokens = seededShuffle(segments.map((value, index) => ({ id: `${nextRoundNumber}-${index}`, value })), random);
     const nextRound = { id: `${nextRoundNumber}-${Date.now()}`, segments, tokens, verse };
     setRound(nextRound);
     setRoundNumber(nextRoundNumber);
@@ -139,7 +142,7 @@ export function RevelationMemorization({ onError, standaloneRoomId, standalonePl
     setRoundCorrect(false);
     setRemainingTime(difficulty);
     setPuzzlePhase("playing");
-  }, [difficulty, puzzleVerses]);
+  }, [difficulty, puzzleVerses, qslSeed]);
 
   const finishPuzzleRound = useCallback(() => {
     const activeRound = roundRef.current;
@@ -224,6 +227,8 @@ export function RevelationMemorization({ onError, standaloneRoomId, standalonePl
     try {
       const room = await createQslPuzzleRoom({ roundCount: puzzleRoundTarget, difficulty });
       setQslRoomId(room.roomId);
+      setQslSeed(room.seed);
+      setQslStatus(room.status ?? "waiting");
       url.pathname = `/qsl/${room.roomId}`;
       url.hash = "";
     } catch {
@@ -262,6 +267,20 @@ export function RevelationMemorization({ onError, standaloneRoomId, standalonePl
     const timer = window.setInterval(refresh, 2500);
     return () => window.clearInterval(timer);
   }, [qslRoomId]);
+
+  useEffect(() => {
+    if (!qslRoomId) return;
+    const refreshRoom = () => void getQslPuzzleRoom(qslRoomId).then((room) => { setQslSeed(room.seed); setQslStatus(room.status ?? "waiting"); if (room.status === "started" && puzzlePhase === "difficulty" && standaloneRoomId) setPuzzlePhase("difficulty"); }).catch(() => undefined);
+    refreshRoom();
+    const timer = window.setInterval(refreshRoom, 1800);
+    return () => window.clearInterval(timer);
+  }, [qslRoomId, puzzlePhase, standaloneRoomId]);
+
+  const startRoom = useCallback(async () => {
+    if (!qslRoomId) return;
+    try { await startQslPuzzleRoom(qslRoomId); setQslStatus("started"); showToast("房主已开始比赛，所有玩家使用同一套题目"); }
+    catch (error) { onError?.(error instanceof Error ? error.message : "开始比赛失败"); }
+  }, [onError, qslRoomId, showToast]);
 
   useEffect(() => {
     if (!standaloneRoomId || !bookName || puzzleLoading || puzzleVerses.length > 0) return;
@@ -319,11 +338,12 @@ export function RevelationMemorization({ onError, standaloneRoomId, standalonePl
       </div>}
 
       {toast ? <div className="revelation-memorization-toast" role="status">{toast}</div> : null}
-      {puzzleOpen ? <div className="revelation-puzzle-backdrop" role="dialog" aria-modal="true" aria-label="QSL 拼拼乐"><section className="revelation-puzzle-modal">
+      {puzzleOpen ? <div className="revelation-puzzle-backdrop" role="dialog" aria-modal="true" aria-label="QSL 拼拼乐"><section className={`revelation-puzzle-modal${standaloneRoomId && qslStatus !== "started" ? " qsl-room-waiting" : ""}`}>
         <button aria-label="退出 QSL 拼拼乐" className="revelation-puzzle-close" onClick={() => setPuzzleOpen(false)} type="button"><X size={20} /></button>
         {qslRoomId ? <aside className="revelation-puzzle-room"><strong>在线 PK 房间 {qslRoomId}</strong><span>{leaderboard.length} 人参赛</span>{leaderboard.slice(0, 5).map((player, index) => <span key={player.userId}>#{index + 1} {player.username} · {player.score} 分 · {player.completedRounds} 节</span>)}</aside> : null}
         {puzzleLoading ? <div className="revelation-puzzle-loading">正在准备 QSL 拼拼乐题库…</div> : puzzlePhase === "difficulty" ? <div className="revelation-puzzle-difficulty"><h2>QSL 拼拼乐</h2><p>将被打散的经文分句按正确顺序拼回。</p><label><span>本次挑战节数</span><input min={1} max={500} onChange={(event) => setPuzzleRoundTarget(Math.min(500, Math.max(1, Number(event.target.value) || 1)))} type="number" value={puzzleRoundTarget} /></label><fieldset><legend>选择挑战难度</legend>{([{ value: 25, label: "简单 · 25 秒" }, { value: 17, label: "一般 · 17 秒" }, { value: 10, label: "高手 · 10 秒" }] as Array<{ label: string; value: PuzzleDifficulty }>).map((item) => <label key={item.value}><input checked={difficulty === item.value} name="difficulty" onChange={() => setDifficulty(item.value)} type="radio" value={item.value} />{item.label}</label>)}</fieldset><div className="revelation-puzzle-actions"><button className="primary-button" onClick={startPuzzle} type="button">开始挑战</button><button className="toolbar-button" onClick={() => void sharePuzzleChallenge()} type="button">分享挑战</button></div></div> : puzzlePhase === "complete" ? <div className="revelation-puzzle-difficulty"><h2>挑战完成！</h2><p>你已完成 {puzzleRoundTarget} 节经文拼拼乐，最终得分 {puzzleScore}。</p><button className="primary-button" onClick={() => setPuzzlePhase("difficulty")} type="button">再次挑战</button></div> : round ? <div className="revelation-puzzle-game"><header><div><span>⏱ {remainingTime.toFixed(2)}s</span><span>✓ 得分 {puzzleScore}</span></div><small>第 {roundNumber} / {puzzleRoundTarget} 节</small></header><h2>启示录 {round.verse.chapterNumber}:{round.verse.verseNumber}</h2><div className="revelation-puzzle-blanks">{round.segments.map((segment, index) => <button className={puzzlePhase === "result" ? selectedTokens[index]?.value === segment ? "is-correct" : "is-wrong" : selectedTokens[index] ? "is-filled" : ""} disabled={puzzlePhase !== "playing" || !selectedTokens[index]} key={`${round.id}-blank-${index}`} onClick={() => removePuzzleToken(index)} style={{ minWidth: `${Math.min(250, Math.max(48, segment.length * 18 + 20))}px` }} type="button">{selectedTokens[index]?.value}</button>)}</div><div className="revelation-puzzle-tokens">{round.tokens.map((token) => <button className={selectedTokens.some((selected) => selected.id === token.id) ? "is-used" : ""} disabled={puzzlePhase !== "playing" || selectedTokens.some((selected) => selected.id === token.id)} key={token.id} onClick={() => selectPuzzleToken(token)} type="button">{token.value}</button>)}</div><footer><button className="primary-button" onClick={puzzlePhase === "playing" ? finishPuzzleRound : continuePuzzle} type="button">{puzzlePhase === "playing" ? "完成" : roundCorrect ? roundNumber >= puzzleRoundTarget ? "查看结果" : "继续" : "重新挑战"}</button></footer></div> : null}
       </section></div> : null}
+      {standaloneRoomId && qslStatus !== "started" && puzzleOpen ? <div className="qsl-waiting-overlay"><h2>等待房主开始比赛</h2><p>所有参赛者将使用同一套题目、同一顺序。</p><span>房主开始后会自动进入对决…</span></div> : null}
     </section>
   );
 }
@@ -379,6 +399,8 @@ function splitVerseIntoClauseRanges(text: string): Array<{ start: number; end: n
 
 function shuffle<T>(items: T[]): T[] { return [...items].sort(() => Math.random() - 0.5); }
 function normalizeAnswer(value: string): string { return value.replace(/\s+/g, "").trim(); }
+function seededRandom(seed: number): () => number { let value = Math.abs(Math.floor(seed)) || 1; return () => { value = (value * 1664525 + 1013904223) >>> 0; return value / 4294967296; }; }
+function seededShuffle<T>(items: T[], random: () => number): T[] { const next = [...items]; for (let index = next.length - 1; index > 0; index -= 1) { const swap = Math.floor(random() * (index + 1)); [next[index], next[swap]] = [next[swap], next[index]]; } return next; }
 
 function MemorizationBlank({
   answer,

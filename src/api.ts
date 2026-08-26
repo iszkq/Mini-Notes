@@ -70,6 +70,12 @@ export async function joinQslPuzzleRoom(roomId: string, nickname?: string, playe
     body: JSON.stringify({ nickname, playerToken })
   });
 }
+export async function getQslPuzzleRoom(roomId: string): Promise<QslPuzzleRoom> {
+  return apiRequest(`/api/qsl/rooms/${encodeURIComponent(roomId)}`);
+}
+export async function startQslPuzzleRoom(roomId: string): Promise<{ ok: true; status: "started" }> {
+  return apiRequest(`/api/qsl/rooms/${encodeURIComponent(roomId)}/start`, { method: "POST" });
+}
 export async function updateQslPuzzleProgress(roomId: string, input: { score: number; completedRounds: number; playerToken?: string }): Promise<{ ok: true }> {
   return apiRequest(`/api/qsl/rooms/${encodeURIComponent(roomId)}/progress`, { method: "PATCH", body: JSON.stringify(input) });
 }

@@ -333,7 +333,8 @@ async function handleApi(
     // leaderboard without an account; progress is kept locally in the client.
     if (
       segments[0] === "qsl" && segments[1] === "rooms" && segments[2] &&
-      ((segments[3] === "join" && request.method === "POST") ||
+      ((segments[3] === undefined && request.method === "GET") ||
+        (segments[3] === "join" && request.method === "POST") ||
         (segments[3] === "progress" && request.method === "PATCH") ||
         (segments[3] === "leaderboard" && request.method === "GET"))
     ) {
@@ -632,9 +633,15 @@ async function handleQslApi(request: Request, env: Env, user: AuthUser, segments
     return json({ roomId: id, seed, roundCount, difficulty, expiresAt: expires });
   }
   if (!roomId) return error("缺少房间 ID。", 400);
-  const room = await env.DB.prepare("SELECT id AS roomId, seed, round_count AS roundCount, difficulty, expires_at AS expiresAt FROM qsl_puzzle_rooms WHERE id = ? AND expires_at > ?")
-    .bind(roomId, new Date().toISOString()).first<{ roomId: string; seed: number; roundCount: number; difficulty: number; expiresAt: string }>();
+  const room = await env.DB.prepare("SELECT id AS roomId, seed, round_count AS roundCount, difficulty, status, owner_user_id AS ownerUserId, (SELECT username FROM users WHERE id = owner_user_id) AS ownerUsername, expires_at AS expiresAt FROM qsl_puzzle_rooms WHERE id = ? AND expires_at > ?")
+    .bind(roomId, new Date().toISOString()).first<{ roomId: string; seed: number; roundCount: number; difficulty: number; status: "waiting" | "started" | "finished"; ownerUserId: string; ownerUsername: string; expiresAt: string }>();
   if (!room) return error("房间不存在或已过期。", 404);
+  if (request.method === "GET" && !segments[3]) return json(room);
+  if (request.method === "POST" && segments[3] === "start") {
+    if (guest || room.ownerUserId !== user.id) return error("Only the room owner can start the match.", 403);
+    await env.DB.prepare("UPDATE qsl_puzzle_rooms SET status = 'started', started_at = ? WHERE id = ?").bind(new Date().toISOString(), roomId).run();
+    return json({ ok: true, status: "started" });
+  }
   if (request.method === "POST" && segments[3] === "join") {
     if (guest) {
       const body = await readJson<{ nickname?: unknown; playerToken?: unknown }>(request);

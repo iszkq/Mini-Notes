@@ -35,6 +35,9 @@ export type QslPuzzleRoom = {
   seed: number;
   roundCount: number;
   difficulty: number;
+  status?: "waiting" | "started" | "finished";
+  ownerUserId?: string;
+  ownerUsername?: string;
   expiresAt: string;
   playerToken?: string;
 };

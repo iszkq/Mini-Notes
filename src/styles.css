@@ -7917,6 +7917,9 @@ button.note-breadcrumb__item:hover {
 .revelation-puzzle-room strong { width:100%; }
 .revelation-puzzle-room span { padding:4px 7px; border-radius:999px; background:#fff; }
 .qsl-battle-shell { min-height:100vh; background:linear-gradient(145deg,#eef7f6,#f9fbfb); }
+.qsl-waiting-overlay { position:fixed; inset:0; z-index:20; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:10px; background:rgba(247,252,251,.97); color:#245e62; text-align:center; }
+.qsl-waiting-overlay h2 { margin:0; font-size:1.8rem; }
+.qsl-waiting-overlay p { margin:0; color:#66817d; }
 .qsl-battle-lobby { width:min(420px,calc(100vw - 32px)); margin:0 auto; padding:72px 24px 40px; text-align:center; }
 .qsl-battle-brand { width:64px; height:64px; margin:0 auto 20px; display:grid; place-items:center; border-radius:20px; background:linear-gradient(135deg,#2b777a,#4b9b96); color:#fff; font-size:1.6rem; font-weight:800; box-shadow:0 10px 24px rgba(43,119,122,.25); }
 .qsl-battle-lobby h1 { margin:0; color:#21494a; font-size:1.7rem; }
