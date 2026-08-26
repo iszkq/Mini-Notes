@@ -22,6 +22,7 @@ import {
   ListChecks,
   MessageSquareText,
   Network,
+  Palette,
   Pencil,
   RotateCcw,
   Timer,
@@ -52,6 +53,9 @@ import {
 import {
   COLLAPSIBLE_CONTENT_DEFAULT_BODY,
   COLLAPSIBLE_CONTENT_DEFAULT_TITLE,
+  COLOR_BLOCK_DEFAULT_BACKGROUND,
+  COLOR_BLOCK_DEFAULT_ICON,
+  COLOR_BLOCK_DEFAULT_TEXT,
   COMPARISON_DEFAULT_PAYLOAD,
   STEPS_DEFAULT_PAYLOAD,
   TIMELINE_DEFAULT_PAYLOAD,
@@ -206,6 +210,7 @@ export function NotebookEditor({
   const [bibleModalOpen, setBibleModalOpen] = useState(false);
   const [bibleInsertTarget, setBibleInsertTarget] = useState<BibleInsertTarget | null>(null);
   const [emojiPickerOpen, setEmojiPickerOpen] = useState(false);
+  const [colorBlockIconTarget, setColorBlockIconTarget] = useState<string | null>(null);
   const [activeCommentId, setActiveCommentId] = useState<string | null>(null);
   const [commentAnchorPositions, setCommentAnchorPositions] = useState<CommentAnchorPositions>({});
   const [commentComposer, setCommentComposer] = useState<CommentComposer | null>(null);
@@ -274,6 +279,29 @@ export function NotebookEditor({
       resolveFileUrl: async (url: string) => apiUrl(url)
     },
     [dictionary, handleUpload, note.id]
+  );
+
+  useEffect(() => {
+    const handleColorBlockEmoji = (event: Event) => {
+      const blockId = (event as CustomEvent<{ blockId?: string }>).detail?.blockId;
+      if (blockId) {
+        setColorBlockIconTarget(blockId);
+      }
+    };
+    window.addEventListener("mininotes:color-block-emoji", handleColorBlockEmoji);
+    return () => window.removeEventListener("mininotes:color-block-emoji", handleColorBlockEmoji);
+  }, []);
+
+  const selectColorBlockIcon = useCallback(
+    (item: EmojiItem) => {
+      if (!colorBlockIconTarget) return;
+      const block = editor.getBlock(colorBlockIconTarget);
+      if (block?.type === "colorBlock") {
+        editor.updateBlock(block, { props: { icon: item.url } } as PartialBlock);
+      }
+      setColorBlockIconTarget(null);
+    },
+    [colorBlockIconTarget, editor]
   );
 
   const resolveRemoteImageUrl = useCallback(
@@ -799,6 +827,33 @@ export function NotebookEditor({
     editor.focus();
   }, [editor, getCurrentBlockTextFromDom, getCurrentTextBlock]);
 
+  const insertColorBlock = useCallback(() => {
+    const currentBlock = getCurrentTextBlock();
+    const plainText = getCurrentBlockTextFromDom();
+    const colorBlock = {
+      type: "colorBlock",
+      props: {
+        backgroundColor: COLOR_BLOCK_DEFAULT_BACKGROUND,
+        icon: COLOR_BLOCK_DEFAULT_ICON
+      },
+      content: [{ type: "text", text: COLOR_BLOCK_DEFAULT_TEXT, styles: {} }]
+    } as unknown as PartialBlock;
+    const spacerBlock = { type: "paragraph", content: [] } as PartialBlock;
+    const blocksToInsert = [colorBlock, spacerBlock];
+
+    if (!plainText || plainText.startsWith("/")) {
+      const result = editor.replaceBlocks([currentBlock.id], blocksToInsert);
+      const cursorBlock = result.insertedBlocks[0] ?? result.insertedBlocks[1];
+      if (cursorBlock) editor.setTextCursorPosition(cursorBlock, "end");
+    } else {
+      const insertedBlocks = editor.insertBlocks(blocksToInsert, currentBlock.id, "after");
+      const cursorBlock = insertedBlocks[0] ?? insertedBlocks[1];
+      if (cursorBlock) editor.setTextCursorPosition(cursorBlock, "end");
+    }
+
+    editor.focus();
+  }, [editor, getCurrentBlockTextFromDom, getCurrentTextBlock]);
+
   const insertContentWidgetBlock = useCallback(
     (
       blockType: "contentTimeline" | "contentSteps" | "contentComparison" | "contentMindMap",
@@ -1251,11 +1306,14 @@ export function NotebookEditor({
       const defaultItems: DefaultReactSuggestionItem[] = getDefaultReactSlashMenuItems(editor)
         .filter(
           (item) =>
+            item.title !== editor.dictionary.slash_menu.code_block.title &&
+            !item.aliases?.some((alias) => ["code", "code block", "codeblock", "代码块"].includes(alias.toLowerCase())) &&
             !item.title.includes("表情") &&
             !item.subtext?.includes("表情") &&
             !item.aliases?.some((alias) => ["emoji", "emoticon"].includes(alias.toLowerCase()))
         );
       const heading3Title = editor.dictionary.slash_menu.heading_3.title;
+      const codeBlockTitle = editor.dictionary.slash_menu.code_block.title;
       const toggleListTitle = editor.dictionary.slash_menu.toggle_list.title;
       const dividerTitle = editor.dictionary.slash_menu.divider.title;
       const collapsibleItem: DefaultReactSuggestionItem = {
@@ -1265,6 +1323,14 @@ export function NotebookEditor({
         group: "高级功能",
         icon: <ChevronDown size={18} />,
         onItemClick: insertCollapsibleContent
+      };
+      const colorBlockItem: DefaultReactSuggestionItem = {
+        title: "色块",
+        subtext: "可自定义背景颜色、图标和文字格式的重点区块",
+        aliases: ["色块", "高亮块", "提示块", "callout", "color block"],
+        group: "基本块",
+        icon: <Palette size={18} />,
+        onItemClick: insertColorBlock
       };
       const timelineItem: DefaultReactSuggestionItem = {
         title: "时间轴",
@@ -1325,6 +1391,14 @@ export function NotebookEditor({
       };
       const items = [...defaultItems];
       moveSuggestionItemToGroup(items, dividerTitle, "基本块");
+      const codeIndex = codeBlockTitle
+        ? items.findIndex((item) => item.title === codeBlockTitle)
+        : -1;
+      if (codeIndex >= 0) {
+        items.splice(codeIndex, 0, colorBlockItem);
+      } else {
+        insertSuggestionItemsInGroup(items, "基本块", [colorBlockItem]);
+      }
       const heading3Index = items.findIndex((item) => item.title === heading3Title);
       const toggleListIndex = items.findIndex((item) => item.title === toggleListTitle);
       items.splice(toggleListIndex >= 0 ? toggleListIndex + 1 : 0, 0, subPageItem);
@@ -1343,6 +1417,7 @@ export function NotebookEditor({
     [
       editor,
       insertCollapsibleContent,
+      insertColorBlock,
       insertComparison,
       insertMindMap,
       insertSteps,
@@ -1480,6 +1555,18 @@ export function NotebookEditor({
             onSelect={insertEmojiImage}
             open
             title="插入表情包"
+          />
+        </Suspense>
+      ) : null}
+
+      {!readOnly && colorBlockIconTarget ? (
+        <Suspense fallback={null}>
+          <EmojiPackPicker
+            onClose={() => setColorBlockIconTarget(null)}
+            onSelect={selectColorBlockIcon}
+            open
+            title="选择色块图标"
+            confirmLabel="设置图标"
           />
         </Suspense>
       ) : null}
