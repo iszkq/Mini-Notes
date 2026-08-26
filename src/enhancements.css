@@ -3119,7 +3119,7 @@ button.collapsible-content-block__toggle:hover {
 .bn-editor [data-content-type="table"] th { position:relative; overflow:visible; }
 .bn-editor [data-content-type="table"] .tableWrapper,
 .bn-editor [data-content-type="table"] table { overflow:visible !important; }
-.bn-editor .selectedCell:after { position:absolute; z-index:2; inset:-1px; width:auto; height:auto; box-sizing:border-box; border:2px solid rgba(77,145,224,.9); border-radius:1px; pointer-events:none; }
+.bn-editor .selectedCell:after { position:absolute; z-index:2; inset:0; width:100%; height:100%; box-sizing:border-box; border:2px solid rgba(77,145,224,.9); border-radius:1px; background:rgba(77,145,224,.2); pointer-events:none; }
 
 /* Drag the lower edge of any row to increase its height. */
 .bn-editor [data-content-type="table"] tr[data-row-height] {
