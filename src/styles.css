@@ -5370,10 +5370,18 @@ button.note-breadcrumb__item:hover {
 .mindmap-widget-tools button:hover:not(:disabled), .mindmap-widget-tools button.is-active { border-color:#6ba8a2; background:#eaf6f4; color:#1d6667; }
 .mindmap-widget-tools button:disabled { opacity:.45; cursor:not-allowed; }
 .mindmap-zoom-label { min-width:38px; text-align:center; color:#5e7977; font-size:12px; }
-.mindmap-widget-canvas { position:relative; min-height:560px; overflow:hidden; padding:14px; border:1px solid #e1ecea; border-radius:12px; background-color:#f7fbfb; background-image:radial-gradient(#d8e7e4 1px,transparent 1px); background-size:18px 18px; }
+.mindmap-widget-canvas { position:relative; min-height:560px; overflow:auto; padding:14px; border:1px solid #e1ecea; border-radius:12px; background-color:#f7fbfb; background-image:radial-gradient(#d8e7e4 1px,transparent 1px); background-size:18px 18px; cursor:grab; }
+.mindmap-widget-canvas:active { cursor:grabbing; }
 .mindmap-widget-stage { position:absolute; left:50%; top:50%; width:1000px; height:540px; margin-left:-500px; margin-top:-270px; transform-origin:center center; transition:transform .18s ease; }
 .mindmap-widget-edges { position:absolute; inset:0; overflow:visible; pointer-events:none; }
 .mindmap-widget-edges path { fill:none; stroke:#9dbeba; stroke-width:2.5; stroke-linecap:round; }
+.mindmap-widget-free-line { position:absolute; inset:0; overflow:visible; pointer-events:none; }
+.mindmap-widget-node.is-free-text { min-width:150px; border-style:dashed; background:transparent; box-shadow:none; }
+.mindmap-widget-canvas.is-drawing { cursor:crosshair; }
+.mindmap-template-wrap { position:relative; display:inline-flex; }
+.mindmap-template-menu { position:absolute; right:0; top:36px; z-index:4; display:flex; flex-direction:column; gap:4px; min-width:130px; padding:8px; border:1px solid #d8e6e4; border-radius:9px; background:#fff; box-shadow:0 8px 22px rgba(22,70,70,.16); }
+.mindmap-template-menu strong { padding:3px 6px; color:#557674; font-size:12px; }
+.mindmap-template-menu button { justify-content:flex-start; border:0; background:#fff; }
 .mindmap-widget-node { position:absolute; z-index:1; display:flex; align-items:center; width:200px; min-height:50px; padding:8px 13px; border:2px solid color-mix(in srgb,var(--mind-color,#5b8def) 72%,#fff); border-radius:12px; background:#fff; box-shadow:0 4px 14px rgba(22,70,70,.12); transition:box-shadow .15s, border-color .15s; cursor:grab; }
 .mindmap-widget-node:active { cursor:grabbing; }
 .mindmap-widget-node.is-selected { border-color:var(--mind-color,#5b8def); box-shadow:0 0 0 3px color-mix(in srgb,var(--mind-color,#5b8def) 20%,transparent),0 7px 18px rgba(22,70,70,.16); }
