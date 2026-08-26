@@ -3119,7 +3119,7 @@ button.collapsible-content-block__toggle:hover {
 .bn-editor [data-content-type="table"] th { position:relative; overflow:visible; }
 .bn-editor [data-content-type="table"] .tableWrapper,
 .bn-editor [data-content-type="table"] table { overflow:visible !important; }
-.bn-editor .selectedCell:after { position:absolute; z-index:2; inset:0; width:100%; height:100%; box-sizing:border-box; border:2px solid rgba(77,145,224,.9); border-radius:1px; background:rgba(77,145,224,.2); pointer-events:none; }
+.bn-editor .selectedCell:after { position:absolute !important; z-index:30 !important; inset:0 !important; width:100% !important; height:100% !important; box-sizing:border-box !important; border:2px solid rgba(77,145,224,.9) !important; border-radius:1px !important; background:rgba(77,145,224,.2) !important; pointer-events:none !important; }
 
 /* Drag the lower edge of any row to increase its height. */
 .bn-editor [data-content-type="table"] tr[data-row-height] {
@@ -3146,6 +3146,7 @@ button.collapsible-content-block__toggle:hover {
 }
 .bn-editor [data-content-type="table"] tr:hover > td:hover::after,
 .bn-editor [data-content-type="table"] tr:hover > th:hover::after { opacity:1; }
+.bn-editor [data-content-type="table"] .bn-table-drop-cursor { z-index:40 !important; display:block !important; background:#4d8df7 !important; opacity:1 !important; }
 
 .table-cell-color-swatch {
   display:inline-block;
