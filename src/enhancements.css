@@ -3152,7 +3152,9 @@ button.collapsible-content-block__toggle:hover {
   line-height: 1.2;
 }
 .bn-table-handle-menu {
-  transform: translateY(calc(-100% - 8px));
+  /* Keep the floating strip clear of the table edge and its selection
+     outline, especially for the column handle anchored below the header. */
+  transform: translateY(calc(-100% - 18px));
 }
 .bn-table-handle-menu .mantine-Menu-item:hover {
   background: #edf5fb !important;
