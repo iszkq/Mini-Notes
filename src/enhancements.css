@@ -3129,8 +3129,8 @@ button.collapsible-content-block__toggle:hover {
 .bn-editor [data-content-type="table"] th {
   transition: height .12s ease;
 }
-.bn-editor [data-content-type="table"] tr:hover > td:last-child::after,
-.bn-editor [data-content-type="table"] tr:hover > th:last-child::after {
+.bn-editor [data-content-type="table"] tr:hover > td::after,
+.bn-editor [data-content-type="table"] tr:hover > th::after {
   position:absolute;
   right:0;
   bottom:-3px;
@@ -3138,8 +3138,14 @@ button.collapsible-content-block__toggle:hover {
   z-index:25;
   height:6px;
   content:"";
+  background:#4d8df7;
+  border-radius:3px;
+  opacity:.72;
+  pointer-events:none;
   cursor:row-resize;
 }
+.bn-editor [data-content-type="table"] tr:hover > td:hover::after,
+.bn-editor [data-content-type="table"] tr:hover > th:hover::after { opacity:1; }
 
 .table-cell-color-swatch {
   display:inline-block;
