@@ -1,0 +1,1 @@
+ALTER TABLE notes ADD COLUMN title_size TEXT NOT NULL DEFAULT 'h1';

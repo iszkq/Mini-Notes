@@ -1,0 +1,539 @@
+import type {
+  AdminUpload,
+  AdminUploadUpdateInput,
+  AdminStorageSummary,
+  AdminUser,
+  AdminUserCreateInput,
+  AdminUserUpdateInput,
+  AdminUsersResponse,
+  BibleNote,
+  BibleNoteCreateInput,
+  BibleNoteUpdateInput,
+  LoginInput,
+  Note,
+  NoteCreateInput,
+  NoteMoveInput,
+  NoteMoveResult,
+  NoteSummary,
+  NoteUpdateInput,
+  RegisterInput,
+  RevelationQaItem,
+  RevelationQaItemCreateInput,
+  RevelationQaItemUpdateInput,
+  RevelationQaItemsPage,
+  RevelationQaLibrary,
+  RevelationQaPrimaryCategory,
+  RevelationQaPrimaryCategoryCreateInput,
+  RevelationQaPrimaryCategoryUpdateInput,
+  RevelationQaSecondaryCategory,
+  RevelationQaSecondaryCategoryCreateInput,
+  RevelationQaSecondaryCategoryUpdateInput,
+  SessionStatus,
+  TenMinuteReaderData,
+  TenMinuteReaderSettings,
+  TenMinuteLessonDocument,
+  TenMinuteLessonDocumentUpdateInput,
+  UploadResult,
+  QslPuzzleRoom,
+  QslPuzzlePlayer
+} from "./shared";
+import { apiUrl } from "./apiBase";
+
+export class ApiError extends Error {
+  constructor(
+    message: string,
+    public readonly status: number
+  ) {
+    super(message);
+  }
+}
+
+const API_REQUEST_TIMEOUT_MS = 90_000;
+
+/**
+ * The web build talks to the Worker on the current origin.  A Capacitor APK
+ * is served from `capacitor://localhost`, so it must be given the public
+ * Worker origin at build time (`VITE_API_BASE_URL`).
+ */
+export { API_BASE_URL, apiUrl } from "./apiBase";
+
+export async function getStatus(): Promise<SessionStatus> {
+  return apiRequest("/api/status");
+}
+
+export async function createQslPuzzleRoom(input: { roundCount: number; difficulty: number }): Promise<QslPuzzleRoom> {
+  return apiRequest("/api/qsl/rooms", { method: "POST", body: JSON.stringify(input) });
+}
+export async function joinQslPuzzleRoom(roomId: string): Promise<QslPuzzleRoom> {
+  return apiRequest(`/api/qsl/rooms/${encodeURIComponent(roomId)}/join`, { method: "POST" });
+}
+export async function updateQslPuzzleProgress(roomId: string, input: { score: number; completedRounds: number }): Promise<{ ok: true }> {
+  return apiRequest(`/api/qsl/rooms/${encodeURIComponent(roomId)}/progress`, { method: "PATCH", body: JSON.stringify(input) });
+}
+export async function getQslPuzzleLeaderboard(roomId: string): Promise<QslPuzzlePlayer[]> {
+  return apiRequest(`/api/qsl/rooms/${encodeURIComponent(roomId)}/leaderboard`);
+}
+
+export async function login(input: LoginInput): Promise<SessionStatus> {
+  return apiRequest("/api/auth/login", {
+    method: "POST",
+    body: JSON.stringify(input)
+  });
+}
+
+export async function register(input: RegisterInput): Promise<SessionStatus> {
+  return apiRequest("/api/auth/register", {
+    method: "POST",
+    body: JSON.stringify(input)
+  });
+}
+
+export async function logout(): Promise<{ ok: true }> {
+  return apiRequest("/api/auth/logout", {
+    method: "POST"
+  });
+}
+
+export async function listNotes(): Promise<NoteSummary[]> {
+  return apiRequest("/api/notes");
+}
+
+export async function getNote(id: string): Promise<Note> {
+  return apiRequest(`/api/notes/${encodeURIComponent(id)}`);
+}
+
+export async function getPublicNote(shareToken: string, noteId?: string | null, password?: string): Promise<Note> {
+  const suffix = noteId ? `/${encodeURIComponent(noteId)}` : "";
+  return apiRequest(`/api/public/notes/${encodeURIComponent(shareToken)}${suffix}`, {
+    headers: password ? { "X-Share-Password": password } : undefined
+  });
+}
+
+export async function createNote(input: NoteCreateInput): Promise<Note> {
+  return apiRequest("/api/notes", {
+    method: "POST",
+    body: JSON.stringify(input)
+  });
+}
+
+export async function updateNote(
+  id: string,
+  input: NoteUpdateInput
+): Promise<Note> {
+  return apiRequest(`/api/notes/${encodeURIComponent(id)}`, {
+    method: "PATCH",
+    body: JSON.stringify(input)
+  });
+}
+
+export async function moveNote(id: string, input: NoteMoveInput): Promise<NoteMoveResult> {
+  return apiRequest(`/api/notes/${encodeURIComponent(id)}/move`, {
+    method: "PATCH",
+    body: JSON.stringify(input)
+  });
+}
+
+export async function deleteNote(id: string): Promise<{ ok: true }> {
+  return apiRequest(`/api/notes/${encodeURIComponent(id)}`, {
+    method: "DELETE"
+  });
+}
+
+export async function enableShare(id: string, password?: string): Promise<Note> {
+  return apiRequest(`/api/notes/${encodeURIComponent(id)}/share`, {
+    method: "POST",
+    body: password === undefined ? undefined : JSON.stringify({ password })
+  });
+}
+
+export async function disableShare(id: string): Promise<Note> {
+  return apiRequest(`/api/notes/${encodeURIComponent(id)}/share`, {
+    method: "DELETE"
+  });
+}
+
+
+export async function listBibleNotes(
+  bookName?: string,
+  chapterNumber?: number,
+  options?: { limit?: number; offset?: number }
+): Promise<BibleNote[]> {
+  const params = new URLSearchParams();
+  if (bookName) {
+    params.set("book", bookName);
+  }
+  if (chapterNumber != null) {
+    params.set("chapter", String(chapterNumber));
+  }
+  if (options?.limit != null) {
+    params.set("limit", String(options.limit));
+  }
+  if (options?.offset != null) {
+    params.set("offset", String(options.offset));
+  }
+
+  const query = params.toString();
+  return apiRequest(`/api/bible/notes${query ? `?${query}` : ""}`);
+}
+
+export async function createBibleNote(input: BibleNoteCreateInput): Promise<BibleNote> {
+  return apiRequest("/api/bible/notes", {
+    method: "POST",
+    body: JSON.stringify(input)
+  });
+}
+
+export async function updateBibleNote(
+  id: string,
+  input: BibleNoteUpdateInput
+): Promise<BibleNote> {
+  return apiRequest(`/api/bible/notes/${encodeURIComponent(id)}`, {
+    method: "PATCH",
+    body: JSON.stringify(input)
+  });
+}
+
+export async function deleteBibleNote(id: string): Promise<{ ok: true }> {
+  return apiRequest(`/api/bible/notes/${encodeURIComponent(id)}`, {
+    method: "DELETE"
+  });
+}
+
+export async function getTenMinuteReaderData(): Promise<TenMinuteReaderData> {
+  return apiRequest("/api/ten-minute");
+}
+
+export async function updateTenMinuteReaderSettings(
+  settings: TenMinuteReaderSettings
+): Promise<TenMinuteReaderSettings> {
+  return apiRequest("/api/ten-minute/settings", {
+    method: "PATCH",
+    body: JSON.stringify(settings)
+  });
+}
+
+export async function getTenMinuteLessonDocument(lessonId: string): Promise<TenMinuteLessonDocument> {
+  return apiRequest(`/api/ten-minute/lessons/${encodeURIComponent(lessonId)}/document`);
+}
+
+export async function updateTenMinuteLessonDocument(
+  lessonId: string,
+  input: TenMinuteLessonDocumentUpdateInput
+): Promise<TenMinuteLessonDocument> {
+  return apiRequest(`/api/ten-minute/lessons/${encodeURIComponent(lessonId)}/document`, {
+    method: "PATCH",
+    body: JSON.stringify(input)
+  });
+}
+
+export async function getRevelationQaLibrary(): Promise<RevelationQaLibrary> {
+  return apiRequest("/api/revelation-qa");
+}
+
+export async function listRevelationQaItems(input: {
+  limit?: number;
+  offset?: number;
+  query?: string;
+  secondaryId: string;
+}): Promise<RevelationQaItemsPage> {
+  const params = new URLSearchParams({
+    secondary: input.secondaryId
+  });
+  if (input.limit !== undefined) {
+    params.set("limit", String(input.limit));
+  }
+  if (input.offset !== undefined) {
+    params.set("offset", String(input.offset));
+  }
+  if (input.query?.trim()) {
+    params.set("q", input.query.trim());
+  }
+
+  return apiRequest(`/api/revelation-qa/items?${params}`);
+}
+
+export async function createRevelationQaPrimaryCategory(
+  input: RevelationQaPrimaryCategoryCreateInput
+): Promise<RevelationQaPrimaryCategory> {
+  return apiRequest("/api/revelation-qa/primary", {
+    method: "POST",
+    body: JSON.stringify(input)
+  });
+}
+
+export async function updateRevelationQaPrimaryCategory(
+  id: string,
+  input: RevelationQaPrimaryCategoryUpdateInput
+): Promise<RevelationQaPrimaryCategory> {
+  return apiRequest(`/api/revelation-qa/primary/${encodeURIComponent(id)}`, {
+    method: "PATCH",
+    body: JSON.stringify(input)
+  });
+}
+
+export async function deleteRevelationQaPrimaryCategory(id: string): Promise<{ ok: true }> {
+  return apiRequest(`/api/revelation-qa/primary/${encodeURIComponent(id)}`, {
+    method: "DELETE"
+  });
+}
+
+export async function createRevelationQaSecondaryCategory(
+  input: RevelationQaSecondaryCategoryCreateInput
+): Promise<RevelationQaSecondaryCategory> {
+  return apiRequest("/api/revelation-qa/secondary", {
+    method: "POST",
+    body: JSON.stringify(input)
+  });
+}
+
+export async function updateRevelationQaSecondaryCategory(
+  id: string,
+  input: RevelationQaSecondaryCategoryUpdateInput
+): Promise<RevelationQaSecondaryCategory> {
+  return apiRequest(`/api/revelation-qa/secondary/${encodeURIComponent(id)}`, {
+    method: "PATCH",
+    body: JSON.stringify(input)
+  });
+}
+
+export async function deleteRevelationQaSecondaryCategory(id: string): Promise<{ ok: true }> {
+  return apiRequest(`/api/revelation-qa/secondary/${encodeURIComponent(id)}`, {
+    method: "DELETE"
+  });
+}
+
+export async function createRevelationQaItem(
+  input: RevelationQaItemCreateInput
+): Promise<RevelationQaItem> {
+  return apiRequest("/api/revelation-qa/items", {
+    method: "POST",
+    body: JSON.stringify(input)
+  });
+}
+
+export async function updateRevelationQaItem(
+  id: string,
+  input: RevelationQaItemUpdateInput
+): Promise<RevelationQaItem> {
+  return apiRequest(`/api/revelation-qa/items/${encodeURIComponent(id)}`, {
+    method: "PATCH",
+    body: JSON.stringify(input)
+  });
+}
+
+export async function deleteRevelationQaItem(id: string): Promise<{ ok: true }> {
+  return apiRequest(`/api/revelation-qa/items/${encodeURIComponent(id)}`, {
+    method: "DELETE"
+  });
+}
+
+export async function uploadAsset(file: File): Promise<UploadResult> {
+  const formData = new FormData();
+  formData.append("file", file);
+
+  const result = await apiRequest<UploadResult>("/api/uploads", {
+    method: "POST",
+    body: formData
+  });
+  return normalizeUploadResult(result);
+}
+
+export async function importImageAsset(url: string): Promise<UploadResult> {
+  const result = await apiRequest<UploadResult>("/api/uploads/import", {
+    method: "POST",
+    body: JSON.stringify({ url })
+  });
+  return normalizeUploadResult(result);
+}
+
+export async function listAdminUsers(): Promise<AdminUsersResponse> {
+  const response = await apiRequest<AdminUsersResponse | AdminUser[]>("/api/admin/users");
+  if (Array.isArray(response)) {
+    return {
+      users: response,
+      storage: summarizeAdminStorage(response)
+    };
+  }
+
+  return response;
+}
+
+export async function createAdminUser(input: AdminUserCreateInput): Promise<AdminUser> {
+  return apiRequest("/api/admin/users", {
+    method: "POST",
+    body: JSON.stringify(input)
+  });
+}
+
+export async function updateAdminUser(
+  id: string,
+  input: AdminUserUpdateInput
+): Promise<AdminUser> {
+  return apiRequest(`/api/admin/users/${encodeURIComponent(id)}`, {
+    method: "PATCH",
+    body: JSON.stringify(input)
+  });
+}
+
+export async function deleteAdminUser(id: string): Promise<{ ok: true }> {
+  return apiRequest(`/api/admin/users/${encodeURIComponent(id)}`, {
+    method: "DELETE"
+  });
+}
+
+export async function listAdminUploads(userId: string): Promise<AdminUpload[]> {
+  const uploads = await apiRequest<AdminUpload[]>(`/api/admin/users/${encodeURIComponent(userId)}/uploads`);
+  return uploads.map((upload) => ({ ...upload, url: apiUrl(upload.url) }));
+}
+
+export async function createAdminUpload(userId: string, file: File): Promise<AdminUpload> {
+  const formData = new FormData();
+  formData.append("file", file);
+
+  const result = await apiRequest<AdminUpload>(`/api/admin/users/${encodeURIComponent(userId)}/uploads`, {
+    method: "POST",
+    body: formData
+  });
+  return { ...result, url: apiUrl(result.url) };
+}
+
+function normalizeUploadResult(result: UploadResult): UploadResult {
+  return { ...result, url: apiUrl(result.url) };
+}
+
+export async function updateAdminUpload(
+  id: string,
+  input: AdminUploadUpdateInput
+): Promise<AdminUpload> {
+  return apiRequest(`/api/admin/uploads/${encodeURIComponent(id)}`, {
+    method: "PATCH",
+    body: JSON.stringify(input)
+  });
+}
+
+export async function deleteAdminUpload(id: string): Promise<{ ok: true }> {
+  return apiRequest(`/api/admin/uploads/${encodeURIComponent(id)}`, {
+    method: "DELETE"
+  });
+}
+
+async function apiRequest<T>(path: string, init: RequestInit = {}): Promise<T> {
+  const headers = new Headers(init.headers);
+  if (shouldSetJsonContentType(init.body) && !headers.has("Content-Type")) {
+    headers.set("Content-Type", "application/json");
+  }
+
+  const controller = new AbortController();
+  let timedOut = false;
+  const handleCallerAbort = () => controller.abort(init.signal?.reason);
+  if (init.signal?.aborted) {
+    handleCallerAbort();
+  } else {
+    init.signal?.addEventListener("abort", handleCallerAbort, { once: true });
+  }
+  const timeoutId = window.setTimeout(() => {
+    timedOut = true;
+    controller.abort();
+  }, API_REQUEST_TIMEOUT_MS);
+
+  try {
+    const response = await fetch(apiUrl(path), {
+      ...init,
+      cache: "no-store",
+      // `include` is required for the session cookie when the APK talks to
+      // the Worker on a different origin. It is harmless for same-origin web.
+      credentials: "include",
+      headers,
+      signal: controller.signal
+    });
+    const text = await response.text();
+    const data = tryParseJson(text);
+    const contentType = response.headers.get("Content-Type") ?? "";
+
+    if (!response.ok) {
+      const message = summarizeApiError(data, text, contentType, response.statusText);
+      throw new ApiError(message || "请求失败。", response.status);
+    }
+
+    return (data ?? null) as T;
+  } catch (cause) {
+    if (cause instanceof ApiError) {
+      throw cause;
+    }
+
+    if (timedOut) {
+      throw new ApiError("请求超时，请检查网络后重试。", 408);
+    }
+
+    if (cause instanceof DOMException && cause.name === "AbortError") {
+      throw new ApiError("请求已取消。", 499);
+    }
+
+    throw new ApiError("无法连接到服务，请检查网络后重试。", 0);
+  } finally {
+    window.clearTimeout(timeoutId);
+    init.signal?.removeEventListener("abort", handleCallerAbort);
+  }
+}
+
+function shouldSetJsonContentType(body: RequestInit["body"]): body is string {
+  return typeof body === "string";
+}
+
+function tryParseJson(value: string): unknown {
+  if (!value.trim()) {
+    return null;
+  }
+
+  try {
+    return JSON.parse(value);
+  } catch {
+    return null;
+  }
+}
+
+function summarizeAdminStorage(users: AdminUser[]): AdminStorageSummary {
+  const storage = users.reduce(
+    (total, user) => ({
+      bibleNoteContentBytes: total.bibleNoteContentBytes + Number(user.bibleNoteContentBytes ?? 0),
+      noteContentBytes: total.noteContentBytes + Number(user.noteContentBytes ?? 0),
+      totalBytes: total.totalBytes + Number(user.storageBytes ?? 0),
+      uploadBytes: total.uploadBytes + Number(user.uploadBytes ?? 0)
+    }),
+    {
+      bibleNoteContentBytes: 0,
+      noteContentBytes: 0,
+      totalBytes: 0,
+      uploadBytes: 0
+    }
+  );
+
+  return {
+    ...storage,
+    quotaBytes: null,
+    remainingBytes: null
+  };
+}
+
+function summarizeApiError(
+  data: unknown,
+  text: string,
+  contentType: string,
+  statusText: string
+): string {
+  if (data && typeof data === "object" && "error" in data && typeof data.error === "string") {
+    return data.error;
+  }
+
+  if (contentType.toLowerCase().includes("text/html") || /<!doctype html|<html/i.test(text)) {
+    const code =
+      /error code[:\s>]+(\d{3,5})/i.exec(text)?.[1] ??
+      /cf-error-code[^>]*>(\d{3,5})</i.exec(text)?.[1];
+
+    return code
+      ? `服务暂时异常，请稍后重试。错误代码 ${code}。`
+      : "服务暂时异常，请稍后重试。";
+  }
+
+  return text.trim() || statusText || "请求失败。";
+}

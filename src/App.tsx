@@ -1,0 +1,5358 @@
+import clsx from "clsx";
+import {
+  Archive,
+  ArrowRight,
+  BookOpen,
+  Check,
+  ChevronDown,
+  ChevronRight,
+  Clock3,
+  Copy,
+  Download,
+  ExternalLink,
+  FileText,
+  Folder,
+  FolderPlus,
+  Globe2,
+  GripVertical,
+  Home,
+  LibraryBig,
+  Link2,
+  Lock,
+  LogOut,
+  Menu,
+  Network,
+  MoreHorizontal,
+  PanelLeftClose,
+  PanelLeftOpen,
+  Pencil,
+  Plus,
+  Redo2,
+  Search,
+  ShieldCheck,
+  Sparkles,
+  Timer,
+  Trash2,
+  Undo2,
+  UploadCloud,
+  WifiOff
+} from "lucide-react";
+import {
+  Fragment,
+  Suspense,
+  type CSSProperties,
+  type DragEvent as ReactDragEvent,
+  type FormEvent,
+  type MouseEvent as ReactMouseEvent,
+  type PointerEvent as ReactPointerEvent,
+  type ReactNode,
+  lazy,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState
+} from "react";
+import { createPortal } from "react-dom";
+import {
+  ApiError,
+  createNote,
+  deleteNote,
+  disableShare,
+  enableShare,
+  getNote,
+  getPublicNote,
+  getStatus,
+  listNotes,
+  login,
+  logout,
+  moveNote,
+  register,
+  updateNote
+} from "./api";
+import { collectNoteComments } from "./comments";
+import { NoteIcon } from "./components/NoteIcon";
+import { isImageIcon, type EmojiItem } from "./emojiPacks";
+import { openExportWindow } from "./exportWindow";
+import type { AuthUser, Note, NoteBlock, NoteSummary, NoteTitleSize } from "./shared";
+
+const AdminPanel = lazy(() =>
+  import("./components/AdminPanel").then((module) => ({ default: module.AdminPanel }))
+);
+const BibleReader = lazy(() =>
+  import("./components/BibleReader").then((module) => ({ default: module.BibleReader }))
+);
+const EmojiPackPicker = lazy(() =>
+  import("./components/EmojiPackPicker").then((module) => ({ default: module.EmojiPackPicker }))
+);
+const ExportPanel = lazy(() =>
+  import("./components/ExportPanel").then((module) => ({ default: module.ExportPanel }))
+);
+const NotebookEditor = lazy(() =>
+  import("./components/NotebookEditor").then((module) => ({ default: module.NotebookEditor }))
+);
+const MindMapView = lazy(() =>
+  import("./components/MindMapView").then((module) => ({ default: module.MindMapView }))
+);
+const RevelationQaLibrary = lazy(() =>
+  import("./components/RevelationQaLibrary").then((module) => ({
+    default: module.RevelationQaLibrary
+  }))
+);
+const RevelationMemorization = lazy(() =>
+  import("./components/RevelationMemorization").then((module) => ({
+    default: module.RevelationMemorization
+  }))
+);
+const TenMinuteReader = lazy(() =>
+  import("./components/TenMinuteReader").then((module) => ({ default: module.TenMinuteReader }))
+);
+
+type SaveStatus = "idle" | "saving" | "saved" | "error";
+type AuthMode = "login" | "register";
+type WorkspaceView =
+  | "notes"
+  | "bible"
+  | "ten-minute"
+  | "revelation-qa"
+  | "revelation-memorization"
+  | "mindmap"
+  | "admin";
+
+type NotesBrowserLocation =
+  | { kind: "page" }
+  | { kind: "root" }
+  | { kind: "category"; categoryId: string };
+
+type PagePreset = {
+  value: string;
+  label: string;
+};
+
+type CategoryActionMenu = {
+  categoryId: string;
+  left: number;
+  top: number;
+};
+
+type PageActionMenu = {
+  noteId: string;
+  left: number;
+  top: number;
+};
+
+type NoteDropTarget = {
+  anchorId: string | null;
+  parentId: string | null;
+  beforeId: string | null;
+  position: "before" | "inside" | "after" | "append";
+};
+
+type DragAutoScrollState = {
+  list: HTMLElement;
+  velocity: number;
+  lastFrameAt: number | null;
+};
+
+type PageSnapshot = Pick<Note, "title" | "icon" | "titleSize" | "content">;
+
+type PageHistoryState = {
+  noteId: string | null;
+  past: PageSnapshot[];
+  future: PageSnapshot[];
+};
+
+type PublicShareRoute = {
+  shareToken: string;
+  noteId: string | null;
+};
+
+type CategoryTreeItem = {
+  category: NoteSummary;
+  depth: number;
+};
+
+const SIDEBAR_GROUP_PAGE_SIZE = 80;
+const SIDEBAR_GROUP_PAGE_STEP = 80;
+const SIDEBAR_SEARCH_PAGE_SIZE = 120;
+const UNCATEGORIZED_GROUP_KEY = "__uncategorized__";
+const SIDEBAR_COLLAPSED_STORAGE_KEY = "mini-notes-sidebar-collapsed";
+const PAGE_HISTORY_LIMIT = 80;
+const DROP_TARGET_EDGE_RATIO = 0.25;
+const DEFAULT_TITLE_SIZE: NoteTitleSize = "h1";
+const PAGE_TITLE_SIZE_OPTIONS: Array<{ label: string; value: NoteTitleSize }> = [
+  { label: "一级标题", value: "h1" },
+  { label: "二级标题", value: "h2" },
+  { label: "三级标题", value: "h3" }
+];
+
+/*
+const PAGE_PRESETS: PagePreset[] = [
+  { value: "📝", label: "笔记" },
+  { value: "💡", label: "灵感" },
+  { value: "📅", label: "会议" },
+  { value: "✅", label: "任务" },
+  { value: "📚", label: "资料" },
+  { value: "📌", label: "收藏" }
+];
+
+const LEGACY_ICON_MAP: Record<string, string> = {
+  Note: "📝",
+  Idea: "💡",
+  Plan: "📅",
+  Task: "✅",
+  Book: "📚",
+  Pin: "📌"
+};
+
+*/
+
+const PAGE_PRESETS: PagePreset[] = [
+  { value: "📝", label: "笔记" },
+  { value: "💡", label: "灵感" },
+  { value: "📅", label: "会议" },
+  { value: "✅", label: "任务" },
+  { value: "📚", label: "资料" },
+  { value: "📌", label: "收藏" }
+];
+
+const LEGACY_ICON_MAP: Record<string, string> = {
+  Note: "📝",
+  Idea: "💡",
+  Plan: "📅",
+  Task: "✅",
+  Book: "📚",
+  Pin: "📌"
+};
+
+function App() {
+  const [initialPublicRoute] = useState<PublicShareRoute | null>(() =>
+    typeof window === "undefined" ? null : getPublicShareRouteFromPath(window.location.pathname)
+  );
+  const initialShareToken = initialPublicRoute?.shareToken ?? null;
+  const initialPublicNoteId = initialPublicRoute?.noteId ?? null;
+  const isPublicView = Boolean(initialShareToken);
+
+  const [authMode, setAuthMode] = useState<AuthMode>("login");
+  const [sessionUser, setSessionUser] = useState<AuthUser | null>(null);
+  const [authUsername, setAuthUsername] = useState("");
+  const [authPassword, setAuthPassword] = useState("");
+  const [authInviteCode, setAuthInviteCode] = useState("");
+  const [hasUsers, setHasUsers] = useState(false);
+  const [authPending, setAuthPending] = useState(false);
+  const [isLocked, setIsLocked] = useState(false);
+  const [isBooting, setIsBooting] = useState(!isPublicView);
+  const [isLoadingNote, setIsLoadingNote] = useState(false);
+  const [notes, setNotes] = useState<NoteSummary[]>([]);
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [draft, setDraft] = useState<Note | null>(null);
+  const [pageHistory, setPageHistory] = useState<PageHistoryState>(() =>
+    createEmptyPageHistory(null)
+  );
+  const [query, setQuery] = useState("");
+  const [dirty, setDirty] = useState(false);
+  const [saveStatus, setSaveStatus] = useState<SaveStatus>("idle");
+  const [appError, setAppError] = useState<string | null>(null);
+  const [shareOpen, setShareOpen] = useState(false);
+  const [sharePending, setSharePending] = useState(false);
+  const [shareCopied, setShareCopied] = useState(false);
+  const [sharePassword, setSharePassword] = useState("");
+  const [exportOpen, setExportOpen] = useState(false);
+  const [exportPending, setExportPending] = useState(false);
+  const [exportSelection, setExportSelection] = useState<string[]>([]);
+  const [findReplaceOpen, setFindReplaceOpen] = useState(false);
+  const [editorFocusRequest, setEditorFocusRequest] = useState(0);
+  const [editorDocumentVersion, setEditorDocumentVersion] = useState(0);
+  const [publicNote, setPublicNote] = useState<Note | null>(null);
+  const [publicPending, setPublicPending] = useState(isPublicView);
+  const [publicError, setPublicError] = useState<string | null>(null);
+  const [publicPassword, setPublicPassword] = useState("");
+  const [publicPasswordRequired, setPublicPasswordRequired] = useState(false);
+  const [workspaceView, setWorkspaceView] = useState<WorkspaceView>(() =>
+    typeof window !== "undefined" && /^\/console\/?$/.test(window.location.pathname) ? "admin" : "notes"
+  );
+  const [workspaceSidebarExpanded, setWorkspaceSidebarExpanded] = useState(false);
+  const [notesBrowserLocation, setNotesBrowserLocation] = useState<NotesBrowserLocation>({
+    kind: "page"
+  });
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(() => {
+    if (typeof window === "undefined") {
+      return false;
+    }
+
+    return window.localStorage.getItem(SIDEBAR_COLLAPSED_STORAGE_KEY) === "true";
+  });
+  const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
+  const [collapsedCategoryIds, setCollapsedCategoryIds] = useState<string[]>([]);
+  const [editingCategoryId, setEditingCategoryId] = useState<string | null>(null);
+  const [editingCategoryTitle, setEditingCategoryTitle] = useState("");
+  const revisionRef = useRef(0);
+  const authSessionEpochRef = useRef(0);
+  const navigationIntentRef = useRef(0);
+  const loadNoteRequestRef = useRef(0);
+  const publicNoteRequestRef = useRef(0);
+  const selectedIdRef = useRef<string | null>(null);
+  const draftRef = useRef<Note | null>(null);
+  const lastPageSnapshotRef = useRef<PageSnapshot | null>(null);
+  const pageHistoryRef = useRef<PageHistoryState>(createEmptyPageHistory(null));
+  const authUsernameInputRef = useRef<HTMLInputElement | null>(null);
+  const authPasswordInputRef = useRef<HTMLInputElement | null>(null);
+  const authInviteCodeInputRef = useRef<HTMLInputElement | null>(null);
+  const breadcrumbRef = useRef<HTMLElement | null>(null);
+  const shareButtonRef = useRef<HTMLButtonElement | null>(null);
+  const findReplaceButtonRef = useRef<HTMLButtonElement | null>(null);
+  const [sharePanelStyle, setSharePanelStyle] = useState<CSSProperties>({});
+  const [categoryMenuOpen, setCategoryMenuOpen] = useState(false);
+  const [categoryActionMenu, setCategoryActionMenu] = useState<CategoryActionMenu | null>(null);
+  const [pageActionMenu, setPageActionMenu] = useState<PageActionMenu | null>(null);
+  const [pageIconPickerTargetId, setPageIconPickerTargetId] = useState<string | null>(null);
+  const [draggedNoteId, setDraggedNoteId] = useState<string | null>(null);
+  const [dropTarget, setDropTarget] = useState<NoteDropTarget | null>(null);
+  const dropTargetRef = useRef<NoteDropTarget | null>(null);
+  const draggedNoteIdRef = useRef<string | null>(null);
+  const suppressNoteClickRef = useRef(false);
+  const dragExpandTimerRef = useRef<number | null>(null);
+  const dragExpandTargetRef = useRef<string | null>(null);
+  const noteListRef = useRef<HTMLElement | null>(null);
+  const dragAutoScrollFrameRef = useRef<number | null>(null);
+  const dragAutoScrollStateRef = useRef<DragAutoScrollState | null>(null);
+  const touchDragPointerRef = useRef<number | null>(null);
+  const notesRef = useRef<NoteSummary[]>([]);
+  const noteSaveQueueRef = useRef<Promise<boolean>>(Promise.resolve(true));
+  const noteSavePendingCountRef = useRef(0);
+  const noteSaveRequestsRef = useRef<Map<string, Promise<boolean>>>(new Map());
+  const noteMoveQueuesRef = useRef<Map<string, Promise<void>>>(new Map());
+  const noteMoveVersionsRef = useRef<Map<string, number>>(new Map());
+  const [sidebarGroupLimits, setSidebarGroupLimits] = useState<Record<string, number>>({});
+  const [sidebarSearchLimit, setSidebarSearchLimit] = useState(SIDEBAR_SEARCH_PAGE_SIZE);
+  const isAdminView = workspaceView === "admin" && Boolean(sessionUser?.isAdmin);
+  const isBibleView = workspaceView === "bible";
+  const isTenMinuteView = workspaceView === "ten-minute";
+  const isRevelationQaView = workspaceView === "revelation-qa";
+  const isRevelationMemorizationView = workspaceView === "revelation-memorization";
+  const isMindMapView = workspaceView === "mindmap";
+
+  useEffect(() => {
+    selectedIdRef.current = selectedId;
+  }, [selectedId]);
+
+  useEffect(() => {
+    draftRef.current = draft;
+  }, [draft]);
+
+  useEffect(() => {
+    pageHistoryRef.current = pageHistory;
+  }, [pageHistory]);
+
+  useEffect(() => {
+    dropTargetRef.current = dropTarget;
+  }, [dropTarget]);
+
+  useEffect(() => {
+    notesRef.current = notes;
+  }, [notes]);
+
+  const updateDropTarget = useCallback((nextTarget: NoteDropTarget | null) => {
+    if (areDropTargetsEqual(dropTargetRef.current, nextTarget)) {
+      return;
+    }
+
+    dropTargetRef.current = nextTarget;
+    setDropTarget(nextTarget);
+  }, []);
+
+  const replacePageHistory = useCallback((nextHistory: PageHistoryState) => {
+    pageHistoryRef.current = nextHistory;
+    setPageHistory(nextHistory);
+  }, []);
+
+  const resetPageHistory = useCallback(
+    (noteId: string | null) => {
+      replacePageHistory(createEmptyPageHistory(noteId));
+    },
+    [replacePageHistory]
+  );
+
+  const pushPageHistorySnapshot = useCallback(
+    (noteId: string, snapshot: PageSnapshot) => {
+      const currentHistory = pageHistoryRef.current;
+      const currentPast =
+        currentHistory.noteId === noteId ? currentHistory.past : [];
+      const nextSnapshot = clonePageSnapshot(snapshot);
+      const previousSnapshot = currentPast.at(-1);
+
+      if (previousSnapshot && arePageSnapshotsEqual(previousSnapshot, nextSnapshot)) {
+        return;
+      }
+
+      replacePageHistory({
+        noteId,
+        past: [...currentPast, nextSnapshot].slice(-PAGE_HISTORY_LIMIT),
+        future: []
+      });
+    },
+    [replacePageHistory]
+  );
+
+  useEffect(() => {
+    if (typeof window === "undefined") {
+      return;
+    }
+
+    window.localStorage.setItem(SIDEBAR_COLLAPSED_STORAGE_KEY, String(sidebarCollapsed));
+  }, [sidebarCollapsed]);
+
+  useEffect(() => {
+    if (!mobileSidebarOpen) {
+      return;
+    }
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        setMobileSidebarOpen(false);
+      }
+    };
+
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [mobileSidebarOpen]);
+
+  useEffect(() => {
+    setMobileSidebarOpen(false);
+  }, [selectedId, workspaceView]);
+
+  const handleLoggedOut = useCallback((nextHasUsers = true) => {
+    authSessionEpochRef.current += 1;
+    navigationIntentRef.current += 1;
+    loadNoteRequestRef.current += 1;
+    setSessionUser(null);
+    setHasUsers(nextHasUsers);
+    setAuthMode("login");
+    setAuthPassword("");
+    setAuthInviteCode("");
+    setIsLocked(true);
+    setIsLoadingNote(false);
+    setNotes([]);
+    draftRef.current = null;
+    selectedIdRef.current = null;
+    lastPageSnapshotRef.current = null;
+    setDraft(null);
+    setSelectedId(null);
+    resetPageHistory(null);
+    setShareOpen(false);
+    setShareCopied(false);
+    setPageActionMenu(null);
+    setExportOpen(false);
+    setExportPending(false);
+    setExportSelection([]);
+    setWorkspaceView("notes");
+    setMobileSidebarOpen(false);
+    setNotesBrowserLocation({ kind: "page" });
+    setCollapsedCategoryIds([]);
+    setEditingCategoryId(null);
+    setEditingCategoryTitle("");
+    setCategoryActionMenu(null);
+    setPageActionMenu(null);
+    setPageIconPickerTargetId(null);
+    setDraggedNoteId(null);
+    draggedNoteIdRef.current = null;
+    updateDropTarget(null);
+  }, [resetPageHistory, updateDropTarget]);
+
+  const loadNote = useCallback(
+    async (id: string) => {
+      const requestId = loadNoteRequestRef.current + 1;
+      loadNoteRequestRef.current = requestId;
+      setIsLoadingNote(true);
+      setAppError(null);
+      setShareOpen(false);
+      setShareCopied(false);
+
+        try {
+        const note = normalizeNote(await getNote(id));
+        if (loadNoteRequestRef.current === requestId) {
+          selectedIdRef.current = id;
+          setSelectedId(id);
+          draftRef.current = note;
+          lastPageSnapshotRef.current = clonePageSnapshot(note);
+          setDraft(note);
+          setDirty(false);
+          setSaveStatus("idle");
+          resetPageHistory(note.id);
+        }
+        } catch (error) {
+        if (loadNoteRequestRef.current !== requestId) {
+          return;
+        }
+
+        if (error instanceof ApiError && error.status === 401) {
+          handleLoggedOut(hasUsers);
+          setAppError("登录状态已失效，请重新登录。");
+        } else if (error instanceof ApiError) {
+          setAppError(error.message);
+        } else {
+          setAppError("页面加载失败。");
+        }
+      } finally {
+        if (loadNoteRequestRef.current === requestId) {
+          setIsLoadingNote(false);
+        }
+      }
+    },
+    [handleLoggedOut, hasUsers, resetPageHistory]
+  );
+
+  const bootstrap = useCallback(async () => {
+    setIsBooting(true);
+    setAppError(null);
+
+    try {
+      const status = await getStatus();
+      setHasUsers(status.hasUsers);
+      setSessionUser(status.user);
+
+      if (!status.authenticated) {
+        setAuthMode("login");
+        setIsLocked(true);
+        setIsBooting(false);
+        return;
+      }
+
+      setIsLocked(false);
+
+      const nextNotes = (await listNotes()).map(normalizeNoteSummary);
+      setNotes(nextNotes);
+      const nextSelected =
+        selectedIdRef.current &&
+        nextNotes.some((note) => note.id === selectedIdRef.current && note.kind === "page")
+          ? selectedIdRef.current
+          : getFirstPageId(nextNotes);
+
+      if (nextSelected) {
+        await loadNote(nextSelected);
+      } else {
+        selectedIdRef.current = null;
+        setSelectedId(null);
+        setNotesBrowserLocation({ kind: "root" });
+        draftRef.current = null;
+        lastPageSnapshotRef.current = null;
+        setDraft(null);
+        setDirty(false);
+        setSaveStatus("idle");
+        resetPageHistory(null);
+      }
+    } catch (error) {
+      if (error instanceof ApiError && error.status === 401) {
+        handleLoggedOut(hasUsers);
+      } else if (error instanceof ApiError) {
+        setAppError(error.message);
+        // Never leave the user in an empty workspace when the API is
+        // unreachable. Keep the authentication screen visible so the next
+        // action is obvious and the error can be retried after connectivity
+        // returns.
+        setAuthMode("login");
+        setIsLocked(true);
+      } else {
+        setAppError("工作区初始化失败。");
+        setAuthMode("login");
+        setIsLocked(true);
+      }
+    } finally {
+      setIsBooting(false);
+    }
+  }, [handleLoggedOut, hasUsers, loadNote, resetPageHistory]);
+
+  useEffect(() => {
+    if (isPublicView) {
+      setIsBooting(false);
+      return;
+    }
+
+    void bootstrap();
+  }, [bootstrap, isPublicView]);
+
+  const loadPublicNote = useCallback(async (shareToken: string, noteId?: string | null, password?: string) => {
+    const requestId = publicNoteRequestRef.current + 1;
+    publicNoteRequestRef.current = requestId;
+    setPublicPending(true);
+    setPublicError(null);
+
+    try {
+      const note = normalizeNote(await getPublicNote(shareToken, noteId, password));
+      if (publicNoteRequestRef.current !== requestId) {
+        return;
+      }
+
+      setPublicNote(note);
+      setPublicPasswordRequired(false);
+    } catch (error) {
+      if (publicNoteRequestRef.current !== requestId) {
+        return;
+      }
+
+      if (error instanceof ApiError && error.status === 401) {
+        setPublicNote(null);
+        setPublicPasswordRequired(true);
+      } else if (error instanceof ApiError) {
+        setPublicError(error.message);
+      } else {
+        setPublicError("分享页面暂时无法打开，请稍后重试。");
+      }
+    } finally {
+      if (publicNoteRequestRef.current === requestId) {
+        setPublicPending(false);
+      }
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!initialShareToken) {
+      return;
+    }
+
+    void loadPublicNote(initialShareToken, initialPublicNoteId);
+  }, [initialPublicNoteId, initialShareToken, loadPublicNote]);
+
+  useEffect(() => {
+    if (!isPublicView || typeof window === "undefined") {
+      return;
+    }
+
+    const handleOpenPublicNote = (event: Event) => {
+      const detail = (event as CustomEvent<{ noteId?: unknown; shareToken?: unknown; title?: unknown }>).detail;
+      const shareToken =
+        typeof detail?.shareToken === "string" && detail.shareToken
+          ? detail.shareToken
+          : initialShareToken;
+      const noteId = typeof detail?.noteId === "string" ? detail.noteId : "";
+
+      if (!shareToken || !noteId) {
+        window.alert("这个子页面暂时无法打开。");
+        return;
+      }
+
+      const nextPath = `/share/${encodeURIComponent(shareToken)}/${encodeURIComponent(noteId)}`;
+      window.history.pushState({ shareToken, noteId }, "", nextPath);
+      void loadPublicNote(shareToken, noteId, publicPassword);
+    };
+
+    const handlePublicPopState = () => {
+      const route = getPublicShareRouteFromPath(window.location.pathname);
+      if (!route) {
+        return;
+      }
+
+      void loadPublicNote(route.shareToken, route.noteId, publicPassword);
+    };
+
+    window.addEventListener("mini-notes:open-public-note", handleOpenPublicNote);
+    window.addEventListener("popstate", handlePublicPopState);
+
+    return () => {
+      window.removeEventListener("mini-notes:open-public-note", handleOpenPublicNote);
+      window.removeEventListener("popstate", handlePublicPopState);
+    };
+  }, [initialShareToken, isPublicView, loadPublicNote]);
+
+  useEffect(() => {
+    if (workspaceView === "admin" && sessionUser && !sessionUser.isAdmin) {
+      setWorkspaceView("notes");
+    }
+  }, [sessionUser?.isAdmin, workspaceView]);
+
+  useEffect(() => {
+    if (workspaceView !== "notes") {
+      setExportOpen(false);
+      setFindReplaceOpen(false);
+      setCategoryMenuOpen(false);
+      setCategoryActionMenu(null);
+      setPageActionMenu(null);
+    }
+  }, [workspaceView]);
+
+  useEffect(() => {
+    setCategoryMenuOpen(false);
+    setCategoryActionMenu(null);
+    setPageActionMenu(null);
+    setFindReplaceOpen(false);
+  }, [draft?.id, isAdminView, isBibleView, isRevelationQaView]);
+
+  useEffect(() => {
+    setExportSelection((current) => current.filter((id) => notes.some((note) => note.id === id)));
+  }, [notes]);
+
+  useEffect(() => {
+    if (!shareOpen || typeof window === "undefined") {
+      return;
+    }
+
+    const updateSharePanelLayout = () => {
+      if (window.innerWidth <= 760) {
+        setSharePanelStyle({});
+        return;
+      }
+
+      const button = shareButtonRef.current;
+      if (!button) {
+        return;
+      }
+
+      const rect = button.getBoundingClientRect();
+      setSharePanelStyle({
+        top: `${Math.round(rect.bottom + 12)}px`,
+        right: `${Math.max(Math.round(window.innerWidth - rect.right), 16)}px`,
+        bottom: "auto",
+        left: "auto"
+      });
+    };
+
+    updateSharePanelLayout();
+    window.addEventListener("resize", updateSharePanelLayout);
+    window.addEventListener("scroll", updateSharePanelLayout, true);
+
+    return () => {
+      window.removeEventListener("resize", updateSharePanelLayout);
+      window.removeEventListener("scroll", updateSharePanelLayout, true);
+    };
+  }, [shareOpen]);
+
+  const sortedRecords = useMemo(() => {
+    return [...notes].sort(compareNoteOrder);
+  }, [notes]);
+
+  const categories = useMemo(
+    () => sortedRecords.filter((note) => note.kind === "category"),
+    [sortedRecords]
+  );
+
+  const categoriesById = useMemo(
+    () => new Map(categories.map((category) => [category.id, category])),
+    [categories]
+  );
+
+  const categoriesByParent = useMemo(() => {
+    const groups = new Map<string | null, NoteSummary[]>();
+    categories.forEach((category) => {
+      const key = category.parentId && categoriesById.has(category.parentId)
+        ? category.parentId
+        : null;
+      const current = groups.get(key) ?? [];
+      current.push(category);
+      groups.set(key, current);
+    });
+    return groups;
+  }, [categories, categoriesById]);
+
+  const categoryMenuItems = useMemo(
+    () => flattenCategoryTree(categoriesByParent.get(null) ?? [], categoriesByParent),
+    [categoriesByParent]
+  );
+
+  const sortedNotes = useMemo(
+    () => sortedRecords.filter((note) => note.kind === "page"),
+    [sortedRecords]
+  );
+
+  const recordsById = useMemo(
+    () => new Map(sortedRecords.map((record) => [record.id, record])),
+    [sortedRecords]
+  );
+
+  const draggedRecord = useMemo(
+    () => (draggedNoteId ? recordsById.get(draggedNoteId) ?? null : null),
+    [draggedNoteId, recordsById]
+  );
+
+  const draftBreadcrumbRecord = useMemo(
+    () => (draft ? normalizeNoteSummary(toSummary(draft)) : null),
+    [
+      draft?.createdAt,
+      draft?.icon,
+      draft?.id,
+      draft?.isArchived,
+      draft?.kind,
+      draft?.parentId,
+      draft?.sharedAt,
+      draft?.shareToken,
+      draft?.sortOrder,
+      draft?.title,
+      draft?.titleSize,
+      draft?.updatedAt
+    ]
+  );
+  const noteBreadcrumbs = useMemo(
+    () => (draftBreadcrumbRecord ? buildNoteBreadcrumb(draftBreadcrumbRecord, recordsById) : []),
+    [draftBreadcrumbRecord, recordsById]
+  );
+
+  const isNotesOverview = notesBrowserLocation.kind !== "page";
+  const overviewCategory = useMemo(
+    () =>
+      notesBrowserLocation.kind === "category"
+        ? categoriesById.get(notesBrowserLocation.categoryId) ?? null
+        : null,
+    [categoriesById, notesBrowserLocation]
+  );
+  const overviewParentId = overviewCategory?.id ?? null;
+  const overviewCategories = useMemo(
+    () => categoriesByParent.get(overviewParentId) ?? [],
+    [categoriesByParent, overviewParentId]
+  );
+  const allPagesByParent = useMemo(() => {
+    const groups = new Map<string | null, NoteSummary[]>();
+    sortedNotes.forEach((note) => {
+      const parentId = note.parentId ?? null;
+      const current = groups.get(parentId) ?? [];
+      current.push(note);
+      groups.set(parentId, current);
+    });
+    return groups;
+  }, [sortedNotes]);
+  const overviewPages = useMemo(
+    () => allPagesByParent.get(overviewParentId) ?? [],
+    [allPagesByParent, overviewParentId]
+  );
+  const overviewBreadcrumbs = useMemo(
+    () => (overviewCategory ? buildNoteBreadcrumb(overviewCategory, recordsById) : []),
+    [overviewCategory, recordsById]
+  );
+  const breadcrumbRecords = isNotesOverview ? overviewBreadcrumbs : noteBreadcrumbs;
+  const breadcrumbPathKey = breadcrumbRecords.map((record) => record.id).join("/");
+
+  useEffect(() => {
+    if (
+      notesBrowserLocation.kind === "category" &&
+      !categoriesById.has(notesBrowserLocation.categoryId)
+    ) {
+      setNotesBrowserLocation({ kind: "root" });
+    }
+  }, [categoriesById, notesBrowserLocation]);
+
+  useEffect(() => {
+    const breadcrumb = breadcrumbRef.current;
+    if (!breadcrumb) {
+      return;
+    }
+
+    breadcrumb.scrollLeft = breadcrumb.scrollWidth;
+  }, [breadcrumbPathKey]);
+
+  const selectedCategory = useMemo(
+    () => [...noteBreadcrumbs].reverse().find((record) => record.kind === "category") ?? null,
+    [noteBreadcrumbs]
+  );
+
+  const draftCommentCount = useMemo(
+    () => (draft ? collectNoteComments(draft.content).length : 0),
+    [draft]
+  );
+
+  const contextCategory = useMemo(
+    () => categories.find((category) => category.id === categoryActionMenu?.categoryId) ?? null,
+    [categories, categoryActionMenu?.categoryId]
+  );
+
+  const contextPage = useMemo(
+    () => sortedNotes.find((note) => note.id === pageActionMenu?.noteId) ?? null,
+    [pageActionMenu?.noteId, sortedNotes]
+  );
+
+  const iconPickerTarget = useMemo(
+    () => sortedNotes.find((note) => note.id === pageIconPickerTargetId) ?? null,
+    [pageIconPickerTargetId, sortedNotes]
+  );
+
+  const visibleNotes = useMemo(() => {
+    const term = query.trim().toLowerCase();
+
+    if (!term) {
+      return sortedNotes;
+    }
+
+    return sortedNotes.filter((note) => note.title.toLowerCase().includes(term));
+  }, [query, sortedNotes]);
+
+  const noteCount = sortedNotes.length;
+
+  const pagesByCategory = useMemo(() => {
+    const groups = new Map<string | null, NoteSummary[]>();
+    const recordIds = new Set(sortedRecords.map((record) => record.id));
+    visibleNotes.forEach((note) => {
+      const key = note.parentId && recordIds.has(note.parentId) ? note.parentId : null;
+      const current = groups.get(key) ?? [];
+      current.push(note);
+      groups.set(key, current);
+    });
+    return groups;
+  }, [sortedRecords, visibleNotes]);
+
+  const uncategorizedNotes = useMemo(
+    () => pagesByCategory.get(null) ?? [],
+    [pagesByCategory]
+  );
+
+  const visibleCategoryIds = useMemo(() => {
+    const term = query.trim().toLowerCase();
+    if (!term) {
+      return null;
+    }
+
+    const notesById = new Map(sortedNotes.map((note) => [note.id, note]));
+    const matchedCategoryIds = new Set<string>();
+    const includeCategoryWithAncestors = (categoryId: string) => {
+      let currentId: string | null = categoryId;
+      const visited = new Set<string>();
+
+      while (currentId && !visited.has(currentId)) {
+        const category = categoriesById.get(currentId);
+        if (!category) {
+          return;
+        }
+
+        matchedCategoryIds.add(category.id);
+        visited.add(category.id);
+        currentId = category.parentId;
+      }
+    };
+
+    visibleNotes.forEach((note) => {
+      let parentId = note.parentId;
+      const visited = new Set<string>();
+
+      while (parentId && !visited.has(parentId)) {
+        visited.add(parentId);
+        if (categoriesById.has(parentId)) {
+          includeCategoryWithAncestors(parentId);
+          return;
+        }
+
+        parentId = notesById.get(parentId)?.parentId ?? null;
+      }
+    });
+
+    categories.forEach((category) => {
+      if (category.title.toLowerCase().includes(term)) {
+        includeCategoryWithAncestors(category.id);
+      }
+    });
+
+    return matchedCategoryIds;
+  }, [categories, categoriesById, query, sortedNotes, visibleNotes]);
+
+  const visibleCategories = useMemo(() => {
+    const rootCategories = categoriesByParent.get(null) ?? [];
+    return visibleCategoryIds
+      ? rootCategories.filter((category) => visibleCategoryIds.has(category.id))
+      : rootCategories;
+  }, [categoriesByParent, visibleCategoryIds]);
+
+  const getSidebarGroupKey = useCallback(
+    (parentId: string | null) => parentId ?? UNCATEGORIZED_GROUP_KEY,
+    []
+  );
+
+  const getSidebarGroupLimit = useCallback(
+    (parentId: string | null) =>
+      sidebarGroupLimits[getSidebarGroupKey(parentId)] ?? SIDEBAR_GROUP_PAGE_SIZE,
+    [getSidebarGroupKey, sidebarGroupLimits]
+  );
+
+  const showMoreInSidebarGroup = useCallback(
+    (parentId: string | null, total: number) => {
+      const groupKey = getSidebarGroupKey(parentId);
+      setSidebarGroupLimits((current) => ({
+        ...current,
+        [groupKey]: Math.min(
+          total,
+          (current[groupKey] ?? SIDEBAR_GROUP_PAGE_SIZE) + SIDEBAR_GROUP_PAGE_STEP
+        )
+      }));
+    },
+    [getSidebarGroupKey]
+  );
+
+  useEffect(() => {
+    setSidebarSearchLimit(SIDEBAR_SEARCH_PAGE_SIZE);
+  }, [query]);
+
+  useEffect(() => {
+    if (!selectedId || query.trim()) {
+      return;
+    }
+
+    const selectedNote = sortedNotes.find((note) => note.id === selectedId);
+    if (!selectedNote) {
+      return;
+    }
+
+    const notesById = new Map(sortedNotes.map((note) => [note.id, note]));
+    const requiredLimits: Record<string, number> = {};
+    let currentNote: NoteSummary | undefined = selectedNote;
+    const visited = new Set<string>();
+
+    while (currentNote && !visited.has(currentNote.id)) {
+      visited.add(currentNote.id);
+      const parentId = currentNote.parentId ?? null;
+      const groupNotes = pagesByCategory.get(parentId) ?? [];
+      const selectedIndex = groupNotes.findIndex((note) => note.id === currentNote?.id);
+
+      if (selectedIndex >= 0) {
+        requiredLimits[getSidebarGroupKey(parentId)] =
+          Math.ceil((selectedIndex + 1) / SIDEBAR_GROUP_PAGE_STEP) * SIDEBAR_GROUP_PAGE_STEP;
+      }
+
+      currentNote = currentNote.parentId ? notesById.get(currentNote.parentId) : undefined;
+    }
+
+    if (Object.keys(requiredLimits).length === 0) {
+      return;
+    }
+
+    setSidebarGroupLimits((current) => {
+      let changed = false;
+      const next = { ...current };
+
+      Object.entries(requiredLimits).forEach(([groupKey, minimumLimit]) => {
+        if ((next[groupKey] ?? SIDEBAR_GROUP_PAGE_SIZE) < minimumLimit) {
+          next[groupKey] = minimumLimit;
+          changed = true;
+        }
+      });
+
+      return changed ? next : current;
+    });
+  }, [getSidebarGroupKey, pagesByCategory, query, selectedId, sortedNotes]);
+
+  const shareUrl = useMemo(() => {
+    if (!draft?.shareToken || typeof window === "undefined") {
+      return "";
+    }
+
+    return new URL(`/share/${draft.shareToken}`, window.location.origin).toString();
+  }, [draft?.shareToken]);
+
+  const saveDraft = useCallback(
+    (snapshot: Note, revision: number): Promise<boolean> => {
+      const sessionEpoch = authSessionEpochRef.current;
+      const saveKey = `${sessionEpoch}:${snapshot.id}:${revision}`;
+      const existingSave = noteSaveRequestsRef.current.get(saveKey);
+      if (existingSave) {
+        return existingSave;
+      }
+
+      const queuedSnapshot: Note = {
+        ...snapshot,
+        content: cloneNoteBlocks(snapshot.content)
+      };
+      const executeSave = async (): Promise<boolean> => {
+        if (authSessionEpochRef.current !== sessionEpoch) {
+          return false;
+        }
+
+        try {
+          setSaveStatus("saving");
+          const saved = normalizeNote(
+            await updateNote(queuedSnapshot.id, {
+              title: queuedSnapshot.title,
+              icon: queuedSnapshot.icon,
+              titleSize: queuedSnapshot.titleSize,
+              content: queuedSnapshot.content
+            })
+          );
+
+          if (authSessionEpochRef.current !== sessionEpoch) {
+            return false;
+          }
+
+          const currentSummary = notesRef.current.find((note) => note.id === saved.id);
+          const positionSafeSaved: Note = {
+            ...saved,
+            parentId: currentSummary?.parentId ?? saved.parentId,
+            sortOrder: currentSummary?.sortOrder ?? saved.sortOrder
+          };
+          const nextNotes = updateSummary(notesRef.current, positionSafeSaved);
+          notesRef.current = nextNotes;
+          setNotes(nextNotes);
+          const isCurrentRevision =
+            selectedIdRef.current !== queuedSnapshot.id || revisionRef.current === revision;
+          if (selectedIdRef.current === queuedSnapshot.id && isCurrentRevision) {
+            const currentDraft = draftRef.current;
+            const nextDraft = currentDraft
+              ? {
+                  ...positionSafeSaved,
+                  parentId: currentDraft.parentId,
+                  sortOrder: currentDraft.sortOrder
+                }
+              : positionSafeSaved;
+            draftRef.current = nextDraft;
+            lastPageSnapshotRef.current = clonePageSnapshot(nextDraft);
+            setDraft(nextDraft);
+            setDirty(false);
+            setSaveStatus("saved");
+            setAppError(null);
+          }
+          return isCurrentRevision;
+        } catch (error) {
+          if (error instanceof ApiError && error.status === 401) {
+            handleLoggedOut(hasUsers);
+            setAppError("登录状态已失效，请重新登录。");
+          } else {
+            setSaveStatus("error");
+            setAppError(error instanceof ApiError ? error.message : "自动保存失败。");
+          }
+          return false;
+        }
+      };
+
+      const pendingSave = noteSaveQueueRef.current.then(executeSave, executeSave);
+      noteSavePendingCountRef.current += 1;
+      const trackedSave = pendingSave.finally(() => {
+        noteSavePendingCountRef.current = Math.max(0, noteSavePendingCountRef.current - 1);
+        if (noteSaveRequestsRef.current.get(saveKey) === trackedSave) {
+          noteSaveRequestsRef.current.delete(saveKey);
+        }
+      });
+      noteSaveRequestsRef.current.set(saveKey, trackedSave);
+      noteSaveQueueRef.current = trackedSave;
+      return trackedSave;
+    },
+    [handleLoggedOut, hasUsers]
+  );
+
+  useEffect(() => {
+    if (isLocked || isPublicView || typeof window === "undefined") {
+      return;
+    }
+
+    const flushCurrentDraft = () => {
+      if (!dirty) {
+        return;
+      }
+
+      const currentDraft = draftRef.current;
+      if (currentDraft) {
+        void saveDraft(currentDraft, revisionRef.current);
+      }
+    };
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === "hidden") {
+        flushCurrentDraft();
+      }
+    };
+    const handlePageHide = () => {
+      flushCurrentDraft();
+    };
+    const handleBeforeUnload = (event: BeforeUnloadEvent) => {
+      flushCurrentDraft();
+      if (!dirty && noteSavePendingCountRef.current === 0) {
+        return;
+      }
+
+      event.preventDefault();
+      event.returnValue = "";
+    };
+
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+    window.addEventListener("pagehide", handlePageHide);
+    window.addEventListener("beforeunload", handleBeforeUnload);
+    return () => {
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
+      window.removeEventListener("pagehide", handlePageHide);
+      window.removeEventListener("beforeunload", handleBeforeUnload);
+    };
+  }, [dirty, isLocked, isPublicView, saveDraft]);
+
+  useEffect(() => {
+    if (!draft || !dirty || isLocked) {
+      return;
+    }
+
+    const revision = revisionRef.current;
+    const handle = window.setTimeout(() => {
+      void saveDraft(draft, revision);
+    }, 850);
+
+    return () => window.clearTimeout(handle);
+  }, [dirty, draft, isLocked, saveDraft]);
+
+  useEffect(() => {
+    if (isLocked || isPublicView || isAdminView || isBibleView) {
+      return;
+    }
+
+    const handleKeydown = (event: KeyboardEvent) => {
+      if (!(event.ctrlKey || event.metaKey) || event.shiftKey || event.altKey) {
+        return;
+      }
+
+      if (event.key.toLowerCase() !== "s") {
+        return;
+      }
+
+      event.preventDefault();
+      if (draft && dirty) {
+        void saveDraft(draft, revisionRef.current);
+      }
+    };
+
+    window.addEventListener("keydown", handleKeydown);
+    return () => window.removeEventListener("keydown", handleKeydown);
+  }, [dirty, draft, isAdminView, isBibleView, isLocked, isPublicView, saveDraft]);
+
+  const editDraft = useCallback(
+    (patch: Partial<Note>) => {
+      const currentDraft = draftRef.current;
+      if (!currentDraft) {
+        return;
+      }
+
+      const previousSnapshot = lastPageSnapshotRef.current ?? clonePageSnapshot(currentDraft);
+      const nextSnapshot = clonePageSnapshot({ ...currentDraft, ...patch });
+      if (arePageSnapshotsEqual(previousSnapshot, nextSnapshot)) {
+        return;
+      }
+
+      pushPageHistorySnapshot(currentDraft.id, previousSnapshot);
+      const nextDraft = applyPageSnapshotToNote(currentDraft, nextSnapshot);
+      revisionRef.current += 1;
+      draftRef.current = nextDraft;
+      lastPageSnapshotRef.current = nextSnapshot;
+      setDirty(true);
+      setSaveStatus("saving");
+      setDraft(nextDraft);
+
+      if (
+        patch.title !== undefined ||
+        patch.icon !== undefined ||
+        patch.titleSize !== undefined ||
+        patch.parentId !== undefined
+      ) {
+        setNotes((current) =>
+          current.map((note) =>
+            note.id === selectedIdRef.current
+              ? {
+                  ...note,
+                  title: nextDraft.title,
+                  icon: nextDraft.icon,
+                  titleSize: nextDraft.titleSize,
+                  parentId: nextDraft.parentId
+                }
+              : note
+          )
+        );
+      }
+    },
+    [pushPageHistorySnapshot]
+  );
+
+  const syncParentPageLink = useCallback(
+    async (parentId: string | null, child: NoteSummary, mode: "add" | "remove") => {
+      if (!parentId) {
+        return;
+      }
+
+      const parent = notes.find((note) => note.id === parentId && note.kind === "page");
+      if (!parent) {
+        return;
+      }
+
+      const transform =
+        mode === "add"
+          ? (blocks: NoteBlock[]) => addChildPageLinkBlock(blocks, child)
+          : (blocks: NoteBlock[]) => removeChildPageLinkBlocks(blocks, child.id);
+      const currentDraft = draftRef.current;
+
+      if (currentDraft?.id === parentId) {
+        const result = transform(currentDraft.content);
+        if (result.changed) {
+          editDraft({ content: result.blocks });
+          setEditorDocumentVersion((current) => current + 1);
+        }
+        return;
+      }
+
+      const parentNote = normalizeNote(await getNote(parentId));
+      const result = transform(parentNote.content);
+      if (!result.changed) {
+        return;
+      }
+
+      const savedParent = normalizeNote(await updateNote(parentId, { content: result.blocks }));
+      setNotes((current) => updateSummary(current, savedParent));
+    },
+    [editDraft, notes]
+  );
+
+  const syncChildPageLinks = useCallback(
+    async (
+      child: NoteSummary,
+      previousParentId: string | null,
+      nextParentId: string | null
+    ) => {
+      if (previousParentId === nextParentId) {
+        return;
+      }
+
+      await syncParentPageLink(previousParentId, child, "remove");
+      await syncParentPageLink(nextParentId, child, "add");
+    },
+    [syncParentPageLink]
+  );
+
+  const reportPageLinkSyncError = useCallback(
+    (error: unknown) => {
+      if (error instanceof ApiError && error.status === 401) {
+        handleLoggedOut(hasUsers);
+        setAppError("登录状态已失效，请重新登录。");
+        return;
+      }
+
+      setAppError(error instanceof ApiError ? error.message : "子页面关联同步失败。");
+    },
+    [handleLoggedOut, hasUsers]
+  );
+
+  const syncSidebarFromPageLinks = useCallback(
+    async (parentId: string, previousContent: NoteBlock[], nextContent: NoteBlock[]) => {
+      const previousLinkIds = collectPageLinkNoteIds(previousContent);
+      const nextLinkIds = collectPageLinkNoteIds(nextContent);
+      const removedLinkIds = Array.from(previousLinkIds).filter((id) => !nextLinkIds.has(id));
+
+      if (removedLinkIds.length === 0) {
+        return;
+      }
+
+      const currentNotes = notes.filter((note) => note.kind === "page");
+
+      for (const noteId of removedLinkIds) {
+        const child = currentNotes.find((note) => note.id === noteId);
+        if (!child || child.parentId !== parentId) {
+          continue;
+        }
+
+        await deleteNote(child.id);
+        setNotes((current) =>
+          current
+            .filter((note) => note.id !== child.id)
+            .map((note) => (note.parentId === child.id ? { ...note, parentId: null } : note))
+        );
+      }
+    },
+    [notes]
+  );
+
+  const handleEditorContentChange = useCallback(
+    (content: NoteBlock[]) => {
+      const currentDraft = draftRef.current;
+      if (!currentDraft) {
+        return;
+      }
+
+      const previousContent = currentDraft.content;
+      editDraft({ content });
+      void syncSidebarFromPageLinks(currentDraft.id, previousContent, content).catch(
+        reportPageLinkSyncError
+      );
+    },
+    [editDraft, reportPageLinkSyncError, syncSidebarFromPageLinks]
+  );
+
+  const applyPageSnapshot = useCallback((snapshot: PageSnapshot) => {
+    const currentDraft = draftRef.current;
+    if (!currentDraft) {
+      return;
+    }
+
+    const nextDraft = applyPageSnapshotToNote(currentDraft, snapshot);
+    revisionRef.current += 1;
+    draftRef.current = nextDraft;
+    lastPageSnapshotRef.current = clonePageSnapshot(nextDraft);
+    setDirty(true);
+    setSaveStatus("saving");
+    setShareCopied(false);
+    setEditorDocumentVersion((current) => current + 1);
+    setDraft(nextDraft);
+    setNotes((current) => updateSummary(current, nextDraft));
+  }, []);
+
+  const undoPageChange = useCallback(() => {
+    const currentDraft = draftRef.current;
+    const currentHistory = pageHistoryRef.current;
+
+    if (!currentDraft || currentHistory.noteId !== currentDraft.id || currentHistory.past.length === 0) {
+      return;
+    }
+
+    const previousSnapshot = currentHistory.past[currentHistory.past.length - 1];
+    const nextPast = currentHistory.past.slice(0, -1);
+    const currentSnapshot = lastPageSnapshotRef.current ?? clonePageSnapshot(currentDraft);
+
+    replacePageHistory({
+      noteId: currentDraft.id,
+      past: nextPast,
+      future: [currentSnapshot, ...currentHistory.future].slice(0, PAGE_HISTORY_LIMIT)
+    });
+    applyPageSnapshot(previousSnapshot);
+  }, [applyPageSnapshot, replacePageHistory]);
+
+  const redoPageChange = useCallback(() => {
+    const currentDraft = draftRef.current;
+    const currentHistory = pageHistoryRef.current;
+
+    if (!currentDraft || currentHistory.noteId !== currentDraft.id || currentHistory.future.length === 0) {
+      return;
+    }
+
+    const nextSnapshot = currentHistory.future[0];
+    const currentSnapshot = lastPageSnapshotRef.current ?? clonePageSnapshot(currentDraft);
+
+    replacePageHistory({
+      noteId: currentDraft.id,
+      past: [...currentHistory.past, currentSnapshot].slice(-PAGE_HISTORY_LIMIT),
+      future: currentHistory.future.slice(1)
+    });
+    applyPageSnapshot(nextSnapshot);
+  }, [applyPageSnapshot, replacePageHistory]);
+
+  const canUndoPageChange =
+    Boolean(draft) && pageHistory.noteId === draft?.id && pageHistory.past.length > 0;
+  const canRedoPageChange =
+    Boolean(draft) && pageHistory.noteId === draft?.id && pageHistory.future.length > 0;
+
+  const selectNote = useCallback(
+    async (id: string) => {
+      const navigationIntent = navigationIntentRef.current + 1;
+      navigationIntentRef.current = navigationIntent;
+      setWorkspaceView("notes");
+      setMobileSidebarOpen(false);
+      if (id === draftRef.current?.id && !isLoadingNote) {
+        setNotesBrowserLocation({ kind: "page" });
+        return;
+      }
+
+      if (draft && dirty) {
+        const saved = await saveDraft(draft, revisionRef.current);
+        if (!saved) {
+          return;
+        }
+      }
+
+      if (navigationIntentRef.current !== navigationIntent) {
+        return;
+      }
+
+      setNotesBrowserLocation({ kind: "page" });
+      await loadNote(id);
+    },
+    [dirty, draft, isLoadingNote, loadNote, saveDraft]
+  );
+
+  const revealSidebarRecord = useCallback(
+    (recordId: string, fallbackParentId: string | null = null) => {
+      setWorkspaceView("notes");
+      setSidebarCollapsed(false);
+      setQuery("");
+
+      const categoryIds = new Set<string>();
+      let currentId: string | null = recordsById.has(recordId) ? recordId : fallbackParentId;
+      const visited = new Set<string>();
+      while (currentId && !visited.has(currentId)) {
+        visited.add(currentId);
+        const current = recordsById.get(currentId);
+        if (!current) {
+          break;
+        }
+        if (current.kind === "category") {
+          categoryIds.add(current.id);
+        }
+        currentId = current.parentId;
+      }
+
+      setCollapsedCategoryIds((current) => current.filter((id) => !categoryIds.has(id)));
+      window.setTimeout(() => {
+        const record = document.querySelector<HTMLElement>(
+          `[data-sidebar-record-id="${CSS.escape(recordId)}"]`
+        );
+        record?.scrollIntoView({ block: "nearest" });
+        const focusTarget =
+          record?.querySelector<HTMLElement>(".category-title-input") ??
+          (record?.matches("button") ? record : record?.querySelector<HTMLElement>("button"));
+        focusTarget?.focus({ preventScroll: true });
+      }, 80);
+    },
+    [recordsById]
+  );
+
+  const openNotesOverview = useCallback(
+    (categoryId: string | null = null) => {
+      navigationIntentRef.current += 1;
+      setWorkspaceView("notes");
+      setMobileSidebarOpen(false);
+      setSidebarCollapsed(false);
+      setQuery("");
+      setShareOpen(false);
+      setShareCopied(false);
+      setFindReplaceOpen(false);
+      setCategoryMenuOpen(false);
+      setPageActionMenu(null);
+      setNotesBrowserLocation(
+        categoryId ? { kind: "category", categoryId } : { kind: "root" }
+      );
+
+      if (categoryId) {
+        revealSidebarRecord(categoryId);
+      }
+
+      const currentDraft = draftRef.current;
+      if (currentDraft && dirty) {
+        void saveDraft(currentDraft, revisionRef.current);
+      }
+    },
+    [dirty, revealSidebarRecord, saveDraft]
+  );
+
+  useEffect(() => {
+    const handleOpenNote = (event: Event) => {
+      const noteId = (event as CustomEvent<{ noteId?: unknown }>).detail?.noteId;
+      if (typeof noteId === "string" && noteId) {
+        void selectNote(noteId);
+      }
+    };
+
+    window.addEventListener("mini-notes:open-note", handleOpenNote);
+    return () => window.removeEventListener("mini-notes:open-note", handleOpenNote);
+  }, [selectNote]);
+
+  const isDescendantRecord = useCallback(
+    (candidateParentId: string, recordId: string): boolean => {
+      let currentId: string | null = candidateParentId;
+      const visited = new Set<string>();
+
+      while (currentId && !visited.has(currentId)) {
+        if (currentId === recordId) {
+          return true;
+        }
+
+        visited.add(currentId);
+        currentId = recordsById.get(currentId)?.parentId ?? null;
+      }
+
+      return false;
+    },
+    [recordsById]
+  );
+
+  const clearDragExpandTimer = useCallback(() => {
+    if (dragExpandTimerRef.current !== null && typeof window !== "undefined") {
+      window.clearTimeout(dragExpandTimerRef.current);
+    }
+
+    dragExpandTimerRef.current = null;
+    dragExpandTargetRef.current = null;
+  }, []);
+
+  const stopDragAutoScroll = useCallback(() => {
+    if (dragAutoScrollFrameRef.current !== null && typeof window !== "undefined") {
+      window.cancelAnimationFrame(dragAutoScrollFrameRef.current);
+    }
+
+    dragAutoScrollFrameRef.current = null;
+    dragAutoScrollStateRef.current = null;
+  }, []);
+
+  const updateDragAutoScroll = useCallback(
+    (clientY: number) => {
+      if (typeof window === "undefined") {
+        return;
+      }
+
+      const list = noteListRef.current;
+      if (!list || !list.isConnected || list.scrollHeight <= list.clientHeight) {
+        stopDragAutoScroll();
+        return;
+      }
+
+      const bounds = list.getBoundingClientRect();
+      if (clientY < bounds.top || clientY > bounds.bottom) {
+        stopDragAutoScroll();
+        return;
+      }
+
+      const edgeSize = Math.max(36, Math.min(72, bounds.height * 0.2));
+      const distanceFromTop = clientY - bounds.top;
+      const distanceFromBottom = bounds.bottom - clientY;
+      let velocity = 0;
+
+      if (distanceFromTop < edgeSize) {
+        const intensity = 1 - distanceFromTop / edgeSize;
+        velocity = -(220 + intensity * 780);
+      } else if (distanceFromBottom < edgeSize) {
+        const intensity = 1 - distanceFromBottom / edgeSize;
+        velocity = 220 + intensity * 780;
+      }
+
+      const maximumScrollTop = Math.max(0, list.scrollHeight - list.clientHeight);
+      if (
+        velocity === 0 ||
+        (velocity < 0 && list.scrollTop <= 0) ||
+        (velocity > 0 && list.scrollTop >= maximumScrollTop - 1)
+      ) {
+        stopDragAutoScroll();
+        return;
+      }
+
+      const currentState = dragAutoScrollStateRef.current;
+      if (currentState?.list === list) {
+        currentState.velocity = velocity;
+      } else {
+        dragAutoScrollStateRef.current = {
+          list,
+          velocity,
+          lastFrameAt: null
+        };
+      }
+
+      if (dragAutoScrollFrameRef.current !== null) {
+        return;
+      }
+
+      const scrollFrame = (frameAt: number) => {
+        const state = dragAutoScrollStateRef.current;
+        if (!state || !state.list.isConnected) {
+          dragAutoScrollFrameRef.current = null;
+          dragAutoScrollStateRef.current = null;
+          return;
+        }
+
+        const elapsed =
+          state.lastFrameAt === null
+            ? 16
+            : Math.min(40, Math.max(0, frameAt - state.lastFrameAt));
+        state.lastFrameAt = frameAt;
+        const previousScrollTop = state.list.scrollTop;
+        state.list.scrollTop += (state.velocity * elapsed) / 1000;
+
+        if (Math.abs(state.list.scrollTop - previousScrollTop) < 0.5) {
+          dragAutoScrollFrameRef.current = null;
+          dragAutoScrollStateRef.current = null;
+          return;
+        }
+
+        dragAutoScrollFrameRef.current = window.requestAnimationFrame(scrollFrame);
+      };
+
+      dragAutoScrollFrameRef.current = window.requestAnimationFrame(scrollFrame);
+    },
+    [stopDragAutoScroll]
+  );
+
+  const scheduleCategoryAutoExpand = useCallback(
+    (categoryId: string | null) => {
+      if (
+        !categoryId ||
+        !categoriesById.has(categoryId) ||
+        !collapsedCategoryIds.includes(categoryId) ||
+        typeof window === "undefined"
+      ) {
+        clearDragExpandTimer();
+        return;
+      }
+
+      if (dragExpandTargetRef.current === categoryId && dragExpandTimerRef.current !== null) {
+        return;
+      }
+
+      clearDragExpandTimer();
+      dragExpandTargetRef.current = categoryId;
+      dragExpandTimerRef.current = window.setTimeout(() => {
+        setCollapsedCategoryIds((current) => current.filter((id) => id !== categoryId));
+        dragExpandTimerRef.current = null;
+        dragExpandTargetRef.current = null;
+      }, 520);
+    },
+    [categoriesById, clearDragExpandTimer, collapsedCategoryIds]
+  );
+
+  useEffect(() => clearDragExpandTimer, [clearDragExpandTimer]);
+
+  useEffect(() => {
+    if (!draggedNoteId || typeof window === "undefined") {
+      stopDragAutoScroll();
+      return;
+    }
+
+    const handleWindowDragOver = (event: DragEvent) => updateDragAutoScroll(event.clientY);
+    const handleWindowDragStop = () => stopDragAutoScroll();
+
+    window.addEventListener("dragover", handleWindowDragOver, true);
+    window.addEventListener("dragend", handleWindowDragStop, true);
+    window.addEventListener("drop", handleWindowDragStop, true);
+    window.addEventListener("blur", handleWindowDragStop);
+
+    return () => {
+      window.removeEventListener("dragover", handleWindowDragOver, true);
+      window.removeEventListener("dragend", handleWindowDragStop, true);
+      window.removeEventListener("drop", handleWindowDragStop, true);
+      window.removeEventListener("blur", handleWindowDragStop);
+      stopDragAutoScroll();
+    };
+  }, [draggedNoteId, stopDragAutoScroll, updateDragAutoScroll]);
+
+  const calculateDropSortOrder = useCallback(
+    (
+      kind: NoteSummary["kind"],
+      parentId: string | null,
+      beforeId: string | null,
+      draggedId: string
+    ): number => {
+      const targetGroup = [...notesRef.current]
+        .filter(
+          (record) =>
+            record.kind === kind &&
+            record.id !== draggedId &&
+            (record.parentId ?? null) === parentId
+        )
+        .sort(compareNoteOrder);
+      const targetIndex = beforeId ? targetGroup.findIndex((note) => note.id === beforeId) : -1;
+      const insertionIndex = beforeId && targetIndex >= 0 ? targetIndex : targetGroup.length;
+      const previousNote = targetGroup[insertionIndex - 1] ?? null;
+      const nextNote = targetGroup[insertionIndex] ?? null;
+
+      if (previousNote && nextNote) {
+        return (previousNote.sortOrder + nextNote.sortOrder) / 2;
+      }
+
+      if (previousNote) {
+        return previousNote.sortOrder - 1000;
+      }
+
+      if (nextNote) {
+        return nextNote.sortOrder + 1000;
+      }
+
+      return Date.now();
+    },
+    []
+  );
+
+  const applyNotePositionLocally = useCallback(
+    (noteId: string, parentId: string | null, sortOrder: number, updatedAt: string) => {
+      const nextNotes = notesRef.current.map((note) =>
+        note.id === noteId ? { ...note, parentId, sortOrder, updatedAt } : note
+      );
+      notesRef.current = nextNotes;
+      setNotes(nextNotes);
+
+      if (selectedIdRef.current !== noteId) {
+        return;
+      }
+
+      const currentDraft = draftRef.current;
+      if (!currentDraft) {
+        return;
+      }
+
+      const nextDraft = { ...currentDraft, parentId, sortOrder, updatedAt };
+      draftRef.current = nextDraft;
+      setDraft(nextDraft);
+    },
+    []
+  );
+
+  const queueRecordMove = useCallback(
+    (noteId: string, parentId: string | null, beforeId: string | null) => {
+      const currentNotes = notesRef.current;
+      const draggedNote = currentNotes.find((note) => note.id === noteId);
+      if (!draggedNote || noteId === beforeId) {
+        return;
+      }
+
+      const targetParent = parentId
+        ? currentNotes.find((record) => record.id === parentId) ?? null
+        : null;
+      if (draggedNote.kind === "category" && targetParent && targetParent.kind !== "category") {
+        setAppError("分类只能放在其他分类中。");
+        return;
+      }
+
+      if (parentId && isDescendantRecord(parentId, noteId)) {
+        setAppError(
+          draggedNote.kind === "category"
+            ? "不能移动到自己的子分类中。"
+            : "不能移动到自己的子页面中。"
+        );
+        return;
+      }
+
+      const currentSiblings = [...currentNotes]
+        .filter(
+          (note) =>
+            note.kind === draggedNote.kind &&
+            (note.parentId ?? null) === (draggedNote.parentId ?? null)
+        )
+        .sort(compareNoteOrder);
+      const currentIndex = currentSiblings.findIndex((note) => note.id === noteId);
+      const currentNextId = currentIndex >= 0 ? currentSiblings[currentIndex + 1]?.id ?? null : null;
+      if ((draggedNote.parentId ?? null) === parentId && currentNextId === beforeId) {
+        return;
+      }
+
+      const nextSortOrder = calculateDropSortOrder(
+        draggedNote.kind,
+        parentId,
+        beforeId,
+        noteId
+      );
+      const optimisticUpdatedAt = new Date().toISOString();
+      applyNotePositionLocally(noteId, parentId, nextSortOrder, optimisticUpdatedAt);
+
+      const optimisticGroup = notesRef.current
+        .filter((note) => note.kind === draggedNote.kind && (note.parentId ?? null) === parentId)
+        .sort(compareNoteOrder);
+      const optimisticIndex = optimisticGroup.findIndex((note) => note.id === noteId);
+      if (draggedNote.kind === "page" && optimisticIndex >= 0) {
+        const groupKey = getSidebarGroupKey(parentId);
+        const requiredLimit =
+          Math.ceil((optimisticIndex + 1) / SIDEBAR_GROUP_PAGE_STEP) * SIDEBAR_GROUP_PAGE_STEP;
+        setSidebarGroupLimits((current) => ({
+          ...current,
+          [groupKey]: Math.max(current[groupKey] ?? SIDEBAR_GROUP_PAGE_SIZE, requiredLimit)
+        }));
+      }
+
+      const version = (noteMoveVersionsRef.current.get(noteId) ?? 0) + 1;
+      noteMoveVersionsRef.current.set(noteId, version);
+      const previousTask = noteMoveQueuesRef.current.get(noteId) ?? Promise.resolve();
+      let task: Promise<void>;
+
+      task = previousTask
+        .catch(() => undefined)
+        .then(async () => {
+          const result = await moveNote(noteId, {
+            parentId,
+            sortOrder: nextSortOrder
+          });
+          const { previousParentId, ...summaryValue } = result;
+          const savedSummary = normalizeNoteSummary(summaryValue);
+
+          if (noteMoveVersionsRef.current.get(noteId) === version) {
+            applyNotePositionLocally(
+              noteId,
+              savedSummary.parentId,
+              savedSummary.sortOrder,
+              savedSummary.updatedAt
+            );
+          }
+
+          if (savedSummary.kind === "page") {
+            try {
+              await syncChildPageLinks(
+                savedSummary,
+                previousParentId,
+                savedSummary.parentId ?? null
+              );
+            } catch (syncError) {
+              reportPageLinkSyncError(syncError);
+            }
+          }
+        })
+        .catch(async (error) => {
+          if (noteMoveVersionsRef.current.get(noteId) !== version) {
+            return;
+          }
+
+          try {
+            const authoritative = normalizeNote(await getNote(noteId));
+            applyNotePositionLocally(
+              noteId,
+              authoritative.parentId,
+              authoritative.sortOrder,
+              authoritative.updatedAt
+            );
+          } catch {
+            applyNotePositionLocally(
+              noteId,
+              draggedNote.parentId,
+              draggedNote.sortOrder,
+              draggedNote.updatedAt
+            );
+          }
+
+          if (error instanceof ApiError && error.status === 401) {
+            handleLoggedOut(hasUsers);
+            setAppError("登录状态已失效，请重新登录。");
+          } else if (error instanceof ApiError) {
+            setAppError(error.message);
+          } else {
+            setAppError(
+              draggedNote.kind === "category"
+                ? "分类位置保存失败，已恢复原位置。"
+                : "页面位置保存失败，已恢复原位置。"
+            );
+          }
+        })
+        .finally(() => {
+          if (noteMoveQueuesRef.current.get(noteId) === task) {
+            noteMoveQueuesRef.current.delete(noteId);
+          }
+        });
+
+      noteMoveQueuesRef.current.set(noteId, task);
+    },
+    [
+      applyNotePositionLocally,
+      calculateDropSortOrder,
+      getSidebarGroupKey,
+      handleLoggedOut,
+      hasUsers,
+      isDescendantRecord,
+      reportPageLinkSyncError,
+      syncChildPageLinks
+    ]
+  );
+
+  const moveDraggedRecord = useCallback(
+    (parentId: string | null, beforeId: string | null) => {
+      const draggedId = draggedNoteIdRef.current;
+      clearDragExpandTimer();
+      stopDragAutoScroll();
+      draggedNoteIdRef.current = null;
+      setDraggedNoteId(null);
+      updateDropTarget(null);
+
+      if (draggedId) {
+        queueRecordMove(draggedId, parentId, beforeId);
+      }
+    },
+    [clearDragExpandTimer, queueRecordMove, stopDragAutoScroll, updateDropTarget]
+  );
+
+  const getNoteDropTarget = useCallback(
+    (event: ReactDragEvent<HTMLElement>, note: NoteSummary): NoteDropTarget | null => {
+      const draggedId = draggedNoteIdRef.current;
+      if (!draggedId || draggedId === note.id) {
+        return null;
+      }
+
+      const draggedRecord = notesRef.current.find((record) => record.id === draggedId);
+      if (draggedRecord?.kind !== "page") {
+        return null;
+      }
+
+      const parentId = note.parentId ?? null;
+      if (parentId && isDescendantRecord(parentId, draggedId)) {
+        return null;
+      }
+
+      const siblings = sortedNotes.filter(
+        (item) => item.id !== draggedId && (item.parentId ?? null) === parentId
+      );
+      const hoveredIndex = siblings.findIndex((item) => item.id === note.id);
+      if (hoveredIndex < 0) {
+        return null;
+      }
+
+      const bounds = event.currentTarget.getBoundingClientRect();
+      const relativeY = bounds.height > 0 ? (event.clientY - bounds.top) / bounds.height : 0.5;
+      const beforeTarget: NoteDropTarget = {
+        anchorId: note.id,
+        parentId,
+        beforeId: note.id,
+        position: "before"
+      };
+      const afterTarget: NoteDropTarget = {
+        anchorId: note.id,
+        parentId,
+        beforeId: siblings[hoveredIndex + 1]?.id ?? null,
+        position: "after"
+      };
+      if (relativeY <= DROP_TARGET_EDGE_RATIO) {
+        return beforeTarget;
+      }
+
+      if (relativeY >= 1 - DROP_TARGET_EDGE_RATIO) {
+        return afterTarget;
+      }
+
+      if (!isDescendantRecord(note.id, draggedId)) {
+        return {
+          anchorId: note.id,
+          parentId: note.id,
+          beforeId: null,
+          position: "inside"
+        };
+      }
+
+      return relativeY < 0.5 ? beforeTarget : afterTarget;
+    },
+    [isDescendantRecord, sortedNotes]
+  );
+
+  const handleRecordDragStart = (
+    event: ReactDragEvent<HTMLElement>,
+    record: NoteSummary
+  ) => {
+    if (query.trim()) {
+      event.preventDefault();
+      return;
+    }
+
+    setDraggedNoteId(record.id);
+    draggedNoteIdRef.current = record.id;
+    suppressNoteClickRef.current = true;
+    updateDropTarget(null);
+    clearDragExpandTimer();
+    stopDragAutoScroll();
+    event.dataTransfer.effectAllowed = "move";
+    event.dataTransfer.setData("text/plain", record.id);
+    setNoteDragImage(event, record);
+  };
+
+  const handleDragEnd = () => {
+    clearDragExpandTimer();
+    stopDragAutoScroll();
+    draggedNoteIdRef.current = null;
+    setDraggedNoteId(null);
+    updateDropTarget(null);
+    window.setTimeout(() => {
+      suppressNoteClickRef.current = false;
+    }, 120);
+  };
+
+  const handleNoteDragOver = (
+    event: ReactDragEvent<HTMLElement>,
+    note: NoteSummary
+  ) => {
+    const draggedId = draggedNoteIdRef.current;
+    const draggedRecord = draggedId
+      ? notesRef.current.find((record) => record.id === draggedId)
+      : null;
+    if (draggedRecord?.kind !== "page") {
+      return;
+    }
+
+    event.preventDefault();
+    event.stopPropagation();
+    updateDragAutoScroll(event.clientY);
+    const nextTarget = getNoteDropTarget(event, note);
+    if (!nextTarget) {
+      event.dataTransfer.dropEffect = "none";
+      clearDragExpandTimer();
+      updateDropTarget(null);
+      return;
+    }
+
+    event.dataTransfer.dropEffect = "move";
+    clearDragExpandTimer();
+    updateDropTarget(nextTarget);
+  };
+
+  const handleNoteDrop = (
+    event: ReactDragEvent<HTMLElement>,
+    note: NoteSummary
+  ) => {
+    event.preventDefault();
+    event.stopPropagation();
+    const target = dropTargetRef.current;
+    if (!target || target.anchorId !== note.id) {
+      updateDropTarget(null);
+      return;
+    }
+
+    moveDraggedRecord(target.parentId, target.beforeId);
+  };
+
+  const getCategoryDropTarget = useCallback(
+    (event: ReactDragEvent<HTMLElement>, category: NoteSummary): NoteDropTarget | null => {
+      const draggedId = draggedNoteIdRef.current;
+      if (!draggedId || draggedId === category.id) {
+        return null;
+      }
+
+      const draggedRecord = notesRef.current.find((record) => record.id === draggedId);
+      if (!draggedRecord) {
+        return null;
+      }
+
+      if (draggedRecord.kind === "page") {
+        if (isDescendantRecord(category.id, draggedId)) {
+          return null;
+        }
+        return {
+          anchorId: category.id,
+          parentId: category.id,
+          beforeId: null,
+          position: "inside"
+        };
+      }
+
+      const parentId = category.parentId ?? null;
+      if (parentId && isDescendantRecord(parentId, draggedId)) {
+        return null;
+      }
+
+      const siblings = categories.filter(
+        (item) => item.id !== draggedId && (item.parentId ?? null) === parentId
+      );
+      const hoveredIndex = siblings.findIndex((item) => item.id === category.id);
+      if (hoveredIndex < 0) {
+        return null;
+      }
+
+      const bounds = event.currentTarget.getBoundingClientRect();
+      const relativeY = bounds.height > 0 ? (event.clientY - bounds.top) / bounds.height : 0.5;
+      const beforeTarget: NoteDropTarget = {
+        anchorId: category.id,
+        parentId,
+        beforeId: category.id,
+        position: "before"
+      };
+      const afterTarget: NoteDropTarget = {
+        anchorId: category.id,
+        parentId,
+        beforeId: siblings[hoveredIndex + 1]?.id ?? null,
+        position: "after"
+      };
+
+      if (relativeY <= DROP_TARGET_EDGE_RATIO) {
+        return beforeTarget;
+      }
+      if (relativeY >= 1 - DROP_TARGET_EDGE_RATIO) {
+        return afterTarget;
+      }
+      if (!isDescendantRecord(category.id, draggedId)) {
+        return {
+          anchorId: category.id,
+          parentId: category.id,
+          beforeId: null,
+          position: "inside"
+        };
+      }
+
+      return relativeY < 0.5 ? beforeTarget : afterTarget;
+    },
+    [categories, isDescendantRecord]
+  );
+
+  const handleCategoryDragOver = (
+    event: ReactDragEvent<HTMLElement>,
+    category: NoteSummary
+  ) => {
+    if (!draggedNoteIdRef.current) {
+      return;
+    }
+
+    event.preventDefault();
+    event.stopPropagation();
+    updateDragAutoScroll(event.clientY);
+    const nextTarget = getCategoryDropTarget(event, category);
+    if (!nextTarget) {
+      event.dataTransfer.dropEffect = "none";
+      clearDragExpandTimer();
+      updateDropTarget(null);
+      return;
+    }
+
+    event.dataTransfer.dropEffect = "move";
+    updateDropTarget(nextTarget);
+    if (nextTarget.position === "inside") {
+      scheduleCategoryAutoExpand(category.id);
+    } else {
+      clearDragExpandTimer();
+    }
+  };
+
+  const handleCategoryDrop = (
+    event: ReactDragEvent<HTMLElement>,
+    category: NoteSummary
+  ) => {
+    event.preventDefault();
+    event.stopPropagation();
+    const target = dropTargetRef.current;
+    if (!target || target.anchorId !== category.id) {
+      updateDropTarget(null);
+      return;
+    }
+
+    moveDraggedRecord(target.parentId, target.beforeId);
+  };
+
+  const handleGroupDragOver = (
+    event: ReactDragEvent<HTMLElement>,
+    parentId: string | null,
+    anchorId: string | null,
+    position: "inside" | "append" = "append"
+  ) => {
+    const draggedId = draggedNoteIdRef.current;
+    if (!draggedId) {
+      return;
+    }
+
+    event.preventDefault();
+    event.stopPropagation();
+    updateDragAutoScroll(event.clientY);
+
+    const draggedRecord = notesRef.current.find((record) => record.id === draggedId);
+    const targetParent = parentId
+      ? notesRef.current.find((record) => record.id === parentId) ?? null
+      : null;
+    if (
+      !draggedRecord ||
+      (draggedRecord.kind === "category" && parentId !== null && targetParent?.kind !== "category") ||
+      (parentId && isDescendantRecord(parentId, draggedId))
+    ) {
+      event.dataTransfer.dropEffect = "none";
+      clearDragExpandTimer();
+      updateDropTarget(null);
+      return;
+    }
+
+    event.dataTransfer.dropEffect = "move";
+    updateDropTarget({ anchorId, parentId, beforeId: null, position });
+    scheduleCategoryAutoExpand(parentId);
+  };
+
+  const handleGroupDrop = (
+    event: ReactDragEvent<HTMLElement>,
+    parentId: string | null,
+    anchorId: string | null
+  ) => {
+    if (!draggedNoteIdRef.current) {
+      return;
+    }
+
+    event.preventDefault();
+    event.stopPropagation();
+    const target = dropTargetRef.current;
+    if (!target || target.parentId !== parentId || target.anchorId !== anchorId) {
+      updateDropTarget(null);
+      return;
+    }
+
+    moveDraggedRecord(parentId, null);
+  };
+
+  const startTouchRecordDrag = (
+    event: ReactPointerEvent<HTMLElement>,
+    record: NoteSummary
+  ) => {
+    if (event.pointerType === "mouse" || query.trim() || editingCategoryId === record.id) {
+      return;
+    }
+
+    event.preventDefault();
+    event.stopPropagation();
+    touchDragPointerRef.current = event.pointerId;
+    event.currentTarget.setPointerCapture(event.pointerId);
+    setDraggedNoteId(record.id);
+    draggedNoteIdRef.current = record.id;
+    suppressNoteClickRef.current = true;
+    updateDropTarget(null);
+    clearDragExpandTimer();
+    stopDragAutoScroll();
+    if (typeof navigator.vibrate === "function") {
+      navigator.vibrate(12);
+    }
+  };
+
+  const updateTouchRecordDrag = (event: ReactPointerEvent<HTMLElement>) => {
+    if (
+      touchDragPointerRef.current !== event.pointerId ||
+      !draggedNoteIdRef.current ||
+      typeof document === "undefined"
+    ) {
+      return;
+    }
+
+    event.preventDefault();
+    updateDragAutoScroll(event.clientY);
+    const hovered = document.elementFromPoint(event.clientX, event.clientY) as HTMLElement | null;
+    const recordElement = hovered?.closest<HTMLElement>("[data-sidebar-record-id]") ?? null;
+    const recordId = recordElement?.dataset.sidebarRecordId;
+
+    if (recordElement && recordId) {
+      const hoveredRecord = notesRef.current.find((record) => record.id === recordId);
+      if (!hoveredRecord) {
+        updateDropTarget(null);
+        return;
+      }
+
+      const pointerEvent = {
+        clientY: event.clientY,
+        currentTarget: recordElement
+      } as ReactDragEvent<HTMLElement>;
+      const nextTarget =
+        hoveredRecord.kind === "category"
+          ? getCategoryDropTarget(pointerEvent, hoveredRecord)
+          : getNoteDropTarget(pointerEvent, hoveredRecord);
+      updateDropTarget(nextTarget);
+
+      if (hoveredRecord.kind === "category" && nextTarget?.position === "inside") {
+        scheduleCategoryAutoExpand(hoveredRecord.id);
+      } else {
+        clearDragExpandTimer();
+      }
+      return;
+    }
+
+    const groupElement = hovered?.closest<HTMLElement>("[data-touch-drop-group]") ?? null;
+    if (!groupElement) {
+      clearDragExpandTimer();
+      updateDropTarget(null);
+      return;
+    }
+
+    const parentId = groupElement.dataset.touchDropParentId || null;
+    const anchorId = groupElement.dataset.touchDropAnchorId || null;
+    const draggedRecord = notesRef.current.find(
+      (record) => record.id === draggedNoteIdRef.current
+    );
+    const targetParent = parentId
+      ? notesRef.current.find((record) => record.id === parentId) ?? null
+      : null;
+    if (
+      !draggedRecord ||
+      (draggedRecord.kind === "category" && parentId !== null && targetParent?.kind !== "category") ||
+      (parentId && isDescendantRecord(parentId, draggedRecord.id))
+    ) {
+      clearDragExpandTimer();
+      updateDropTarget(null);
+      return;
+    }
+
+    updateDropTarget({ anchorId, parentId, beforeId: null, position: "append" });
+    scheduleCategoryAutoExpand(parentId);
+  };
+
+  const finishTouchRecordDrag = (
+    event: ReactPointerEvent<HTMLElement>,
+    cancelled = false
+  ) => {
+    if (touchDragPointerRef.current !== event.pointerId) {
+      return;
+    }
+
+    event.preventDefault();
+    event.stopPropagation();
+    touchDragPointerRef.current = null;
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+      event.currentTarget.releasePointerCapture(event.pointerId);
+    }
+
+    const target = dropTargetRef.current;
+    if (!cancelled && target) {
+      moveDraggedRecord(target.parentId, target.beforeId);
+    } else {
+      handleDragEnd();
+    }
+
+    window.setTimeout(() => {
+      suppressNoteClickRef.current = false;
+    }, 120);
+  };
+
+  const createNewNote = useCallback(async (parentId: string | null = null) => {
+    const sessionEpoch = authSessionEpochRef.current;
+    const navigationIntent = navigationIntentRef.current + 1;
+    navigationIntentRef.current = navigationIntent;
+    setWorkspaceView("notes");
+    setMobileSidebarOpen(false);
+    setSidebarCollapsed(false);
+    setCategoryActionMenu(null);
+    if (draft && dirty) {
+      const saved = await saveDraft(draft, revisionRef.current);
+      if (!saved) {
+        return;
+      }
+    }
+
+    if (navigationIntentRef.current !== navigationIntent) {
+      return;
+    }
+
+    try {
+      const created = normalizeNote(
+        await createNote({
+          title: "未命名",
+          icon: "📝",
+          kind: "page",
+          titleSize: DEFAULT_TITLE_SIZE,
+          parentId,
+          content: []
+        })
+      );
+      if (authSessionEpochRef.current !== sessionEpoch) {
+        return;
+      }
+
+      setNotes((current) => [normalizeNoteSummary(toSummary(created)), ...current]);
+      if (navigationIntentRef.current !== navigationIntent) {
+        return;
+      }
+
+      revealSidebarRecord(created.id, parentId);
+      setNotesBrowserLocation({ kind: "page" });
+      await loadNote(created.id);
+    } catch (error) {
+      if (error instanceof ApiError && error.status === 401) {
+        handleLoggedOut(hasUsers);
+        setAppError("登录状态已失效，请重新登录。");
+      } else {
+        setAppError("新页面创建失败。");
+      }
+    }
+  }, [dirty, draft, handleLoggedOut, hasUsers, loadNote, revealSidebarRecord, saveDraft]);
+
+  const createSubPage = useCallback(
+    async (parentId: string): Promise<NoteSummary> => {
+      setWorkspaceView("notes");
+      setSidebarCollapsed(false);
+      setAppError(null);
+
+      try {
+        const created = normalizeNote(
+          await createNote({
+            title: "未命名",
+            icon: "📝",
+            kind: "page",
+            titleSize: DEFAULT_TITLE_SIZE,
+            parentId,
+            content: []
+          })
+        );
+        const summary = normalizeNoteSummary(toSummary(created));
+        setNotes((current) => [summary, ...current]);
+        setSidebarGroupLimits((current) => ({
+          ...current,
+          [getSidebarGroupKey(parentId)]: Math.max(
+            current[getSidebarGroupKey(parentId)] ?? SIDEBAR_GROUP_PAGE_SIZE,
+            SIDEBAR_GROUP_PAGE_SIZE
+          )
+        }));
+        revealSidebarRecord(created.id, parentId);
+        return summary;
+      } catch (error) {
+        if (error instanceof ApiError && error.status === 401) {
+          handleLoggedOut(hasUsers);
+          setAppError("登录状态已失效，请重新登录。");
+          throw new Error("登录状态已失效，请重新登录。");
+        }
+
+        const message = error instanceof ApiError ? error.message : "子页面创建失败。";
+        setAppError(message);
+        throw new Error(message);
+      }
+    },
+    [getSidebarGroupKey, handleLoggedOut, hasUsers, revealSidebarRecord]
+  );
+
+  const createCategory = useCallback(async (parentId: string | null = null) => {
+    const sessionEpoch = authSessionEpochRef.current;
+    const navigationIntent = navigationIntentRef.current + 1;
+    navigationIntentRef.current = navigationIntent;
+    setWorkspaceView("notes");
+    setSidebarCollapsed(false);
+    setCategoryActionMenu(null);
+    if (draft && dirty) {
+      const saved = await saveDraft(draft, revisionRef.current);
+      if (!saved) {
+        return;
+      }
+    }
+
+    if (navigationIntentRef.current !== navigationIntent) {
+      return;
+    }
+
+    try {
+      const created = normalizeNote(
+        await createNote({
+          title: "未命名分类",
+          icon: "📂",
+          kind: "category",
+          parentId,
+          content: []
+        })
+      );
+      if (authSessionEpochRef.current !== sessionEpoch) {
+        return;
+      }
+
+      setNotes((current) => [normalizeNoteSummary(toSummary(created)), ...current]);
+      if (navigationIntentRef.current !== navigationIntent) {
+        return;
+      }
+
+      setCollapsedCategoryIds((current) =>
+        current.filter((id) => id !== created.id && id !== parentId)
+      );
+      setEditingCategoryId(created.id);
+      setEditingCategoryTitle(created.title);
+      revealSidebarRecord(created.id, parentId);
+    } catch (error) {
+      if (error instanceof ApiError && error.status === 401) {
+        handleLoggedOut(hasUsers);
+        setAppError("登录状态已失效，请重新登录。");
+      } else {
+        setAppError("新建分类失败。");
+      }
+    }
+  }, [dirty, draft, handleLoggedOut, hasUsers, revealSidebarRecord, saveDraft]);
+
+  const archiveCurrent = useCallback(async () => {
+    if (!draft) {
+      return;
+    }
+
+    const sessionEpoch = authSessionEpochRef.current;
+    const actionIntent = navigationIntentRef.current + 1;
+    navigationIntentRef.current = actionIntent;
+    const archivedSummary = normalizeNoteSummary(toSummary(draft));
+    const archivedId = draft.id;
+    const previousParentId = draft.parentId ?? null;
+
+    try {
+      await deleteNote(archivedId);
+      if (authSessionEpochRef.current !== sessionEpoch) {
+        return;
+      }
+
+      const remaining = notesRef.current
+        .filter((note) => note.id !== archivedId)
+        .map((note) => (note.parentId === archivedId ? { ...note, parentId: null } : note));
+      notesRef.current = remaining;
+      setNotes(remaining);
+
+      const wasSelected = selectedIdRef.current === archivedId;
+      if (wasSelected) {
+        revisionRef.current += 1;
+        loadNoteRequestRef.current += 1;
+        selectedIdRef.current = null;
+        draftRef.current = null;
+        lastPageSnapshotRef.current = null;
+        setDraft(null);
+        setSelectedId(null);
+        resetPageHistory(null);
+        setShareOpen(false);
+        setShareCopied(false);
+        setExportOpen(false);
+        setDirty(false);
+        setSaveStatus("idle");
+      }
+
+      if (navigationIntentRef.current === actionIntent && wasSelected) {
+        const nextPageId = getFirstPageId(remaining);
+        if (nextPageId) {
+          setNotesBrowserLocation({ kind: "page" });
+          await loadNote(nextPageId);
+        } else {
+          setNotesBrowserLocation({ kind: "root" });
+        }
+      }
+
+      try {
+        await syncParentPageLink(previousParentId, archivedSummary, "remove");
+      } catch (syncError) {
+        reportPageLinkSyncError(syncError);
+      }
+    } catch (error) {
+      if (error instanceof ApiError && error.status === 401) {
+        handleLoggedOut(hasUsers);
+        setAppError("登录状态已失效，请重新登录。");
+      } else {
+        setAppError("归档失败。");
+      }
+    }
+  }, [
+    draft,
+    handleLoggedOut,
+    hasUsers,
+    loadNote,
+    reportPageLinkSyncError,
+    resetPageHistory,
+    syncParentPageLink
+  ]);
+
+  const archiveCategory = useCallback(
+    async (category: NoteSummary) => {
+      const confirmed =
+        typeof window === "undefined" ||
+        window.confirm(`删除分类“${category.title}”？分类下的页面会移到未分类。`);
+
+      if (!confirmed) {
+        return;
+      }
+
+      if (draft && dirty) {
+        const saved = await saveDraft(draft, revisionRef.current);
+        if (!saved) {
+          return;
+        }
+      }
+
+      try {
+        await deleteNote(category.id);
+        setNotes((current) =>
+          current
+            .filter((note) => note.id !== category.id)
+            .map((note) => (note.parentId === category.id ? { ...note, parentId: null } : note))
+        );
+        setDraft((current) =>
+          current?.parentId === category.id ? { ...current, parentId: null } : current
+        );
+        setCollapsedCategoryIds((current) => current.filter((id) => id !== category.id));
+        setCategoryMenuOpen(false);
+        if (editingCategoryId === category.id) {
+          setEditingCategoryId(null);
+          setEditingCategoryTitle("");
+        }
+      } catch (error) {
+        if (error instanceof ApiError && error.status === 401) {
+          handleLoggedOut(hasUsers);
+          setAppError("登录状态已失效，请重新登录。");
+        } else if (error instanceof ApiError) {
+          setAppError(error.message);
+        } else {
+          setAppError("删除分类失败。");
+        }
+      }
+    },
+    [dirty, draft, editingCategoryId, handleLoggedOut, hasUsers, saveDraft]
+  );
+
+  const submitAuth = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    setAppError(null);
+    setAuthPending(true);
+
+    try {
+      const payload = {
+        username: authUsername.trim(),
+        password: authPassword
+      };
+      const status =
+        authMode === "register"
+          ? await register({
+              ...payload,
+              inviteCode: authInviteCode.trim()
+            })
+          : await login(payload);
+
+      setSessionUser(status.user);
+      setHasUsers(true);
+      setAuthPassword("");
+      setAuthInviteCode("");
+      setIsLocked(false);
+      await bootstrap();
+    } catch (error) {
+      if (error instanceof ApiError) {
+        setAppError(error.message);
+      } else {
+        setAppError(authMode === "register" ? "注册失败。" : "登录失败。");
+      }
+    } finally {
+      setAuthPending(false);
+    }
+  };
+
+  const logoutWorkspace = async () => {
+    if (draft && dirty) {
+      const saved = await saveDraft(draft, revisionRef.current);
+      if (!saved) {
+        return;
+      }
+    }
+
+    try {
+      await logout();
+    } finally {
+      handleLoggedOut(true);
+      setAppError(null);
+    }
+  };
+
+  const toggleCategoryCollapse = (id: string) => {
+    setCollapsedCategoryIds((current) =>
+      current.includes(id) ? current.filter((item) => item !== id) : [...current, id]
+    );
+  };
+
+  const openCategoryActionMenu = (
+    event: ReactMouseEvent<HTMLDivElement>,
+    category: NoteSummary
+  ) => {
+    event.preventDefault();
+    event.stopPropagation();
+
+    const menuWidth = 178;
+    const menuHeight = 178;
+    const viewportWidth = typeof window === "undefined" ? 0 : window.innerWidth;
+    const viewportHeight = typeof window === "undefined" ? 0 : window.innerHeight;
+    const left = viewportWidth
+      ? Math.max(12, Math.min(event.clientX, Math.max(12, viewportWidth - menuWidth - 12)))
+      : event.clientX;
+    const top = viewportHeight
+      ? Math.max(12, Math.min(event.clientY, Math.max(12, viewportHeight - menuHeight - 12)))
+      : event.clientY;
+
+    setCategoryActionMenu({ categoryId: category.id, left, top });
+    setPageActionMenu(null);
+  };
+
+  const openPageActionMenu = (
+    event: ReactMouseEvent<HTMLElement>,
+    note: NoteSummary
+  ) => {
+    event.preventDefault();
+    event.stopPropagation();
+
+    const menuWidth = 220;
+    const menuHeight = Math.min(420, 196 + categories.length * 38);
+    const viewportWidth = typeof window === "undefined" ? 0 : window.innerWidth;
+    const viewportHeight = typeof window === "undefined" ? 0 : window.innerHeight;
+    const left = viewportWidth
+      ? Math.max(12, Math.min(event.clientX, Math.max(12, viewportWidth - menuWidth - 12)))
+      : event.clientX;
+    const top = viewportHeight
+      ? Math.max(12, Math.min(event.clientY, Math.max(12, viewportHeight - menuHeight - 12)))
+      : event.clientY;
+
+    setPageActionMenu({ noteId: note.id, left, top });
+    setCategoryActionMenu(null);
+    setCategoryMenuOpen(false);
+    setShareOpen(false);
+    setShareCopied(false);
+  };
+
+  const startCategoryEdit = (category: NoteSummary) => {
+    setCategoryActionMenu(null);
+    setEditingCategoryId(category.id);
+    setEditingCategoryTitle(category.title);
+  };
+
+  const saveCategoryTitle = useCallback(
+    async (categoryId: string) => {
+      const nextTitle = editingCategoryTitle.trim();
+      setEditingCategoryId(null);
+
+      if (!nextTitle) {
+        setEditingCategoryTitle("");
+        return;
+      }
+
+      try {
+        const saved = normalizeNote(await updateNote(categoryId, { title: nextTitle }));
+        setNotes((current) =>
+          current.map((note) => (note.id === saved.id ? normalizeNoteSummary(toSummary(saved)) : note))
+        );
+      } catch (error) {
+        if (error instanceof ApiError && error.status === 401) {
+          handleLoggedOut(hasUsers);
+          setAppError("登录状态已失效，请重新登录。");
+        } else if (error instanceof ApiError) {
+          setAppError(error.message);
+        } else {
+          setAppError("分类名称保存失败。");
+        }
+      } finally {
+        setEditingCategoryTitle("");
+      }
+    },
+    [editingCategoryTitle, handleLoggedOut, hasUsers]
+  );
+
+  const openSharePanel = () => {
+    setExportOpen(false);
+    setFindReplaceOpen(false);
+    setCategoryMenuOpen(false);
+    setCategoryActionMenu(null);
+    setShareOpen((current) => !current);
+    setShareCopied(false);
+    setSharePassword("");
+  };
+
+  const openExportPanel = () => {
+    setShareOpen(false);
+    setShareCopied(false);
+    setFindReplaceOpen(false);
+    setCategoryMenuOpen(false);
+    setCategoryActionMenu(null);
+    setExportOpen(true);
+    setExportSelection((current) => {
+      if (current.length > 0) {
+        return current;
+      }
+
+      if (draft) {
+        return [draft.id];
+      }
+
+      return sortedNotes[0] ? [sortedNotes[0].id] : [];
+    });
+  };
+
+  const enableCurrentShare = async () => {
+    if (!draft) {
+      return;
+    }
+
+    const sessionEpoch = authSessionEpochRef.current;
+    const targetId = draft.id;
+    setSharePending(true);
+    setAppError(null);
+
+    try {
+      const shared = normalizeNote(await enableShare(targetId, sharePassword));
+      if (authSessionEpochRef.current !== sessionEpoch) {
+        return;
+      }
+
+      const nextNotes = notesRef.current.map((note) =>
+        note.id === targetId
+          ? {
+              ...note,
+              shareToken: shared.shareToken,
+              sharedAt: shared.sharedAt,
+              sharePasswordProtected: shared.sharePasswordProtected,
+              updatedAt: shared.updatedAt
+            }
+          : note
+      );
+      notesRef.current = nextNotes;
+      setNotes(nextNotes);
+
+      if (selectedIdRef.current === targetId && draftRef.current?.id === targetId) {
+        const nextDraft = {
+          ...draftRef.current,
+          shareToken: shared.shareToken,
+          sharedAt: shared.sharedAt,
+          sharePasswordProtected: shared.sharePasswordProtected,
+          updatedAt: shared.updatedAt
+        };
+        draftRef.current = nextDraft;
+        setDraft(nextDraft);
+        setShareOpen(true);
+        setShareCopied(false);
+      }
+    } catch (error) {
+      if (error instanceof ApiError && error.status === 401) {
+        handleLoggedOut(hasUsers);
+        setAppError("登录状态已失效，请重新登录。");
+      } else if (error instanceof ApiError) {
+        setAppError(error.message);
+      } else {
+        setAppError("开启分享失败。");
+      }
+    } finally {
+      setSharePending(false);
+    }
+  };
+
+  const disableCurrentShare = async () => {
+    if (!draft) {
+      return;
+    }
+
+    const sessionEpoch = authSessionEpochRef.current;
+    const targetId = draft.id;
+    setSharePending(true);
+    setAppError(null);
+
+    try {
+      const unshared = normalizeNote(await disableShare(targetId));
+      if (authSessionEpochRef.current !== sessionEpoch) {
+        return;
+      }
+
+      const nextNotes = notesRef.current.map((note) =>
+        note.id === targetId
+          ? {
+              ...note,
+              shareToken: unshared.shareToken,
+              sharedAt: unshared.sharedAt,
+              sharePasswordProtected: unshared.sharePasswordProtected,
+              updatedAt: unshared.updatedAt
+            }
+          : note
+      );
+      notesRef.current = nextNotes;
+      setNotes(nextNotes);
+
+      if (selectedIdRef.current === targetId && draftRef.current?.id === targetId) {
+        const nextDraft = {
+          ...draftRef.current,
+          shareToken: unshared.shareToken,
+          sharedAt: unshared.sharedAt,
+          sharePasswordProtected: unshared.sharePasswordProtected,
+          updatedAt: unshared.updatedAt
+        };
+        draftRef.current = nextDraft;
+        setDraft(nextDraft);
+        setShareCopied(false);
+      }
+    } catch (error) {
+      if (error instanceof ApiError && error.status === 401) {
+        handleLoggedOut(hasUsers);
+        setAppError("登录状态已失效，请重新登录。");
+      } else if (error instanceof ApiError) {
+        setAppError(error.message);
+      } else {
+        setAppError("关闭分享失败。");
+      }
+    } finally {
+      setSharePending(false);
+    }
+  };
+
+  const copyShareLink = async () => {
+    if (!shareUrl) {
+      return;
+    }
+
+    try {
+      await navigator.clipboard.writeText(shareUrl);
+      setShareCopied(true);
+    } catch {
+      setAppError("复制链接失败，请手动复制。");
+    }
+  };
+
+  const toggleExportSelection = (id: string) => {
+    setExportSelection((current) =>
+      current.includes(id) ? current.filter((item) => item !== id) : [...current, id]
+    );
+  };
+
+  const selectAllExportNotes = () => {
+    setExportSelection(sortedNotes.map((note) => note.id));
+  };
+
+  const selectVisibleExportNotes = (ids: string[]) => {
+    setExportSelection((current) => {
+      const next = new Set(current);
+      ids.forEach((id) => next.add(id));
+      return sortedNotes.filter((note) => next.has(note.id)).map((note) => note.id);
+    });
+  };
+
+  const clearExportSelection = () => {
+    setExportSelection([]);
+  };
+
+  const exportNotesAsPdf = async (orderedIds: string[]) => {
+    if (orderedIds.length === 0) {
+      setAppError("请先勾选要导出的页面。");
+      return;
+    }
+
+    const exportWindow = openExportWindow();
+    if (!exportWindow) {
+      setAppError("浏览器拦截了导出窗口，请允许弹窗后重试。");
+      return;
+    }
+
+    setExportPending(true);
+    setAppError(null);
+
+    try {
+      const notesToExport = await Promise.all(
+        orderedIds.map(async (id) => {
+          if (draft && id === draft.id) {
+            return draft;
+          }
+
+          return normalizeNote(await getNote(id));
+        })
+      );
+
+      const { renderNotesToExportWindow } = await import("./export");
+      renderNotesToExportWindow(exportWindow, notesToExport);
+      setExportOpen(false);
+    } catch (error) {
+      exportWindow.close();
+
+      if (error instanceof ApiError && error.status === 401) {
+        handleLoggedOut(hasUsers);
+        setAppError("登录状态已失效，请重新登录。");
+      } else if (error instanceof ApiError) {
+        setAppError(error.message);
+      } else {
+        setAppError("导出失败，请稍后再试。");
+      }
+    } finally {
+      setExportPending(false);
+    }
+  };
+
+  const exportSelectedNotesAsPdf = async () => {
+    const orderedIds = sortedNotes
+      .filter((note) => exportSelection.includes(note.id))
+      .map((note) => note.id);
+
+    await exportNotesAsPdf(orderedIds);
+  };
+
+  const updatePageIcon = async (noteId: string, icon: string) => {
+    setPageActionMenu(null);
+    setPageIconPickerTargetId(null);
+
+    if (draft?.id === noteId) {
+      editDraft({ icon });
+      return;
+    }
+
+    try {
+      const saved = normalizeNote(await updateNote(noteId, { icon }));
+      setNotes((current) => updateSummary(current, saved));
+    } catch (error) {
+      if (error instanceof ApiError && error.status === 401) {
+        handleLoggedOut(hasUsers);
+        setAppError("登录状态已失效，请重新登录。");
+      } else if (error instanceof ApiError) {
+        setAppError(error.message);
+      } else {
+        setAppError("页面图标保存失败。");
+      }
+    }
+  };
+
+  const movePageToCategory = (noteId: string, parentId: string | null) => {
+    setPageActionMenu(null);
+    queueRecordMove(noteId, parentId, null);
+  };
+
+  const togglePageShare = async (note: NoteSummary) => {
+    const sessionEpoch = authSessionEpochRef.current;
+    setPageActionMenu(null);
+    setSharePending(true);
+    setAppError(null);
+
+    try {
+      const saved = normalizeNote(
+        note.shareToken ? await disableShare(note.id) : await enableShare(note.id)
+      );
+      if (authSessionEpochRef.current !== sessionEpoch) {
+        return;
+      }
+
+      const nextNotes = notesRef.current.map((item) =>
+        item.id === saved.id
+          ? {
+              ...item,
+              shareToken: saved.shareToken,
+              sharedAt: saved.sharedAt,
+              updatedAt: saved.updatedAt
+            }
+          : item
+      );
+      notesRef.current = nextNotes;
+      setNotes(nextNotes);
+
+      if (selectedIdRef.current === saved.id && draftRef.current?.id === saved.id) {
+        const nextDraft = {
+          ...draftRef.current,
+          shareToken: saved.shareToken,
+          sharedAt: saved.sharedAt,
+          updatedAt: saved.updatedAt
+        };
+        draftRef.current = nextDraft;
+        setDraft(nextDraft);
+        setShareCopied(false);
+      }
+    } catch (error) {
+      if (error instanceof ApiError && error.status === 401) {
+        handleLoggedOut(hasUsers);
+        setAppError("登录状态已失效，请重新登录。");
+      } else if (error instanceof ApiError) {
+        setAppError(error.message);
+      } else {
+        setAppError("共享状态更新失败。");
+      }
+    } finally {
+      setSharePending(false);
+    }
+  };
+
+  const archivePage = async (note: NoteSummary) => {
+    const sessionEpoch = authSessionEpochRef.current;
+    const actionIntent = navigationIntentRef.current + 1;
+    navigationIntentRef.current = actionIntent;
+    setPageActionMenu(null);
+
+    try {
+      await deleteNote(note.id);
+      if (authSessionEpochRef.current !== sessionEpoch) {
+        return;
+      }
+
+      const remaining = notesRef.current
+        .filter((item) => item.id !== note.id)
+        .map((item) => (item.parentId === note.id ? { ...item, parentId: null } : item));
+      notesRef.current = remaining;
+      setNotes(remaining);
+
+      const wasSelected = selectedIdRef.current === note.id;
+      if (wasSelected) {
+        revisionRef.current += 1;
+        loadNoteRequestRef.current += 1;
+        selectedIdRef.current = null;
+        draftRef.current = null;
+        lastPageSnapshotRef.current = null;
+        setDraft(null);
+        setSelectedId(null);
+        resetPageHistory(null);
+        setShareOpen(false);
+        setShareCopied(false);
+        setExportOpen(false);
+        setDirty(false);
+        setSaveStatus("idle");
+      }
+
+      if (navigationIntentRef.current === actionIntent && wasSelected) {
+        const nextId = getFirstPageId(remaining);
+        if (nextId) {
+          setNotesBrowserLocation({ kind: "page" });
+          await loadNote(nextId);
+        } else {
+          setNotesBrowserLocation({ kind: "root" });
+        }
+      }
+
+      try {
+        await syncParentPageLink(note.parentId ?? null, note, "remove");
+      } catch (syncError) {
+        reportPageLinkSyncError(syncError);
+      }
+    } catch (error) {
+      if (error instanceof ApiError && error.status === 401) {
+        handleLoggedOut(hasUsers);
+        setAppError("登录状态已失效，请重新登录。");
+      } else if (error instanceof ApiError) {
+        setAppError(error.message);
+      } else {
+        setAppError("页面归档失败。");
+      }
+    }
+  };
+
+  const sharePanel =
+    shareOpen && draft && typeof document !== "undefined"
+      ? createPortal(
+          <>
+            <button
+              aria-label="关闭分享面板"
+              className="share-panel-backdrop"
+              onClick={() => {
+                setShareOpen(false);
+                setShareCopied(false);
+              }}
+              type="button"
+            />
+            <div
+              aria-label="页面分享"
+              aria-modal="true"
+              className="share-panel"
+              role="dialog"
+              style={sharePanelStyle}
+            >
+              <div className="share-panel-head">
+                <div>
+                  <strong>页面分享</strong>
+                  <p>由你主动开启，关闭后旧链接会立刻失效。</p>
+                </div>
+                {draft.shareToken ? (
+                  <span className="share-panel-badge">
+                    <Globe2 size={14} />
+                    已开启
+                  </span>
+                ) : (
+                  <span className="share-panel-badge muted">未开启</span>
+                )}
+              </div>
+
+              <label className="share-panel-field">
+                <span>分享密码（至少 6 位，留空表示无密码）</span>
+                <input
+                  className="share-link-input"
+                  maxLength={72}
+                  onChange={(event) => setSharePassword(event.target.value)}
+                  placeholder={draft.sharePasswordProtected ? "当前已设置密码；输入新密码可更换" : "可选"}
+                  type="password"
+                  value={sharePassword}
+                />
+              </label>
+
+              {draft.shareToken ? (
+                <>
+                  <label className="share-panel-field">
+                    <span>分享链接</span>
+                    <div className="share-input-row">
+                      <input className="share-link-input" readOnly type="text" value={shareUrl} />
+                      <button
+                        className="toolbar-button compact"
+                        onClick={() => void copyShareLink()}
+                        type="button"
+                      >
+                        <Copy size={15} />
+                        {shareCopied ? "已复制" : "复制"}
+                      </button>
+                    </div>
+                  </label>
+
+                  <div className="share-status-row">
+                    <span>开启时间：{draft.sharedAt ? formatDateTime(draft.sharedAt) : "刚刚"}</span>
+                    <span>任何拿到链接的人都能免登录查看此页</span>
+                  </div>
+
+                  <div className="share-panel-actions">
+                    <a className="toolbar-button" href={shareUrl} rel="noreferrer" target="_blank">
+                      <ExternalLink size={15} />
+                      打开链接
+                    </a>
+                    <button
+                      className="toolbar-button"
+                      disabled={sharePending || (sharePassword.length > 0 && sharePassword.length < 6)}
+                      onClick={() => void enableCurrentShare()}
+                      type="button"
+                    >
+                      保存密码设置
+                    </button>
+                    <button
+                      className="toolbar-button danger"
+                      disabled={sharePending}
+                      onClick={() => void disableCurrentShare()}
+                      type="button"
+                    >
+                      关闭分享
+                    </button>
+                  </div>
+                </>
+              ) : (
+                <>
+                  <p className="share-panel-copy">
+                    开启后会生成一个只读分享链接，别人打开时不会被登录页拦截。
+                  </p>
+                  <div className="share-panel-actions">
+                    <button
+                      className="primary-button share-primary"
+                      disabled={sharePending}
+                      onClick={() => void enableCurrentShare()}
+                      type="button"
+                    >
+                      <Globe2 size={16} />
+                      {sharePending ? "开启中" : "开启公开分享"}
+                    </button>
+                  </div>
+                </>
+              )}
+            </div>
+          </>,
+          document.body
+        )
+      : null;
+
+  const categoryActionPanel =
+    categoryActionMenu && contextCategory && typeof document !== "undefined"
+      ? createPortal(
+          <>
+            <button
+              aria-label="关闭分类操作菜单"
+              className="category-context-backdrop"
+              onClick={() => setCategoryActionMenu(null)}
+              onContextMenu={(event) => {
+                event.preventDefault();
+                setCategoryActionMenu(null);
+              }}
+              type="button"
+            />
+            <div
+              aria-label={`${contextCategory.title} 分类操作`}
+              className="category-context-menu"
+              role="menu"
+              style={{
+                left: `${categoryActionMenu.left}px`,
+                top: `${categoryActionMenu.top}px`
+              }}
+            >
+              <button
+                className="category-context-menu__item"
+                onClick={() => void createNewNote(contextCategory.id)}
+                role="menuitem"
+                type="button"
+              >
+                <Plus size={15} />
+                新建页面
+              </button>
+              <button
+                className="category-context-menu__item"
+                onClick={() => void createCategory(contextCategory.id)}
+                role="menuitem"
+                type="button"
+              >
+                <FolderPlus size={15} />
+                新建子文件夹
+              </button>
+              <button
+                className="category-context-menu__item"
+                onClick={() => startCategoryEdit(contextCategory)}
+                role="menuitem"
+                type="button"
+              >
+                <Pencil size={15} />
+                重命名分类
+              </button>
+              <button
+                className="category-context-menu__item danger"
+                onClick={() => void archiveCategory(contextCategory)}
+                role="menuitem"
+                type="button"
+              >
+                <Trash2 size={15} />
+                删除分类
+              </button>
+            </div>
+          </>,
+          document.body
+        )
+      : null;
+
+  const pageActionPanel =
+    pageActionMenu && contextPage && typeof document !== "undefined"
+      ? createPortal(
+          <>
+            <button
+              aria-label="关闭页面操作菜单"
+              className="category-context-backdrop"
+              onClick={() => setPageActionMenu(null)}
+              onContextMenu={(event) => {
+                event.preventDefault();
+                setPageActionMenu(null);
+              }}
+              type="button"
+            />
+            <div
+              aria-label={`${contextPage.title} 页面操作`}
+              className="category-context-menu page-context-menu"
+              role="menu"
+              style={{
+                left: `${pageActionMenu.left}px`,
+                top: `${pageActionMenu.top}px`
+              }}
+            >
+              <button
+                className="category-context-menu__item"
+                onClick={() => {
+                  setPageIconPickerTargetId(contextPage.id);
+                  setPageActionMenu(null);
+                }}
+                role="menuitem"
+                type="button"
+              >
+                <Pencil size={15} />
+                页面图标
+              </button>
+
+              <div className="page-context-menu__section" role="group" aria-label="分类">
+                <div className="page-context-menu__label">移动到分类</div>
+                <button
+                  className={clsx("category-context-menu__item compact", !contextPage.parentId && "active")}
+                  onClick={() => void movePageToCategory(contextPage.id, null)}
+                  role="menuitem"
+                  type="button"
+                >
+                  <Folder size={15} />
+                  未分类
+                </button>
+                {categoryMenuItems.map(({ category, depth }) => (
+                  <button
+                    className={clsx(
+                      "category-context-menu__item compact",
+                      "nested-category-option",
+                      contextPage.parentId === category.id && "active"
+                    )}
+                    key={category.id}
+                    style={{ "--category-option-offset": `${depth * 14}px` } as CSSProperties}
+                    onClick={() => void movePageToCategory(contextPage.id, category.id)}
+                    role="menuitem"
+                    type="button"
+                  >
+                    <Folder size={15} />
+                    {category.title}
+                  </button>
+                ))}
+              </div>
+
+              <button
+                className="category-context-menu__item"
+                onClick={() => {
+                  setPageActionMenu(null);
+                  void exportNotesAsPdf([contextPage.id]);
+                }}
+                role="menuitem"
+                type="button"
+              >
+                <Download size={15} />
+                导出页面
+              </button>
+              <button
+                className="category-context-menu__item"
+                disabled={sharePending}
+                onClick={() => void togglePageShare(contextPage)}
+                role="menuitem"
+                type="button"
+              >
+                {contextPage.shareToken ? <Globe2 size={15} /> : <Link2 size={15} />}
+                {contextPage.shareToken ? "关闭共享" : "开启共享"}
+              </button>
+              <button
+                className="category-context-menu__item danger"
+                onClick={() => void archivePage(contextPage)}
+                role="menuitem"
+                type="button"
+              >
+                <Archive size={15} />
+                归档页面
+              </button>
+            </div>
+          </>,
+          document.body
+        )
+      : null;
+
+  const exportPanel = exportOpen ? (
+    <Suspense fallback={null}>
+      <ExportPanel
+        notes={sortedNotes}
+        onClear={clearExportSelection}
+        onClose={() => setExportOpen(false)}
+        onExportPdf={() => void exportSelectedNotesAsPdf()}
+        onSelectAll={selectAllExportNotes}
+        onSelectVisible={selectVisibleExportNotes}
+        onToggleNote={toggleExportSelection}
+        open
+        pending={exportPending}
+        selectedIds={exportSelection}
+      />
+    </Suspense>
+  ) : null;
+
+  const pageIconPicker = pageIconPickerTargetId && iconPickerTarget ? (
+    <Suspense fallback={null}>
+      <EmojiPackPicker
+        confirmLabel="设为页面图标"
+        onClose={() => setPageIconPickerTargetId(null)}
+        onSelect={(item: EmojiItem) => {
+          if (pageIconPickerTargetId) {
+            void updatePageIcon(pageIconPickerTargetId, item.url);
+          }
+        }}
+        open
+        title="选择页面图标"
+      />
+    </Suspense>
+  ) : null;
+
+  const renderCategoryNode = (
+    category: NoteSummary,
+    depth = 0,
+    visited = new Set<string>()
+  ): ReactNode => {
+    if (visited.has(category.id)) {
+      return null;
+    }
+
+    const nextVisited = new Set(visited);
+    nextVisited.add(category.id);
+    const childCategories = (categoriesByParent.get(category.id) ?? []).filter((child) =>
+      visibleCategoryIds ? visibleCategoryIds.has(child.id) : true
+    );
+    const categoryNotes = pagesByCategory.get(category.id) ?? [];
+    const categoryLimit = getSidebarGroupLimit(category.id);
+    const visibleCategoryNotes = categoryNotes.slice(0, categoryLimit);
+    const isCollapsed = collapsedCategoryIds.includes(category.id);
+    const isEditing = editingCategoryId === category.id;
+    const isCategoryDropTarget = dropTarget?.anchorId === category.id;
+    const showDropAfterAtSubtreeEnd =
+      isCategoryDropTarget &&
+      dropTarget.position === "after" &&
+      !isCollapsed &&
+      (childCategories.length > 0 || categoryNotes.length > 0);
+    const depthStyle =
+      depth > 0
+        ? ({ "--category-depth-offset": `${Math.min(depth, 6) * 18}px` } as CSSProperties)
+        : undefined;
+
+    return (
+      <div
+        className={clsx(
+          "note-group",
+          "category-tree-node",
+          depth > 0 && "nested",
+          depth > 1 && "deep",
+          showDropAfterAtSubtreeEnd && "drop-after-subtree"
+        )}
+        key={category.id}
+        style={depthStyle}
+      >
+        <div
+          className={clsx(
+            "category-row",
+            notesBrowserLocation.kind === "category" &&
+              notesBrowserLocation.categoryId === category.id &&
+              "active",
+            draggedNoteId === category.id && "dragging",
+            isCategoryDropTarget && dropTarget.position === "before" && "drop-before",
+            isCategoryDropTarget &&
+              dropTarget.position === "after" &&
+              !showDropAfterAtSubtreeEnd &&
+              "drop-after",
+            isCategoryDropTarget && dropTarget.position === "inside" && "drop-target"
+          )}
+          data-drop-label={
+            isCategoryDropTarget && dropTarget.position === "inside"
+              ? draggedRecord?.kind === "category"
+                ? "放为子分类"
+                : "放入文件夹"
+              : undefined
+          }
+          data-sidebar-record-id={category.id}
+          draggable={!query.trim() && !isEditing}
+          onDragEnd={handleDragEnd}
+          onDragOver={(event) => handleCategoryDragOver(event, category)}
+          onDragStart={(event) => handleRecordDragStart(event, category)}
+          onDrop={(event) => handleCategoryDrop(event, category)}
+          onContextMenu={(event) => openCategoryActionMenu(event, category)}
+        >
+          <button
+            className="category-toggle"
+            onClick={() => toggleCategoryCollapse(category.id)}
+            type="button"
+          >
+            <ChevronRight
+              className={clsx("category-chevron", isCollapsed && "collapsed")}
+              size={14}
+            />
+            <Folder size={15} />
+          </button>
+
+          {isEditing ? (
+            <input
+              autoFocus
+              className="category-title-input"
+              onBlur={() => void saveCategoryTitle(category.id)}
+              onChange={(event) => setEditingCategoryTitle(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === "Enter") {
+                  event.preventDefault();
+                  void saveCategoryTitle(category.id);
+                }
+
+                if (event.key === "Escape") {
+                  event.preventDefault();
+                  setEditingCategoryId(null);
+                  setEditingCategoryTitle("");
+                }
+              }}
+              type="text"
+              value={editingCategoryTitle}
+            />
+          ) : (
+            <button
+              className="category-label"
+              onClick={(event) => {
+                if (suppressNoteClickRef.current) {
+                  event.preventDefault();
+                  return;
+                }
+                openNotesOverview(category.id);
+              }}
+              type="button"
+            >
+              {category.title}
+            </button>
+          )}
+          <button
+            aria-label={`拖动分类：${category.title}`}
+            className="sidebar-drag-handle"
+            draggable={false}
+            onDragStart={(event) => {
+              event.preventDefault();
+              event.stopPropagation();
+            }}
+            onPointerCancel={(event) => finishTouchRecordDrag(event, true)}
+            onPointerDown={(event) => startTouchRecordDrag(event, category)}
+            onPointerMove={updateTouchRecordDrag}
+            onPointerUp={(event) => finishTouchRecordDrag(event)}
+            title="按住拖动分类"
+            type="button"
+          >
+            <GripVertical size={14} />
+          </button>
+        </div>
+
+        {!isCollapsed ? (
+          <div
+            className={clsx(
+              "category-note-list",
+              draggedNoteId &&
+                dropTarget?.anchorId === category.id &&
+                dropTarget?.parentId === category.id &&
+                dropTarget.position === "append" &&
+                "drop-target"
+            )}
+            data-drop-label={
+              draggedRecord?.kind === "category"
+                ? "放到子分类末尾"
+                : draggedNoteId
+                  ? "放到文件夹末尾"
+                  : undefined
+            }
+            data-touch-drop-anchor-id={category.id}
+            data-touch-drop-group="true"
+            data-touch-drop-parent-id={category.id}
+            onDragOver={(event) => handleGroupDragOver(event, category.id, category.id)}
+            onDrop={(event) => handleGroupDrop(event, category.id, category.id)}
+          >
+            {childCategories.map((childCategory) =>
+              renderCategoryNode(childCategory, depth + 1, nextVisited)
+            )}
+            {categoryNotes.length > 0 ? (
+              visibleCategoryNotes.map((note) => renderPageNode(note, depth + 1))
+            ) : childCategories.length === 0 ? (
+              <div className="category-empty">这个文件夹下还没有内容</div>
+            ) : null}
+            {categoryNotes.length > categoryLimit ? (
+              <button
+                className="sidebar-show-more"
+                onClick={() => showMoreInSidebarGroup(category.id, categoryNotes.length)}
+                type="button"
+              >
+                显示更多（{categoryNotes.length - categoryLimit}）
+              </button>
+            ) : null}
+          </div>
+        ) : null}
+      </div>
+    );
+  };
+
+  const renderPageNode = (
+    note: NoteSummary,
+    depth = 0,
+    visited = new Set<string>()
+  ): ReactNode => {
+    if (visited.has(note.id)) {
+      return null;
+    }
+
+    const nextVisited = new Set(visited);
+    nextVisited.add(note.id);
+    const childNotes = pagesByCategory.get(note.id) ?? [];
+    const childLimit = getSidebarGroupLimit(note.id);
+    const visibleChildNotes = childNotes.slice(0, childLimit);
+    const nested = depth > 0;
+    const showDropAfterAtSubtreeEnd =
+      childNotes.length > 0 &&
+      dropTarget?.anchorId === note.id &&
+      dropTarget.position === "after";
+    const depthStyle =
+      depth > 1
+        ? ({ "--note-depth-offset": `${Math.min(depth, 6) * 18}px` } as CSSProperties)
+        : undefined;
+
+    return (
+      <Fragment key={note.id}>
+        <div
+          className={clsx(
+            "note-row",
+            nested && "nested",
+            depth > 1 && "deep",
+            notesBrowserLocation.kind === "page" && note.id === selectedId && "active",
+            draggedNoteId === note.id && "dragging",
+            dropTarget?.anchorId === note.id && dropTarget.position === "before" && "drop-before",
+            dropTarget?.anchorId === note.id &&
+              dropTarget.position === "after" &&
+              !showDropAfterAtSubtreeEnd &&
+              "drop-after",
+            dropTarget?.anchorId === note.id && dropTarget.position === "inside" && "drop-inside"
+          )}
+          draggable={!query.trim()}
+          data-sidebar-record-id={note.id}
+          onDragEnd={handleDragEnd}
+          onDragOver={(event) => handleNoteDragOver(event, note)}
+          onDragStart={(event) => handleRecordDragStart(event, note)}
+          onDrop={(event) => handleNoteDrop(event, note)}
+          onContextMenu={(event) => openPageActionMenu(event, note)}
+          style={depthStyle}
+        >
+          <button
+            className="note-row-main"
+            onClick={(event) => {
+              if (suppressNoteClickRef.current) {
+                event.preventDefault();
+                return;
+              }
+              void selectNote(note.id);
+            }}
+            type="button"
+          >
+            <NoteIcon icon={normalizePageIcon(note.icon)} />
+            <span className="note-row-text">
+              <strong>{note.title}</strong>
+              <span className="note-row-subline">
+                <small>{formatRelative(note.updatedAt)}</small>
+                {note.shareToken ? <em className="mini-share-badge">已共享</em> : null}
+              </span>
+            </span>
+          </button>
+          <button
+            aria-label={`拖动页面：${note.title}`}
+            className="sidebar-drag-handle"
+            draggable={false}
+            onDragStart={(event) => {
+              event.preventDefault();
+              event.stopPropagation();
+            }}
+            onPointerCancel={(event) => finishTouchRecordDrag(event, true)}
+            onPointerDown={(event) => startTouchRecordDrag(event, note)}
+            onPointerMove={updateTouchRecordDrag}
+            onPointerUp={(event) => finishTouchRecordDrag(event)}
+            title="按住拖动页面"
+            type="button"
+          >
+            <GripVertical size={14} />
+          </button>
+        </div>
+        {childNotes.length > 0 ? (
+          <div
+            className={clsx(
+              "note-child-list",
+              draggedNoteId &&
+                dropTarget?.anchorId === note.id &&
+                dropTarget?.parentId === note.id &&
+                dropTarget.position === "append" &&
+                "drop-target",
+              showDropAfterAtSubtreeEnd && "drop-after-subtree",
+              showDropAfterAtSubtreeEnd && nested && "drop-after-subtree-nested",
+              showDropAfterAtSubtreeEnd && depth > 1 && "drop-after-subtree-deep"
+            )}
+            data-drop-label={draggedRecord?.kind === "page" ? "放为子页面" : undefined}
+            data-touch-drop-anchor-id={note.id}
+            data-touch-drop-group="true"
+            data-touch-drop-parent-id={note.id}
+            onDragOver={(event) => handleGroupDragOver(event, note.id, note.id)}
+            onDrop={(event) => handleGroupDrop(event, note.id, note.id)}
+            style={showDropAfterAtSubtreeEnd ? depthStyle : undefined}
+          >
+            {visibleChildNotes.map((childNote) =>
+              renderPageNode(childNote, depth + 1, nextVisited)
+            )}
+            {childNotes.length > childLimit ? (
+              <button
+                className="sidebar-show-more"
+                onClick={() => showMoreInSidebarGroup(note.id, childNotes.length)}
+                type="button"
+              >
+                显示更多（{childNotes.length - childLimit}）
+              </button>
+            ) : null}
+          </div>
+        ) : null}
+      </Fragment>
+    );
+  };
+
+  if (isPublicView) {
+    if (publicPending) {
+      return (
+        <main className="center-screen">
+          <Sparkles className="pulse-icon" size={28} />
+          <span>正在打开分享页面</span>
+        </main>
+      );
+    }
+
+    if (publicPasswordRequired) {
+      return (
+        <main className="public-shell">
+          <section className="public-page">
+            <form
+              className="public-empty public-password-card"
+              onSubmit={(event) => {
+                event.preventDefault();
+                if (initialShareToken && publicPassword.trim()) {
+                  void loadPublicNote(initialShareToken, initialPublicNoteId, publicPassword);
+                }
+              }}
+            >
+              <Lock size={24} />
+              <h1>此分享页面受密码保护</h1>
+              <p>请输入分享者提供的密码后查看内容。</p>
+              <input
+                autoComplete="current-password"
+                autoFocus
+                onChange={(event) => setPublicPassword(event.target.value)}
+                placeholder="分享密码"
+                type="password"
+                value={publicPassword}
+              />
+              <button className="primary-button" disabled={!publicPassword.trim()} type="submit">
+                查看页面
+              </button>
+            </form>
+          </section>
+        </main>
+      );
+    }
+
+    if (publicError || !publicNote) {
+      return (
+        <main className="public-shell">
+          <section className="public-page">
+            <div className="public-empty">
+              <Globe2 size={22} />
+              <h1>这个分享链接暂时不可用</h1>
+              <p>{publicError ?? "该页面可能已关闭分享，或链接已经失效。"}</p>
+            </div>
+          </section>
+        </main>
+      );
+    }
+
+    return (
+      <main className="public-shell">
+        <section className="public-page">
+          <article className="public-note">
+            <div className="public-note-head">
+              <NoteIcon className="public-note-icon" icon={normalizePageIcon(publicNote.icon)} />
+              <div className="public-note-copy">
+                <h1 className={`title-size-${publicNote.titleSize}`}>{publicNote.title}</h1>
+              </div>
+            </div>
+
+            <Suspense fallback={<LazyViewFallback label="正在加载分享内容" />}>
+              <NotebookEditor
+                key={`public-${publicNote.id}`}
+                note={publicNote}
+                onChange={() => undefined}
+                readOnly
+              />
+            </Suspense>
+          </article>
+        </section>
+      </main>
+    );
+  }
+
+  if (isBooting) {
+    return (
+      <main className="center-screen">
+        <Sparkles className="pulse-icon" size={28} />
+        <span>正在打开工作区</span>
+      </main>
+    );
+  }
+
+  if (isLocked) {
+    return (
+      <main className="lock-screen">
+        <section className="auth-shell">
+          <section className="auth-showcase">
+            <div className="auth-brand">
+              <div className="brand-mark">MN</div>
+              <div className="auth-brand-copy">
+                <strong>Mini Notes</strong>
+                <span>在线笔记空间</span>
+              </div>
+            </div>
+
+            <div className="auth-copy-block">
+              <h1>继续你的空间。</h1>
+            </div>
+
+            <div className="auth-frame" aria-hidden="true">
+              <div className="auth-window">
+                <div className="auth-window-bar">
+                  <div className="auth-window-dots">
+                    <span />
+                    <span />
+                    <span />
+                  </div>
+                  <div className="auth-window-search">搜索页面</div>
+                  <div className="auth-window-badge">MN</div>
+                </div>
+
+                <div className="auth-window-body">
+                  <div className="auth-window-sidebar">
+                    <div className="auth-window-sidebar-title">最近页面</div>
+                    <div className="auth-window-list">
+                      <div className="auth-window-row active">
+                        <span>📝</span>
+                        <div>
+                          <strong>今天的工作台</strong>
+                          <small>刚刚更新</small>
+                        </div>
+                      </div>
+                      <div className="auth-window-row">
+                        <span>📚</span>
+                        <div>
+                          <strong>资料库</strong>
+                          <small>4 个文件</small>
+                        </div>
+                      </div>
+                      <div className="auth-window-row">
+                        <span>✅</span>
+                        <div>
+                          <strong>上线检查单</strong>
+                          <small>共享已开启</small>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="auth-window-main">
+                    <div className="auth-window-toolbar">
+                      <span className="auth-window-tag">私人空间</span>
+                      <div className="auth-window-actions">
+                        <span>共享</span>
+                        <span>保存中</span>
+                      </div>
+                    </div>
+
+                    <div className="auth-window-title">今天的工作台</div>
+                    <div className="auth-window-lines">
+                      <span className="w-100" />
+                      <span className="w-82" />
+                      <span className="w-92" />
+                      <span className="w-68" />
+                    </div>
+
+                    <div className="auth-meta-row">
+                      <span className="auth-meta-pill">
+                        <ShieldCheck size={14} />
+                        账号隔离
+                      </span>
+                      <span className="auth-meta-pill">
+                        <UploadCloud size={14} />
+                        文件上传
+                      </span>
+                      <span className="auth-meta-pill">
+                        <Globe2 size={14} />
+                        单页分享
+                      </span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </section>
+
+          <form className="auth-surface" onSubmit={submitAuth}>
+            <div className="auth-surface-top">
+              <div className="lock-mark">
+                <Lock size={22} />
+              </div>
+              <h2>{authMode === "register" ? "创建账号" : "登录 Mini Notes"}</h2>
+            </div>
+
+            <div className="auth-tabs" role="group" aria-label="登录方式">
+              <button
+                aria-pressed={authMode === "login"}
+                className={clsx("auth-tab", authMode === "login" && "active")}
+                onClick={() => {
+                  setAuthMode("login");
+                  setAppError(null);
+                }}
+                type="button"
+              >
+                登录
+              </button>
+              <button
+                aria-pressed={authMode === "register"}
+                className={clsx("auth-tab", authMode === "register" && "active")}
+                onClick={() => {
+                  setAuthMode("register");
+                  setAppError(null);
+                }}
+                type="button"
+              >
+                注册
+              </button>
+            </div>
+
+            <label className="auth-field">
+              <span>用户名</span>
+              <input
+                autoComplete="username"
+                autoFocus
+                className="token-input"
+                onChange={(event) => setAuthUsername(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter" && !event.nativeEvent.isComposing) {
+                    event.preventDefault();
+                    authPasswordInputRef.current?.focus();
+                  }
+                }}
+                placeholder="输入用户名"
+                ref={authUsernameInputRef}
+                type="text"
+                value={authUsername}
+              />
+            </label>
+
+            <label className="auth-field">
+              <span>密码</span>
+              <input
+                autoComplete={authMode === "register" ? "new-password" : "current-password"}
+                className="token-input"
+                onChange={(event) => setAuthPassword(event.target.value)}
+                onKeyDown={(event) => {
+                  if (
+                    authMode === "register" &&
+                    event.key === "Enter" &&
+                    !event.nativeEvent.isComposing
+                  ) {
+                    event.preventDefault();
+                    authInviteCodeInputRef.current?.focus();
+                  }
+                }}
+                placeholder="至少 6 位"
+                ref={authPasswordInputRef}
+                type="password"
+                value={authPassword}
+              />
+            </label>
+
+            {authMode === "register" ? (
+              <label className="auth-field">
+                <span>邀请码</span>
+                <input
+                  className="token-input"
+                  onChange={(event) => setAuthInviteCode(event.target.value)}
+                  placeholder="输入邀请码"
+                  ref={authInviteCodeInputRef}
+                  type="password"
+                  value={authInviteCode}
+                />
+              </label>
+            ) : null}
+
+            {appError ? (
+              <div className="form-error-panel" role="alert">
+                <p className="form-error">{appError}</p>
+              </div>
+            ) : null}
+
+            <button className="primary-button auth-submit" disabled={authPending} type="submit">
+              <span>{authPending ? "提交中" : authMode === "register" ? "验证并注册" : "进入工作区"}</span>
+              <ArrowRight size={16} />
+            </button>
+          </form>
+        </section>
+      </main>
+    );
+  }
+
+  return (
+    <main
+      className={clsx(
+        "app-shell",
+        sidebarCollapsed && "sidebar-collapsed",
+        mobileSidebarOpen && "mobile-sidebar-open",
+        workspaceView !== "notes" && !workspaceSidebarExpanded && "workspace-focused"
+      )}
+    >
+      <button
+        aria-label="关闭页面列表"
+        className="mobile-sidebar-backdrop"
+        onClick={() => setMobileSidebarOpen(false)}
+        tabIndex={mobileSidebarOpen ? 0 : -1}
+        type="button"
+      />
+      <aside className="sidebar" aria-label="页面侧边栏">
+        <div className="brand-row">
+          <div className="brand-mark">MN</div>
+          <div className="brand-copy">
+            <strong>Mini Notes</strong>
+            <span>{sessionUser?.username ?? "当前账号"} · {noteCount} 篇</span>
+          </div>
+          <button
+            aria-label="关闭页面列表"
+            className="icon-button mobile-sidebar-close"
+            onClick={() => setMobileSidebarOpen(false)}
+            type="button"
+          >
+            <PanelLeftClose size={18} />
+          </button>
+        </div>
+
+        <button
+          aria-label={
+            sidebarCollapsed || (workspaceView !== "notes" && !workspaceSidebarExpanded)
+              ? "展开侧边栏"
+              : "收起侧边栏"
+          }
+          aria-pressed={sidebarCollapsed || (workspaceView !== "notes" && !workspaceSidebarExpanded)}
+          className="sidebar-collapse-button"
+          onClick={() => {
+            if (workspaceView !== "notes" && !workspaceSidebarExpanded) {
+              setWorkspaceSidebarExpanded(true);
+              setSidebarCollapsed(false);
+              return;
+            }
+
+            setSidebarCollapsed((current) => !current);
+          }}
+          title={
+            workspaceView !== "notes" && !workspaceSidebarExpanded
+              ? "展开侧边栏"
+              : sidebarCollapsed
+                ? "展开侧边栏"
+                : "收起侧边栏"
+          }
+          type="button"
+        >
+          {sidebarCollapsed || (workspaceView !== "notes" && !workspaceSidebarExpanded) ? (
+            <PanelLeftOpen size={17} />
+          ) : (
+            <PanelLeftClose size={17} />
+          )}
+        </button>
+
+        <label
+          className="search-box"
+          onClick={() => {
+            if (sidebarCollapsed) {
+              setSidebarCollapsed(false);
+            }
+          }}
+          title="搜索页面"
+        >
+          <Search size={16} />
+          <input
+            onChange={(event) => setQuery(event.target.value)}
+            placeholder="搜索页面"
+            value={query}
+          />
+        </label>
+
+        <button
+          aria-label="新页面"
+          className="new-page-button"
+          onClick={() => void createNewNote()}
+          title="新页面"
+          type="button"
+        >
+          <Plus size={16} />
+          <span className="sidebar-action-label">新页面</span>
+        </button>
+
+        <button
+          aria-label="新建分类"
+          className="new-category-button"
+          onClick={() => void createCategory()}
+          title="新建分类"
+          type="button"
+        >
+          <FolderPlus size={16} />
+          <span className="sidebar-action-label">新建分类</span>
+        </button>
+
+        <div className="sidebar-view-toggle">
+          <button
+            className={clsx("toolbar-button sidebar-view-button", workspaceView === "notes" && "active")}
+            onClick={() => {
+              setWorkspaceView("notes");
+              setMobileSidebarOpen(false);
+            }}
+            title="笔记"
+            type="button"
+          >
+            <FileText size={15} />
+            笔记
+          </button>
+          <button
+            className={clsx("toolbar-button sidebar-view-button", workspaceView === "bible" && "active")}
+            onClick={() => {
+              setWorkspaceView("bible");
+              setMobileSidebarOpen(false);
+            }}
+            title="读经"
+            type="button"
+          >
+            <BookOpen size={15} />
+            读经
+          </button>
+          <button
+            className={clsx("toolbar-button sidebar-view-button", workspaceView === "ten-minute" && "active")}
+            onClick={() => {
+              setWorkspaceView("ten-minute");
+              setMobileSidebarOpen(false);
+            }}
+            title="10分钟"
+            type="button"
+          >
+            <Timer size={17} strokeWidth={2.2} />
+            10分钟
+          </button>
+          <button
+            className={clsx("toolbar-button sidebar-view-button", workspaceView === "revelation-qa" && "active")}
+            onClick={() => {
+              setWorkspaceView("revelation-qa");
+              setMobileSidebarOpen(false);
+            }}
+            title="启示录问答库"
+            type="button"
+          >
+            <LibraryBig size={16} />
+            问答库
+          </button>
+          <button
+            className={clsx(
+              "toolbar-button sidebar-view-button",
+              workspaceView === "revelation-memorization" && "active"
+            )}
+            onClick={() => {
+              setWorkspaceView("revelation-memorization");
+              setMobileSidebarOpen(false);
+            }}
+            title="启示录背诵默写"
+            type="button"
+          >
+            <Pencil size={16} />
+            背诵默写
+          </button>
+          <button
+            className={clsx("toolbar-button sidebar-view-button", workspaceView === "mindmap" && "active")}
+            disabled={!draft}
+            onClick={() => {
+              setWorkspaceView("mindmap");
+              setMobileSidebarOpen(false);
+            }}
+            title={draft ? "当前笔记的思维导图" : "请先选择一篇笔记"}
+            type="button"
+          >
+            <Network size={16} />
+            思维导图
+          </button>
+        </div>
+
+        <nav
+          aria-label="页面列表"
+          className={clsx("note-list", draggedNoteId && "is-dragging")}
+          ref={noteListRef}
+        >
+          {query.trim() ? (
+            <>
+              {visibleNotes.slice(0, sidebarSearchLimit).map((note) => (
+            <button
+              className={clsx("note-row", note.id === selectedId && "active")}
+              key={note.id}
+              onClick={() => void selectNote(note.id)}
+              onContextMenu={(event) => openPageActionMenu(event, note)}
+              type="button"
+            >
+              <NoteIcon icon={normalizePageIcon(note.icon)} />
+              <span className="note-row-text">
+                <strong>{note.title}</strong>
+                <span className="note-row-subline">
+                  <small>{formatRelative(note.updatedAt)}</small>
+                  {note.shareToken ? <em className="mini-share-badge">已共享</em> : null}
+                </span>
+              </span>
+            </button>
+              ))}
+              {visibleNotes.length > sidebarSearchLimit ? (
+                <button
+                  className="sidebar-show-more"
+                  onClick={() =>
+                    setSidebarSearchLimit((current) =>
+                      Math.min(visibleNotes.length, current + SIDEBAR_SEARCH_PAGE_SIZE)
+                    )
+                  }
+                  type="button"
+                >
+                  显示更多（{visibleNotes.length - sidebarSearchLimit}）
+                </button>
+              ) : null}
+            </>
+          ) : (
+            <>
+              <div
+                className={clsx(
+                  "note-group",
+                  "uncategorized-drop-zone",
+                  uncategorizedNotes.length === 0 && "empty",
+                  draggedNoteId &&
+                    dropTarget?.anchorId === UNCATEGORIZED_GROUP_KEY &&
+                    dropTarget?.parentId === null &&
+                    dropTarget.position === "append" &&
+                    "drop-target"
+                )}
+                data-drop-label={
+                  draggedRecord?.kind === "category"
+                    ? "移到最外层"
+                    : draggedNoteId
+                      ? "放到未分类"
+                      : undefined
+                }
+                data-touch-drop-anchor-id={UNCATEGORIZED_GROUP_KEY}
+                data-touch-drop-group="true"
+                data-touch-drop-parent-id=""
+                onDragOver={(event) =>
+                  handleGroupDragOver(event, null, UNCATEGORIZED_GROUP_KEY)
+                }
+                onDrop={(event) => handleGroupDrop(event, null, UNCATEGORIZED_GROUP_KEY)}
+              >
+                <div className="note-group-title">未分类</div>
+                {uncategorizedNotes.length > 0 ? (
+                  uncategorizedNotes
+                    .slice(0, getSidebarGroupLimit(null))
+                    .map((note) => renderPageNode(note))
+                ) : (
+                  <div className="category-empty">
+                    {draggedRecord?.kind === "category"
+                      ? "拖到这里移到最外层"
+                      : draggedNoteId
+                        ? "拖到这里移出分类"
+                        : "暂无未分类页面"}
+                  </div>
+                )}
+                {uncategorizedNotes.length > getSidebarGroupLimit(null) ? (
+                  <button
+                    className="sidebar-show-more"
+                    onClick={() => showMoreInSidebarGroup(null, uncategorizedNotes.length)}
+                    type="button"
+                  >
+                    显示更多（{uncategorizedNotes.length - getSidebarGroupLimit(null)}）
+                  </button>
+                ) : null}
+              </div>
+
+              {visibleCategories.map((category) => renderCategoryNode(category))}
+            </>
+          )}
+        </nav>
+      </aside>
+
+      <nav className="mobile-bottom-nav" aria-label="移动端主导航">
+        <button
+          className={clsx("mobile-bottom-nav__item", workspaceView === "notes" && isNotesOverview && "active")}
+          onClick={() => {
+            setWorkspaceView("notes");
+            openNotesOverview();
+            setMobileSidebarOpen(false);
+          }}
+          type="button"
+        >
+          <Home size={20} strokeWidth={2.1} />
+          <span>首页</span>
+        </button>
+        <button
+          className={clsx("mobile-bottom-nav__item", workspaceView === "notes" && !isNotesOverview && "active")}
+          onClick={() => setMobileSidebarOpen(true)}
+          type="button"
+        >
+          <FileText size={20} strokeWidth={2.1} />
+          <span>笔记</span>
+        </button>
+        <button
+          aria-label="新建页面"
+          className="mobile-bottom-nav__compose"
+          onClick={() => void createNewNote()}
+          type="button"
+        >
+          <Plus size={24} strokeWidth={2.4} />
+        </button>
+        <button
+          className={clsx("mobile-bottom-nav__item", workspaceView === "bible" && "active")}
+          onClick={() => {
+            setWorkspaceView("bible");
+            setMobileSidebarOpen(false);
+          }}
+          type="button"
+        >
+          <BookOpen size={20} strokeWidth={2.1} />
+          <span>读经</span>
+        </button>
+        <button
+          className="mobile-bottom-nav__item"
+          onClick={() => setMobileSidebarOpen(true)}
+          type="button"
+        >
+          <MoreHorizontal size={20} strokeWidth={2.1} />
+          <span>更多</span>
+        </button>
+      </nav>
+
+      <section className="workspace">
+        <header className={clsx("topbar", !draft && "is-compact")}>
+          <button
+            aria-expanded={mobileSidebarOpen}
+            aria-label="打开页面列表"
+            className="icon-button mobile-sidebar-trigger"
+            onClick={() => setMobileSidebarOpen(true)}
+            type="button"
+          >
+            <Menu size={19} />
+          </button>
+          <div className="topbar-left">
+            {!isAdminView &&
+            !isBibleView &&
+            !isTenMinuteView &&
+            !isRevelationQaView &&
+            !isMindMapView &&
+            (draft || isNotesOverview) ? (
+              <nav className="note-breadcrumb" aria-label="页面路径" ref={breadcrumbRef}>
+                {notesBrowserLocation.kind === "root" ? (
+                  <span
+                    aria-current="page"
+                    className="note-breadcrumb__item current root"
+                    title="笔记首页"
+                  >
+                    <FileText size={15} />
+                    <span>笔记</span>
+                  </span>
+                ) : (
+                  <button
+                    className="note-breadcrumb__item root"
+                    onClick={() => openNotesOverview()}
+                    title="返回笔记首页"
+                    type="button"
+                  >
+                    <FileText size={15} />
+                    <span>笔记</span>
+                  </button>
+                )}
+                {breadcrumbRecords.map((record, index) => {
+                  const isCurrent = index === breadcrumbRecords.length - 1;
+                  return (
+                    <Fragment key={record.id}>
+                      <ChevronRight className="note-breadcrumb__separator" size={14} />
+                      {isCurrent ? (
+                        <span
+                          aria-current="page"
+                          className="note-breadcrumb__item current"
+                          title={record.title}
+                        >
+                          {record.kind === "category" ? (
+                            <Folder size={14} />
+                          ) : (
+                            <NoteIcon icon={normalizePageIcon(record.icon)} />
+                          )}
+                          <span>{record.title || "未命名"}</span>
+                        </span>
+                      ) : (
+                        <button
+                          className="note-breadcrumb__item"
+                          onClick={() => {
+                            if (record.kind === "page") {
+                              void selectNote(record.id);
+                            } else {
+                              openNotesOverview(record.id);
+                            }
+                          }}
+                          title={record.title}
+                          type="button"
+                        >
+                          {record.kind === "category" ? (
+                            <Folder size={14} />
+                          ) : (
+                            <NoteIcon icon={normalizePageIcon(record.icon)} />
+                          )}
+                          <span>{record.title || "未命名"}</span>
+                        </button>
+                      )}
+                    </Fragment>
+                  );
+                })}
+              </nav>
+            ) : (
+              <>
+                {isAdminView ? (
+                  <ShieldCheck size={17} />
+                ) : isBibleView ? (
+                  <BookOpen size={17} />
+                ) : isTenMinuteView ? (
+                  <Timer size={17} />
+                ) : isRevelationQaView ? (
+                  <LibraryBig size={17} />
+                ) : isRevelationMemorizationView ? (
+                  <Pencil size={17} />
+                ) : isMindMapView ? (
+                  <Network size={17} />
+                ) : (
+                  <FileText size={17} />
+                )}
+                <span>
+                  {isAdminView
+                    ? "管理员后台"
+                    : isBibleView
+                      ? "读经"
+                      : isTenMinuteView
+                        ? "10分钟"
+                        : isRevelationQaView
+                          ? "启示录问答库"
+                          : isRevelationMemorizationView
+                            ? "启示录背诵默写"
+                          : isMindMapView
+                            ? "思维导图"
+                          : noteCount > 0
+                            ? "选择页面"
+                            : "还没有页面"}
+                </span>
+              </>
+            )}
+          </div>
+
+          <div className="topbar-actions">
+            {isAdminView ? (
+              <>
+                <button
+                  className="toolbar-button"
+                  onClick={() => setWorkspaceView("notes")}
+                  type="button"
+                >
+                  <FileText size={16} />
+                  返回笔记
+                </button>
+              </>
+            ) : isBibleView || isTenMinuteView || isRevelationQaView || isRevelationMemorizationView || isMindMapView ? (
+              <>
+                <button
+                  className="toolbar-button"
+                  onClick={() => setWorkspaceView("notes")}
+                  type="button"
+                >
+                  <FileText size={16} />
+                  返回笔记
+                </button>
+              </>
+            ) : isNotesOverview ? null : (
+              <>
+                {draft ? (
+                  <div className="topbar-history" aria-label="页面历史">
+                    <button
+                      aria-label="撤销页面上一步操作"
+                      className="icon-button page-history-button"
+                      disabled={!canUndoPageChange}
+                      onClick={undoPageChange}
+                      title="撤销页面上一步操作"
+                      type="button"
+                    >
+                      <Undo2 size={17} />
+                    </button>
+                    <button
+                      aria-label="恢复页面下一步操作"
+                      className="icon-button page-history-button"
+                      disabled={!canRedoPageChange}
+                      onClick={redoPageChange}
+                      title="恢复页面下一步操作"
+                      type="button"
+                    >
+                      <Redo2 size={17} />
+                    </button>
+                  </div>
+                ) : null}
+
+                {draft ? (
+                  <button
+                    aria-label="查找替换"
+                    className={clsx("toolbar-button", findReplaceOpen && "active")}
+                    onClick={() => {
+                      setExportOpen(false);
+                      setShareOpen(false);
+                      setShareCopied(false);
+                      setCategoryMenuOpen(false);
+                      setCategoryActionMenu(null);
+                      setFindReplaceOpen((current) => !current);
+                    }}
+                    ref={findReplaceButtonRef}
+                    title="查找替换"
+                    type="button"
+                  >
+                    <Search size={16} />
+                    查找替换
+                  </button>
+                ) : null}
+
+                {draft ? (
+                  <div className="topbar-category-picker">
+                    {categoryMenuOpen ? (
+                      <button
+                        aria-label="关闭分类菜单"
+                        className="topbar-category-backdrop"
+                        onClick={() => setCategoryMenuOpen(false)}
+                        type="button"
+                      />
+                    ) : null}
+                    <button
+                      aria-expanded={categoryMenuOpen}
+                      aria-haspopup="menu"
+                      className={clsx("toolbar-button topbar-category-button", categoryMenuOpen && "active")}
+                      onClick={() => {
+                        setExportOpen(false);
+                        setShareOpen(false);
+                        setShareCopied(false);
+                        setFindReplaceOpen(false);
+                        setCategoryActionMenu(null);
+                        setCategoryMenuOpen((current) => !current);
+                      }}
+                      title="选择所在分类"
+                      type="button"
+                    >
+                      <Folder size={16} />
+                      <span>{selectedCategory?.title ?? "未分类"}</span>
+                      <ChevronDown size={15} />
+                    </button>
+                    {categoryMenuOpen ? (
+                      <div className="topbar-category-menu" role="menu">
+                        <button
+                          className={clsx("topbar-category-menu__item", !draft.parentId && "active")}
+                          onClick={() => {
+                            void movePageToCategory(draft.id, null);
+                            setCategoryMenuOpen(false);
+                          }}
+                          role="menuitem"
+                          type="button"
+                        >
+                          未分类
+                        </button>
+                        {categoryMenuItems.map(({ category, depth }) => (
+                          <button
+                            className={clsx(
+                              "topbar-category-menu__item",
+                              "nested-category-option",
+                              draft.parentId === category.id && "active"
+                            )}
+                            key={category.id}
+                            style={{ "--category-option-offset": `${depth * 14}px` } as CSSProperties}
+                            onClick={() => {
+                              void movePageToCategory(draft.id, category.id);
+                              setCategoryMenuOpen(false);
+                            }}
+                            role="menuitem"
+                            type="button"
+                          >
+                            {category.title}
+                          </button>
+                        ))}
+                      </div>
+                    ) : null}
+                  </div>
+                ) : null}
+
+                {noteCount > 0 ? (
+                  <button
+                    aria-label="批量导出页面"
+                    className={clsx("toolbar-button", exportOpen && "active")}
+                    onClick={openExportPanel}
+                    title="批量导出页面"
+                    type="button"
+                  >
+                    <Download size={16} />
+                    导出
+                  </button>
+                ) : null}
+
+                {draft ? (
+                  <>
+                    {draft.shareToken ? (
+                      <span className="share-state">
+                        <Globe2 size={15} />
+                        共享中
+                      </span>
+                    ) : null}
+
+                    <span className={clsx("save-state", saveStatus)}>
+                      {saveStatus === "saving" ? <Clock3 size={15} /> : <Check size={15} />}
+                      {saveLabel(saveStatus)}
+                    </span>
+
+                    <div className="topbar-stack">
+                      <button
+                        aria-label="共享当前页面"
+                        className={clsx("toolbar-button", shareOpen && "active")}
+                        onClick={openSharePanel}
+                        ref={shareButtonRef}
+                        title="共享当前页面"
+                        type="button"
+                      >
+                        {draft.shareToken ? <Globe2 size={16} /> : <Link2 size={16} />}
+                        共享
+                      </button>
+                    </div>
+                    {sharePanel}
+
+                    <button
+                      aria-label="归档页面"
+                      className="icon-button"
+                      onClick={() => void archiveCurrent()}
+                      title="归档页面"
+                      type="button"
+                    >
+                      <Archive size={17} />
+                    </button>
+                  </>
+                ) : null}
+              </>
+            )}
+
+            <button
+              aria-label="退出登录"
+              className="icon-button"
+              onClick={() => void logoutWorkspace()}
+              title="退出登录"
+              type="button"
+            >
+              <LogOut size={17} />
+            </button>
+          </div>
+        </header>
+
+        {appError && !isAdminView ? (
+          <div className="error-strip">
+            <WifiOff size={16} />
+            <span>{appError}</span>
+          </div>
+        ) : null}
+
+        <Suspense fallback={<LazyViewFallback label="正在加载页面" />}>
+          {isAdminView && sessionUser ? (
+            <AdminPanel currentUser={sessionUser} onSessionRefresh={bootstrap} />
+        ) : isBibleView ? (
+          <BibleReader onError={setAppError} />
+        ) : isTenMinuteView ? (
+          <TenMinuteReader onError={setAppError} />
+        ) : isRevelationQaView ? (
+          <RevelationQaLibrary onError={setAppError} />
+        ) : isRevelationMemorizationView ? (
+          <RevelationMemorization onError={setAppError} />
+        ) : isMindMapView && draft ? (
+          <MindMapView note={draft} />
+        ) : isMindMapView ? (
+          <section className="workspace-empty">
+            <div className="workspace-empty-panel">
+              <Network size={28} />
+              <h2>请先选择一篇笔记</h2>
+              <p>思维导图会按照笔记中的标题层级自动生成。</p>
+              <button className="primary-button" onClick={() => setWorkspaceView("notes")} type="button">
+                返回笔记
+              </button>
+            </div>
+          </section>
+        ) : isNotesOverview ? (
+          <section className="notes-overview">
+            <header className="notes-overview__hero">
+              <div className="notes-overview__identity">
+                <span className="notes-overview__icon" aria-hidden="true">
+                  {overviewCategory ? <Folder size={26} /> : <FileText size={26} />}
+                </span>
+                <div>
+                  <span className="notes-overview__eyebrow">
+                    {overviewCategory ? "分类概览" : "笔记空间"}
+                  </span>
+                  <h1>{overviewCategory?.title ?? "笔记首页"}</h1>
+                  <p>
+                    {overviewCategories.length + overviewPages.length > 0
+                      ? `${overviewCategories.length} 个分类 · ${overviewPages.length} 个页面`
+                      : "这里暂时还没有内容"}
+                  </p>
+                </div>
+              </div>
+              <div className="notes-overview__actions">
+                <button
+                  className="toolbar-button"
+                  onClick={() => void createCategory(overviewParentId)}
+                  type="button"
+                >
+                  <FolderPlus size={16} />
+                  新建分类
+                </button>
+                <button
+                  className="primary-button"
+                  onClick={() => void createNewNote(overviewParentId)}
+                  type="button"
+                >
+                  <Plus size={16} />
+                  新建页面
+                </button>
+              </div>
+            </header>
+
+            {overviewCategories.length > 0 || overviewPages.length > 0 ? (
+              <div className="notes-overview__grid">
+                {overviewCategories.map((category) => {
+                  const childCount =
+                    (categoriesByParent.get(category.id)?.length ?? 0) +
+                    (allPagesByParent.get(category.id)?.length ?? 0);
+
+                  return (
+                    <button
+                      className="notes-overview-card category"
+                      key={category.id}
+                      onClick={() => openNotesOverview(category.id)}
+                      type="button"
+                    >
+                      <span className="notes-overview-card__icon">
+                        <Folder size={20} />
+                      </span>
+                      <span className="notes-overview-card__copy">
+                        <strong>{category.title || "未命名分类"}</strong>
+                        <small>{childCount > 0 ? `${childCount} 个项目` : "空分类"}</small>
+                      </span>
+                      <ArrowRight className="notes-overview-card__arrow" size={17} />
+                    </button>
+                  );
+                })}
+
+                {overviewPages.map((note) => (
+                  <button
+                    className="notes-overview-card page-link"
+                    key={note.id}
+                    onClick={() => void selectNote(note.id)}
+                    type="button"
+                  >
+                    <span className="notes-overview-card__icon page-icon">
+                      <NoteIcon icon={normalizePageIcon(note.icon)} />
+                    </span>
+                    <span className="notes-overview-card__copy">
+                      <strong>{note.title || "未命名"}</strong>
+                      <small>{formatRelative(note.updatedAt)}</small>
+                    </span>
+                    <ArrowRight className="notes-overview-card__arrow" size={17} />
+                  </button>
+                ))}
+              </div>
+            ) : (
+              <div className="notes-overview__empty">
+                <span className="notes-overview__empty-icon">
+                  <Folder size={24} />
+                </span>
+                <h2>从这里开始整理</h2>
+                <p>新建一个页面或分类，它会出现在当前层级。</p>
+              </div>
+            )}
+          </section>
+        ) : draft && !isLoadingNote ? (
+          <article className={clsx("page", draftCommentCount > 0 && "has-comments")}>
+            <div className="page-heading-layout">
+              <div className="page-heading-main">
+                <div className="page-meta">
+                  <div className="page-meta-field">
+                    <span className="page-meta-label">页面图标</span>
+                    <button
+                      className="page-icon-picker-button"
+                      onClick={() => setPageIconPickerTargetId(draft.id)}
+                      type="button"
+                    >
+                      <NoteIcon className="page-icon-picker-button__icon" icon={normalizePageIcon(draft.icon)} />
+                      <span>更换图标</span>
+                    </button>
+                  </div>
+
+                  <div className="page-meta-field">
+                    <span className="page-meta-label">标题大小</span>
+                    <div className="page-title-size-options" role="group" aria-label="标题大小">
+                      {PAGE_TITLE_SIZE_OPTIONS.map((option) => (
+                        <button
+                          aria-pressed={draft.titleSize === option.value}
+                          className={clsx(
+                            "page-title-size-option",
+                            draft.titleSize === option.value && "active"
+                          )}
+                          key={option.value}
+                          onClick={() => editDraft({ titleSize: option.value })}
+                          type="button"
+                        >
+                          {option.label}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+
+                <input
+                  className={clsx("title-input", `title-size-${draft.titleSize}`)}
+                  onChange={(event) => editDraft({ title: event.target.value })}
+                  onKeyDown={(event) => {
+                    if (event.key !== "Enter" || event.nativeEvent.isComposing) {
+                      return;
+                    }
+
+                    event.preventDefault();
+                    setEditorFocusRequest((current) => current + 1);
+                  }}
+                  placeholder="未命名"
+                  value={draft.title}
+                />
+              </div>
+            </div>
+
+            <NotebookEditor
+              findReplaceAnchorRef={findReplaceButtonRef}
+              findReplaceOpen={findReplaceOpen}
+              focusRequest={editorFocusRequest}
+              key={`${draft.id}:${editorDocumentVersion}`}
+              note={draft}
+              onError={setAppError}
+              onCreateSubPage={createSubPage}
+              onFindReplaceClose={() => setFindReplaceOpen(false)}
+              onChange={handleEditorContentChange}
+            />
+          </article>
+        ) : noteCount === 0 && !isLoadingNote ? (
+          <section className="workspace-empty">
+            <div className="workspace-empty-panel">
+              <div className="workspace-empty-copy">
+                <span className="workspace-empty-kicker">
+                  <Sparkles size={14} /> 个人工作区
+                </span>
+                <h2>还没有页面</h2>
+                <p>把灵感、资料和每日记录放在一个安静的空间里。现在就创建第一篇笔记吧。</p>
+              </div>
+              <div className="workspace-empty-actions">
+                <button className="primary-button workspace-empty-action" onClick={() => void createNewNote()} type="button">
+                  <Plus size={16} />
+                  新建第一页
+                </button>
+                <button className="toolbar-button workspace-empty-secondary" onClick={() => setWorkspaceView("bible")} type="button">
+                  <BookOpen size={16} />
+                  先去读经
+                </button>
+              </div>
+              <div className="workspace-empty-hints" aria-label="Mini Notes 特点">
+                <div>
+                  <span className="workspace-empty-hint-icon"><Pencil size={15} /></span>
+                  <span><strong>块编辑</strong><small>标题、待办、表格随手插入</small></span>
+                </div>
+                <div>
+                  <span className="workspace-empty-hint-icon"><Clock3 size={15} /></span>
+                  <span><strong>自动保存</strong><small>编辑过程持续同步状态</small></span>
+                </div>
+                <div>
+                  <span className="workspace-empty-hint-icon"><LibraryBig size={15} /></span>
+                  <span><strong>一处整理</strong><small>页面、分类和资料清晰归档</small></span>
+                </div>
+              </div>
+            </div>
+          </section>
+          ) : (
+            <section className="center-screen inset">
+              <Sparkles className="pulse-icon" size={24} />
+              <span>正在打开页面</span>
+            </section>
+          )}
+        </Suspense>
+      </section>
+      {categoryActionPanel}
+      {pageActionPanel}
+      {exportPanel}
+      {pageIconPicker}
+    </main>
+  );
+}
+
+function LazyViewFallback({ label }: { label: string }) {
+  return (
+    <section className="center-screen inset" role="status">
+      <Sparkles className="pulse-icon" size={24} />
+      <span>{label}</span>
+    </section>
+  );
+}
+
+function normalizePageIcon(icon: string | null | undefined): string {
+  if (!icon) {
+    return PAGE_PRESETS[0].value;
+  }
+
+  return LEGACY_ICON_MAP[icon] ?? icon;
+}
+
+function createEmptyPageHistory(noteId: string | null): PageHistoryState {
+  return {
+    noteId,
+    past: [],
+    future: []
+  };
+}
+
+function clonePageSnapshot(note: Pick<Note, "title" | "icon" | "titleSize" | "content">): PageSnapshot {
+  return {
+    title: note.title,
+    icon: note.icon,
+    titleSize: normalizeTitleSize(note.titleSize),
+    content: cloneNoteBlocks(note.content)
+  };
+}
+
+function applyPageSnapshotToNote(note: Note, snapshot: PageSnapshot): Note {
+  return {
+    ...note,
+    title: snapshot.title,
+    icon: snapshot.icon,
+    titleSize: snapshot.titleSize,
+    content: cloneNoteBlocks(snapshot.content)
+  };
+}
+
+function cloneNoteBlocks(blocks: NoteBlock[]): NoteBlock[] {
+  return JSON.parse(JSON.stringify(blocks)) as NoteBlock[];
+}
+
+function addChildPageLinkBlock(
+  blocks: NoteBlock[],
+  child: Pick<NoteSummary, "id" | "title" | "icon">
+): { blocks: NoteBlock[]; changed: boolean } {
+  if (hasPageLinkBlock(blocks, child.id)) {
+    return { blocks, changed: false };
+  }
+
+  return {
+    blocks: [...cloneNoteBlocks(blocks), createPageLinkBlock(child)],
+    changed: true
+  };
+}
+
+function removeChildPageLinkBlocks(
+  blocks: NoteBlock[],
+  noteId: string
+): { blocks: NoteBlock[]; changed: boolean } {
+  const [nextValue, changed] = removePageLinkBlocksFromValue(blocks, noteId);
+  return {
+    blocks: Array.isArray(nextValue) ? (nextValue as NoteBlock[]) : blocks,
+    changed
+  };
+}
+
+function createPageLinkBlock(child: Pick<NoteSummary, "id" | "title" | "icon">): NoteBlock {
+  return {
+    type: "pageLink",
+    props: {
+      icon: normalizePageIcon(child.icon),
+      noteId: child.id,
+      title: child.title || "未命名"
+    }
+  };
+}
+
+function hasPageLinkBlock(value: unknown, noteId: string): boolean {
+  if (Array.isArray(value)) {
+    return value.some((item) => hasPageLinkBlock(item, noteId));
+  }
+
+  if (!isPlainRecord(value)) {
+    return false;
+  }
+
+  if (isPageLinkBlockForNote(value, noteId)) {
+    return true;
+  }
+
+  return Object.values(value).some((nestedValue) => hasPageLinkBlock(nestedValue, noteId));
+}
+
+function collectPageLinkNoteIds(value: unknown, noteIds = new Set<string>()): Set<string> {
+  if (Array.isArray(value)) {
+    value.forEach((item) => collectPageLinkNoteIds(item, noteIds));
+    return noteIds;
+  }
+
+  if (!isPlainRecord(value)) {
+    return noteIds;
+  }
+
+  if (value.type === "pageLink" && isPlainRecord(value.props)) {
+    const noteId = value.props.noteId;
+    if (typeof noteId === "string" && noteId.trim()) {
+      noteIds.add(noteId.trim());
+    }
+  }
+
+  Object.values(value).forEach((nestedValue) => collectPageLinkNoteIds(nestedValue, noteIds));
+  return noteIds;
+}
+
+function removePageLinkBlocksFromValue(value: unknown, noteId: string): [unknown, boolean] {
+  if (Array.isArray(value)) {
+    let changed = false;
+    const nextItems: unknown[] = [];
+
+    value.forEach((item) => {
+      if (isPageLinkBlockForNote(item, noteId)) {
+        changed = true;
+        return;
+      }
+
+      const [nextItem, itemChanged] = removePageLinkBlocksFromValue(item, noteId);
+      changed = changed || itemChanged;
+      nextItems.push(nextItem);
+    });
+
+    return [changed ? nextItems : value, changed];
+  }
+
+  if (!isPlainRecord(value)) {
+    return [value, false];
+  }
+
+  let changed = false;
+  const nextValue: Record<string, unknown> = {};
+
+  Object.entries(value).forEach(([key, nestedValue]) => {
+    const [nextNestedValue, nestedChanged] = removePageLinkBlocksFromValue(nestedValue, noteId);
+    changed = changed || nestedChanged;
+    nextValue[key] = nextNestedValue;
+  });
+
+  return [changed ? nextValue : value, changed];
+}
+
+function isPageLinkBlockForNote(value: unknown, noteId: string): boolean {
+  if (!isPlainRecord(value) || value.type !== "pageLink" || !isPlainRecord(value.props)) {
+    return false;
+  }
+
+  return value.props.noteId === noteId;
+}
+
+function isPlainRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null;
+}
+
+function arePageSnapshotsEqual(first: PageSnapshot, second: PageSnapshot): boolean {
+  return (
+    first.title === second.title &&
+    first.icon === second.icon &&
+    first.titleSize === second.titleSize &&
+    JSON.stringify(first.content) === JSON.stringify(second.content)
+  );
+}
+
+function normalizeLegacyTitle(title: string): string {
+  if (title === "Untitled" || title === "???") {
+    return "未命名";
+  }
+
+  if (title === "Untitled" || title === "???") {
+    return "未命名";
+  }
+
+  return title;
+}
+
+function normalizeNoteSummary(note: NoteSummary): NoteSummary {
+  return {
+    ...note,
+    kind: note.kind === "category" ? "category" : "page",
+    title: normalizeLegacyTitle(note.title),
+    icon: normalizePageIcon(note.icon),
+    titleSize: normalizeTitleSize(note.titleSize)
+  };
+}
+
+function normalizeNote(note: Note): Note {
+  return {
+    ...note,
+    kind: note.kind === "category" ? "category" : "page",
+    title: normalizeLegacyTitle(note.title),
+    icon: normalizePageIcon(note.icon),
+    titleSize: normalizeTitleSize(note.titleSize)
+  };
+}
+
+function normalizeTitleSize(value: unknown): NoteTitleSize {
+  return value === "h2" || value === "h3" ? value : DEFAULT_TITLE_SIZE;
+}
+
+function toSummary(note: Note): NoteSummary {
+  const { content: _content, ...summary } = note;
+  return summary;
+}
+
+function updateSummary(notes: NoteSummary[], saved: Note): NoteSummary[] {
+  return notes.map((note) => (note.id === saved.id ? normalizeNoteSummary(toSummary(saved)) : note));
+}
+
+function areDropTargetsEqual(first: NoteDropTarget | null, second: NoteDropTarget | null): boolean {
+  return (
+    first?.anchorId === second?.anchorId &&
+    first?.parentId === second?.parentId &&
+    first?.beforeId === second?.beforeId &&
+    first?.position === second?.position
+  );
+}
+
+function buildNoteBreadcrumb(
+  current: NoteSummary,
+  recordsById: Map<string, NoteSummary>
+): NoteSummary[] {
+  const path: NoteSummary[] = [current];
+  const visited = new Set<string>([current.id]);
+  let parentId = current.parentId;
+
+  for (let depth = 0; parentId && depth < 80; depth += 1) {
+    if (visited.has(parentId)) {
+      break;
+    }
+
+    const parent = recordsById.get(parentId);
+    if (!parent) {
+      break;
+    }
+
+    path.unshift(parent);
+    visited.add(parent.id);
+    parentId = parent.parentId;
+  }
+
+  return path;
+}
+
+function flattenCategoryTree(
+  categories: NoteSummary[],
+  categoriesByParent: Map<string | null, NoteSummary[]>,
+  depth = 0,
+  visited = new Set<string>()
+): CategoryTreeItem[] {
+  return categories.flatMap((category) => {
+    if (visited.has(category.id)) {
+      return [];
+    }
+
+    const nextVisited = new Set(visited);
+    nextVisited.add(category.id);
+    return [
+      { category, depth },
+      ...flattenCategoryTree(
+        categoriesByParent.get(category.id) ?? [],
+        categoriesByParent,
+        depth + 1,
+        nextVisited
+      )
+    ];
+  });
+}
+
+function compareNoteOrder(a: NoteSummary, b: NoteSummary): number {
+  const sortDiff = Number(b.sortOrder ?? 0) - Number(a.sortOrder ?? 0);
+  if (sortDiff !== 0) {
+    return sortDiff;
+  }
+
+  return new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime();
+}
+
+function setNoteDragImage(
+  event: ReactDragEvent<HTMLElement>,
+  note: NoteSummary
+): void {
+  if (typeof document === "undefined") {
+    return;
+  }
+
+  const preview = document.createElement("div");
+  preview.className = "note-drag-preview";
+
+  const icon = document.createElement("span");
+  icon.className = "note-drag-preview__icon";
+  const iconValue = normalizePageIcon(note.icon);
+  if (isImageIcon(iconValue)) {
+    const image = document.createElement("img");
+    image.alt = "";
+    image.src = iconValue;
+    icon.appendChild(image);
+  } else {
+    icon.textContent = iconValue;
+  }
+
+  const title = document.createElement("span");
+  title.className = "note-drag-preview__title";
+  title.textContent = note.title;
+
+  const hint = document.createElement("span");
+  hint.className = "note-drag-preview__hint";
+  hint.textContent =
+    note.kind === "category"
+      ? "上/下排序 · 中间放为子分类"
+      : "上/下排序 · 中间放为子页面";
+
+  preview.append(icon, title, hint);
+  document.body.appendChild(preview);
+  event.dataTransfer.setDragImage(preview, 18, 22);
+
+  window.requestAnimationFrame(() => {
+    preview.remove();
+  });
+}
+
+function getFirstPageId(notes: NoteSummary[]): string | null {
+  return notes.find((note) => note.kind === "page")?.id ?? null;
+}
+
+function saveLabel(status: SaveStatus): string {
+  switch (status) {
+    case "saving":
+      return "保存中";
+    case "saved":
+      return "已保存";
+    case "error":
+      return "保存失败";
+    default:
+      return "已就绪";
+  }
+}
+
+function formatRelative(value: string): string {
+  const timestamp = new Date(value).getTime();
+  const diff = Date.now() - timestamp;
+  const minute = 60 * 1000;
+  const hour = 60 * minute;
+  const day = 24 * hour;
+
+  if (diff < minute) {
+    return "刚刚";
+  }
+
+  if (diff < hour) {
+    return `${Math.floor(diff / minute)} 分钟前`;
+  }
+
+  if (diff < day) {
+    return `${Math.floor(diff / hour)} 小时前`;
+  }
+
+  return new Intl.DateTimeFormat("zh-CN", {
+    month: "short",
+    day: "numeric"
+  }).format(timestamp);
+}
+
+function formatDateTime(value: string): string {
+  return new Intl.DateTimeFormat("zh-CN", {
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit"
+  }).format(new Date(value));
+}
+
+function getShareTokenFromPath(pathname: string): string | null {
+  return getPublicShareRouteFromPath(pathname)?.shareToken ?? null;
+}
+
+function getPublicShareRouteFromPath(pathname: string): PublicShareRoute | null {
+  const match = /^\/share\/([^/]+)(?:\/([^/]+))?\/?$/.exec(pathname);
+  if (!match) {
+    return null;
+  }
+
+  return {
+    shareToken: decodeURIComponent(match[1]),
+    noteId: match[2] ? decodeURIComponent(match[2]) : null
+  };
+}
+
+export default App;
