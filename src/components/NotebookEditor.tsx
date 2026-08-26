@@ -5,6 +5,7 @@ import { BlockNoteView } from "@blocknote/mantine";
 import "@blocknote/mantine/style.css";
 import {
   FormattingToolbarController,
+  ExperimentalMobileFormattingToolbarController,
   getDefaultReactSlashMenuItems,
   SuggestionMenuController,
   type DefaultReactSuggestionItem,
@@ -1408,9 +1409,10 @@ export function NotebookEditor({
             slashMenu={false}
             theme="light"
           >
-            {!readOnly ? (
+              {!readOnly ? (
               <>
                 <FormattingToolbarController formattingToolbar={renderFormattingToolbar} />
+                <ExperimentalMobileFormattingToolbarController formattingToolbar={renderFormattingToolbar} />
                 <SuggestionMenuController getItems={getSlashMenuItems} triggerCharacter="/" />
               </>
             ) : null}

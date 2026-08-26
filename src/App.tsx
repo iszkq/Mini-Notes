@@ -4411,7 +4411,6 @@ function App() {
             !isBibleView &&
             !isTenMinuteView &&
             !isRevelationQaView &&
-            !isMindMapView &&
             (draft || isNotesOverview) ? (
               <nav className="note-breadcrumb" aria-label="页面路径" ref={breadcrumbRef}>
                 {notesBrowserLocation.kind === "root" ? (
@@ -4489,8 +4488,6 @@ function App() {
                   <LibraryBig size={17} />
                 ) : isRevelationMemorizationView ? (
                   <Pencil size={17} />
-                ) : isMindMapView ? (
-                  <Network size={17} />
                 ) : (
                   <FileText size={17} />
                 )}
