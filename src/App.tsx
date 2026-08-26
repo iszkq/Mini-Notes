@@ -81,7 +81,6 @@ import type { AuthUser, Note, NoteBlock, NoteSummary, NoteTitleSize } from "./sh
 const AdminPanel = lazy(() =>
   import("./components/AdminPanel").then((module) => ({ default: module.AdminPanel }))
 );
-const SHARE_PASSWORD_STORAGE_PREFIX = "mini-notes.share-password.";
 const BibleReader = lazy(() =>
   import("./components/BibleReader").then((module) => ({ default: module.BibleReader }))
 );
@@ -306,6 +305,7 @@ function App() {
   const authInviteCodeInputRef = useRef<HTMLInputElement | null>(null);
   const breadcrumbRef = useRef<HTMLElement | null>(null);
   const shareButtonRef = useRef<HTMLButtonElement | null>(null);
+  const sharePasswordSaveTimerRef = useRef<number | null>(null);
   const findReplaceButtonRef = useRef<HTMLButtonElement | null>(null);
   const [sharePanelStyle, setSharePanelStyle] = useState<CSSProperties>({});
   const [categoryMenuOpen, setCategoryMenuOpen] = useState(false);
@@ -2773,10 +2773,7 @@ function App() {
     setCategoryActionMenu(null);
     setShareOpen((current) => !current);
     setShareCopied(false);
-    const storedPassword = draft && typeof window !== "undefined"
-      ? window.localStorage.getItem(`${SHARE_PASSWORD_STORAGE_PREFIX}${draft.id}`) || ""
-      : "";
-    setSharePassword(storedPassword);
+    setSharePassword(draft?.sharePassword ?? "");
   };
 
   const openExportPanel = () => {
@@ -2822,6 +2819,7 @@ function App() {
               shareToken: shared.shareToken,
               sharedAt: shared.sharedAt,
               sharePasswordProtected: shared.sharePasswordProtected,
+              sharePassword: shared.sharePassword,
               updatedAt: shared.updatedAt
             }
           : note
@@ -2835,6 +2833,7 @@ function App() {
           shareToken: shared.shareToken,
           sharedAt: shared.sharedAt,
           sharePasswordProtected: shared.sharePasswordProtected,
+          sharePassword: shared.sharePassword,
           updatedAt: shared.updatedAt
         };
         draftRef.current = nextDraft;
@@ -2879,6 +2878,7 @@ function App() {
               shareToken: unshared.shareToken,
               sharedAt: unshared.sharedAt,
               sharePasswordProtected: unshared.sharePasswordProtected,
+              sharePassword: unshared.sharePassword,
               updatedAt: unshared.updatedAt
             }
           : note
@@ -2892,6 +2892,7 @@ function App() {
           shareToken: unshared.shareToken,
           sharedAt: unshared.sharedAt,
           sharePasswordProtected: unshared.sharePasswordProtected,
+          sharePassword: unshared.sharePassword,
           updatedAt: unshared.updatedAt
         };
         draftRef.current = nextDraft;
@@ -3179,19 +3180,24 @@ function App() {
               </div>
 
               <label className="share-panel-field">
-                <span>分享密码（至少 6 位，留空表示无密码）</span>
+                <span>分享密码（留空则不设置密码）</span>
                 <div className="share-password-input-wrap">
                   <input
                     className="share-link-input"
-                    maxLength={72}
                     onChange={(event) => {
                       const value = event.target.value;
                       setSharePassword(value);
-                      if (draft && typeof window !== "undefined") {
-                        if (value) window.localStorage.setItem(`${SHARE_PASSWORD_STORAGE_PREFIX}${draft.id}`, value);
-                        else window.localStorage.removeItem(`${SHARE_PASSWORD_STORAGE_PREFIX}${draft.id}`);
+                      if (draft?.shareToken) {
+                        if (sharePasswordSaveTimerRef.current !== null) {
+                          window.clearTimeout(sharePasswordSaveTimerRef.current);
+                        }
+                        sharePasswordSaveTimerRef.current = window.setTimeout(() => {
+                          sharePasswordSaveTimerRef.current = null;
+                          void enableCurrentShare();
+                        }, 450);
                       }
                     }}
+                    onBlur={() => { if (draft?.shareToken) void enableCurrentShare(); }}
                     placeholder={draft.sharePasswordProtected ? "当前已设置密码；输入新密码可更换" : "可选"}
                     type={showSharePassword ? "text" : "password"}
                     value={sharePassword}
@@ -3234,14 +3240,6 @@ function App() {
                       <ExternalLink size={15} />
                       打开链接
                     </a>
-                    <button
-                      className="toolbar-button"
-                      disabled={sharePending || (sharePassword.length > 0 && sharePassword.length < 6)}
-                      onClick={() => void enableCurrentShare()}
-                      type="button"
-                    >
-                      保存密码设置
-                    </button>
                     <button
                       className="toolbar-button danger"
                       disabled={sharePending}

@@ -21,6 +21,8 @@ export type NoteSummary = {
   shareToken: string | null;
   sharedAt: string | null;
   sharePasswordProtected?: boolean;
+  /** Only returned to the authenticated owner; never included in public shares. */
+  sharePassword?: string | null;
   sortOrder: number;
   createdAt: string;
   updatedAt: string;

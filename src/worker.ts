@@ -3126,9 +3126,13 @@ async function enableNoteShare(
       if (password) {
         sharePasswordSalt = generateRandomToken(16);
         sharePasswordHash = await hashPassword(password, sharePasswordSalt);
+        await env.FILES.put(getSharePasswordObjectKey(userId, id), password, {
+          httpMetadata: { contentType: "text/plain; charset=utf-8" }
+        });
       } else {
         sharePasswordSalt = null;
         sharePasswordHash = null;
+        await env.FILES.delete(getSharePasswordObjectKey(userId, id));
       }
     }
   } catch {
@@ -3178,6 +3182,7 @@ async function disableNoteShare(
   )
     .bind(new Date().toISOString(), id, userId)
     .run();
+  await env.FILES.delete(getSharePasswordObjectKey(userId, id));
 
   return json(
     await rowToNote(env, {
@@ -3893,6 +3898,7 @@ async function rowToNote(env: Env, row: DbNoteRow, userId?: string): Promise<Not
   const content = await readNoteContent(env, row, userId);
   return {
     ...rowToSummary(row),
+    sharePassword: userId ? await readSharePassword(env, userId, row.id) : null,
     content: userId ? await hydratePageLinkBlocks(env, userId, content) : content
   };
 }
@@ -4760,8 +4766,17 @@ function cleanPassword(value: unknown): string {
     return "";
   }
 
-  const password = value.trim();
-  return password.length >= 6 ? password.slice(0, 72) : "";
+  return value.trim();
+}
+
+function getSharePasswordObjectKey(userId: string, noteId: string): string {
+  return `share-passwords/${userId}/${noteId}.txt`;
+}
+
+async function readSharePassword(env: Env, userId: string | undefined, noteId: string): Promise<string | null> {
+  if (!userId) return null;
+  const object = await env.FILES.get(getSharePasswordObjectKey(userId, noteId));
+  return object ? (await object.text()) || null : null;
 }
 
 function cleanInviteCode(value: unknown): string {
