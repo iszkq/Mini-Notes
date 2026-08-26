@@ -468,6 +468,22 @@ const colorBlock = createReactBlockSpec(
             >
               <Smile size={14} />
             </button>
+            {icon ? (
+              <button
+                aria-label="删除色块图标"
+                className="color-block__emoji-button color-block__remove-icon-button"
+                onClick={(event) => {
+                  event.preventDefault();
+                  event.stopPropagation();
+                  updateProps({ icon: "" });
+                }}
+                onMouseDown={(event) => event.stopPropagation()}
+                title="删除图标（保留色块）"
+                type="button"
+              >
+                <Trash2 size={14} />
+              </button>
+            ) : null}
             <label className="color-block__color-picker" title="更改色块背景颜色">
               <span aria-hidden="true" className="color-block__color-dot" style={{ backgroundColor }} />
               <input
@@ -517,9 +533,19 @@ const colorBlock = createReactBlockSpec(
               insertHardBreak(editor);
             }}
           >
-            <div className="color-block__icon" aria-hidden="true">
-              {iconIsImage ? <img alt="" src={icon} /> : icon || COLOR_BLOCK_DEFAULT_ICON}
-            </div>
+            {icon ? (
+              <div
+                aria-label="色块图标；点击后可直接粘贴表情"
+                className="color-block__icon"
+                contentEditable={false}
+                data-color-block-id={block.id}
+                role="button"
+                tabIndex={editor.isEditable ? 0 : -1}
+                title={editor.isEditable ? "点击后可直接粘贴图片表情或 emoji" : undefined}
+              >
+                {iconIsImage ? <img alt="" src={icon} /> : icon}
+              </div>
+            ) : null}
             <div
               className="color-block__content"
               data-placeholder={COLOR_BLOCK_DEFAULT_TEXT}
@@ -537,9 +563,11 @@ const colorBlock = createReactBlockSpec(
       return (
         <section className="color-block" style={{ backgroundColor }}>
           <div className="color-block__body">
-            <div className="color-block__icon" aria-hidden="true">
-              {iconIsImage ? <img alt="" src={icon} /> : icon || COLOR_BLOCK_DEFAULT_ICON}
-            </div>
+            {icon ? (
+              <div className="color-block__icon" aria-hidden="true">
+                {iconIsImage ? <img alt="" src={icon} /> : icon}
+              </div>
+            ) : null}
             <div className="color-block__content" ref={contentRef} />
           </div>
         </section>
@@ -1272,6 +1300,7 @@ const pageLinkBlock = createReactBlockSpec(
 export const collapsibleEnterExtension = createExtension({
   key: "embedded-card-enter-hard-break",
   keyboardShortcuts: {
+    Backspace: ({ editor }) => preserveColorBlockOnIconDelete(editor),
     Enter: ({ editor }) => insertHardBreakInEmbeddedCard(editor),
     "Shift-Enter": ({ editor }) => insertHardBreakInEmbeddedCard(editor)
   }
@@ -1791,6 +1820,28 @@ function insertHardBreakInEmbeddedCard(editor: BlockNoteEditor<any, any, any>): 
     }
 
     return insertHardBreak(editor);
+  } catch {
+    return false;
+  }
+}
+
+function preserveColorBlockOnIconDelete(editor: BlockNoteEditor<any, any, any>): boolean {
+  if (!editor.isEditable) return false;
+
+  try {
+    const state = editor.prosemirrorState;
+    if (!state.selection.empty || state.selection.$from.parentOffset !== 0) return false;
+    const currentBlock = editor.getTextCursorPosition().block;
+    if (currentBlock?.type !== "colorBlock") return false;
+
+    const icon = typeof currentBlock.props?.icon === "string" ? currentBlock.props.icon : "";
+    if (icon) {
+      editor.updateBlock(currentBlock, { props: { icon: "" } });
+    }
+
+    // At the beginning of a color block Backspace is reserved for removing
+    // the optional icon.  It must never unwrap the block into a paragraph.
+    return true;
   } catch {
     return false;
   }

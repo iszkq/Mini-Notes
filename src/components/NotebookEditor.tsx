@@ -292,16 +292,25 @@ export function NotebookEditor({
     return () => window.removeEventListener("mininotes:color-block-emoji", handleColorBlockEmoji);
   }, []);
 
+  const updateColorBlockIcon = useCallback(
+    (blockId: string, icon: string) => {
+      const block = editor.getBlock(blockId);
+      if (block?.type === "colorBlock") {
+        editor.updateBlock(block, { props: { icon } } as PartialBlock);
+        return true;
+      }
+      return false;
+    },
+    [editor]
+  );
+
   const selectColorBlockIcon = useCallback(
     (item: EmojiItem) => {
       if (!colorBlockIconTarget) return;
-      const block = editor.getBlock(colorBlockIconTarget);
-      if (block?.type === "colorBlock") {
-        editor.updateBlock(block, { props: { icon: item.url } } as PartialBlock);
-      }
+      updateColorBlockIcon(colorBlockIconTarget, item.url);
       setColorBlockIconTarget(null);
     },
-    [colorBlockIconTarget, editor]
+    [colorBlockIconTarget, updateColorBlockIcon]
   );
 
   const resolveRemoteImageUrl = useCallback(
@@ -1095,6 +1104,51 @@ export function NotebookEditor({
         return;
       }
 
+      const colorBlockIcon = target.closest<HTMLElement>(
+        ".color-block__icon[data-color-block-id]"
+      );
+      const colorBlockId = colorBlockIcon?.dataset.colorBlockId;
+      if (colorBlockId) {
+        const iconFiles = getClipboardImageFiles(clipboardData);
+        const iconSource = getClipboardImageSource(clipboardData);
+        const pastedText = clipboardData.getData("text/plain").trim();
+        if (iconFiles.length > 0 || iconSource || pastedText) {
+          handledClipboardPasteEventsRef.current.add(event);
+          event.preventDefault();
+          event.stopPropagation();
+          event.stopImmediatePropagation();
+
+          void (async () => {
+            try {
+              if (iconFiles.length > 0) {
+                const uploaded = await uploadAsset(normalizeClipboardImageFile(iconFiles[0]));
+                updateColorBlockIcon(colorBlockId, uploaded.url);
+                return;
+              }
+
+              if (iconSource) {
+                if (/^data:/i.test(iconSource)) {
+                  const file = await fileFromImageDataUrl(iconSource);
+                  if (!file) throw new Error("粘贴的图片表情无法读取。");
+                  const uploaded = await uploadAsset(file);
+                  updateColorBlockIcon(colorBlockId, uploaded.url);
+                } else {
+                  updateColorBlockIcon(colorBlockId, normalizePastedImageUrl(iconSource));
+                }
+                return;
+              }
+
+              // Plain emoji and other short text icons are kept as text. This
+              // also lets users paste symbols from outside the built-in packs.
+              updateColorBlockIcon(colorBlockId, Array.from(pastedText).slice(0, 12).join(""));
+            } catch (error) {
+              onError?.(error instanceof Error ? error.message : "图标粘贴失败。");
+            }
+          })();
+          return;
+        }
+      }
+
       const imageFiles = getClipboardImageFiles(clipboardData);
       if (imageFiles.length > 0) {
         handledClipboardPasteEventsRef.current.add(event);
@@ -1131,7 +1185,7 @@ export function NotebookEditor({
 
     root.addEventListener("paste", handlePaste, true);
     return () => root.removeEventListener("paste", handlePaste, true);
-  }, [insertClipboardImageFiles, insertClipboardImageSource, readOnly]);
+  }, [insertClipboardImageFiles, insertClipboardImageSource, onError, readOnly, updateColorBlockIcon]);
 
   useEffect(() => {
     if (readOnly || focusRequest <= 0 || typeof window === "undefined") {
