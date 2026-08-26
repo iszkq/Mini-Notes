@@ -34,7 +34,7 @@ import {
   updateTenMinuteLessonDocument,
   updateTenMinuteReaderSettings
 } from "../api";
-import { noteSchema } from "../editorSchema";
+import { noteSchema, tableCellStyleExtension } from "../editorSchema";
 import type {
   TenMinuteLesson,
   TenMinuteReaderSettings,
@@ -553,8 +553,11 @@ function TenMinuteLessonEditor({ blocks, onChange }: TenMinuteLessonEditorProps)
       initialContent: blocks as PartialBlock[],
       schema: noteSchema,
       tables: {
-        splitCells: true
-      }
+        splitCells: true,
+        cellBackgroundColor: true,
+        cellTextColor: true
+      },
+      extensions: [tableCellStyleExtension]
     },
     [dictionary]
   );

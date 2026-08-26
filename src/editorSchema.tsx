@@ -6,6 +6,7 @@ import {
   type BlockNoteEditor
 } from "@blocknote/core";
 import { createReactBlockSpec, createReactStyleSpec } from "@blocknote/react";
+import { Extension as TiptapExtension } from "@tiptap/core";
 import { useEffect, useRef, useState, type CSSProperties, type PointerEvent as ReactPointerEvent, type ReactNode } from "react";
 import { ChevronDown, CircleDot, FileText, Heading, Network, Plus, Trash2, Minus, RotateCcw, Palette, Shapes, Wand2, Maximize2, Minimize2, Scan, LayoutTemplate } from "lucide-react";
 import { formatBibleReference, parseBibleVersePayload } from "./bible";
@@ -1356,6 +1357,64 @@ export const noteSchema = BlockNoteSchema.create({
     fontSize,
     noteComment
   }
+});
+
+/**
+ * BlockNote stores table-cell presentation in the table cell props.  The
+ * underlying ProseMirror table nodes need matching attributes in order for
+ * those props to survive a round trip and be rendered on the actual cell.
+ * Keeping this as a table-only extension means the normal text background
+ * style remains an inline mark everywhere else in the editor.
+ */
+export const tableCellStyleExtension = createExtension({
+  key: "table-cell-style-attributes",
+  tiptapExtensions: [
+    TiptapExtension.create({
+      name: "tableCellStyleAttributes",
+      addGlobalAttributes() {
+        return [
+          {
+            types: ["tableCell", "tableHeader"],
+            attributes: {
+              backgroundColor: {
+                default: "default",
+                parseHTML: (element: HTMLElement) =>
+                  element.getAttribute("data-background-color") || "default",
+                renderHTML: (attributes: { backgroundColor?: string }) => {
+                  const color = attributes.backgroundColor;
+                  return color && color !== "default"
+                    ? { "data-background-color": color }
+                    : {};
+                }
+              },
+              textColor: {
+                default: "default",
+                parseHTML: (element: HTMLElement) =>
+                  element.getAttribute("data-text-color") || "default",
+                renderHTML: (attributes: { textColor?: string }) => {
+                  const color = attributes.textColor;
+                  return color && color !== "default"
+                    ? { "data-text-color": color }
+                    : {};
+                }
+              },
+              textAlignment: {
+                default: "left",
+                parseHTML: (element: HTMLElement) =>
+                  element.getAttribute("data-text-alignment") || "left",
+                renderHTML: (attributes: { textAlignment?: string }) => {
+                  const alignment = attributes.textAlignment;
+                  return alignment && alignment !== "left"
+                    ? { "data-text-alignment": alignment }
+                    : {};
+                }
+              }
+            }
+          }
+        ];
+      }
+    })
+  ]
 });
 
 function normalizeFontSize(value: string): string {

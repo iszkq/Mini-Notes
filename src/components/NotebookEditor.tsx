@@ -55,7 +55,8 @@ import {
   STEPS_DEFAULT_PAYLOAD,
   TIMELINE_DEFAULT_PAYLOAD,
   collapsibleEnterExtension,
-  noteSchema
+  noteSchema,
+  tableCellStyleExtension
 } from "../editorSchema";
 import type { Note, NoteBlock, NoteSummary } from "../shared";
 import type { EmojiItem } from "../emojiPacks";
@@ -263,9 +264,11 @@ export function NotebookEditor({
       initialContent,
       schema: noteSchema,
       tables: {
-        splitCells: true
+        splitCells: true,
+        cellBackgroundColor: true,
+        cellTextColor: true
       },
-      extensions: [collapsibleEnterExtension],
+      extensions: [collapsibleEnterExtension, tableCellStyleExtension],
       uploadFile: handleUpload,
       resolveFileUrl: async (url: string) => apiUrl(url)
     },

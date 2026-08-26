@@ -3033,6 +3033,87 @@ button.collapsible-content-block__toggle:hover {
   margin-left: auto;
 }
 
+/* Notion-style table cell fills.  These selectors are intentionally scoped to
+   table cells so regular paragraph highlighting remains an inline text mark. */
+.bn-editor [data-content-type="table"] td[data-background-color="gray"],
+.bn-editor [data-content-type="table"] th[data-background-color="gray"],
+.bn-editor [data-content-type="table"] td:has([data-background-color="gray"]),
+.bn-editor [data-content-type="table"] th:has([data-background-color="gray"]) {
+  background-color: #ebeced;
+}
+.bn-editor [data-content-type="table"] td[data-background-color="brown"],
+.bn-editor [data-content-type="table"] th[data-background-color="brown"],
+.bn-editor [data-content-type="table"] td:has([data-background-color="brown"]),
+.bn-editor [data-content-type="table"] th:has([data-background-color="brown"]) {
+  background-color: #e9e5e3;
+}
+.bn-editor [data-content-type="table"] td[data-background-color="red"],
+.bn-editor [data-content-type="table"] th[data-background-color="red"],
+.bn-editor [data-content-type="table"] td:has([data-background-color="red"]),
+.bn-editor [data-content-type="table"] th:has([data-background-color="red"]) {
+  background-color: #fbe4e4;
+}
+.bn-editor [data-content-type="table"] td[data-background-color="orange"],
+.bn-editor [data-content-type="table"] th[data-background-color="orange"],
+.bn-editor [data-content-type="table"] td:has([data-background-color="orange"]),
+.bn-editor [data-content-type="table"] th:has([data-background-color="orange"]) {
+  background-color: #f6e9d9;
+}
+.bn-editor [data-content-type="table"] td[data-background-color="yellow"],
+.bn-editor [data-content-type="table"] th[data-background-color="yellow"],
+.bn-editor [data-content-type="table"] td:has([data-background-color="yellow"]),
+.bn-editor [data-content-type="table"] th:has([data-background-color="yellow"]) {
+  background-color: #fbf3db;
+}
+.bn-editor [data-content-type="table"] td[data-background-color="green"],
+.bn-editor [data-content-type="table"] th[data-background-color="green"],
+.bn-editor [data-content-type="table"] td:has([data-background-color="green"]),
+.bn-editor [data-content-type="table"] th:has([data-background-color="green"]) {
+  background-color: #ddedea;
+}
+.bn-editor [data-content-type="table"] td[data-background-color="blue"],
+.bn-editor [data-content-type="table"] th[data-background-color="blue"],
+.bn-editor [data-content-type="table"] td:has([data-background-color="blue"]),
+.bn-editor [data-content-type="table"] th:has([data-background-color="blue"]) {
+  background-color: #ddebf1;
+}
+.bn-editor [data-content-type="table"] td[data-background-color="purple"],
+.bn-editor [data-content-type="table"] th[data-background-color="purple"],
+.bn-editor [data-content-type="table"] td:has([data-background-color="purple"]),
+.bn-editor [data-content-type="table"] th:has([data-background-color="purple"]) {
+  background-color: #eae4f2;
+}
+.bn-editor [data-content-type="table"] td[data-background-color="pink"],
+.bn-editor [data-content-type="table"] th[data-background-color="pink"],
+.bn-editor [data-content-type="table"] td:has([data-background-color="pink"]),
+.bn-editor [data-content-type="table"] th:has([data-background-color="pink"]) {
+  background-color: #f4dfeb;
+}
+
+/* A background mark inside a table is promoted to the cell fill above. */
+.bn-editor [data-content-type="table"] td [data-background-color],
+.bn-editor [data-content-type="table"] th [data-background-color] {
+  background-color: transparent !important;
+}
+
+/* Make the ProseMirror resize affordance easy to discover and grab. */
+.bn-editor [data-content-type="table"] .column-resize-handle {
+  width: 8px;
+  right: -4px;
+  background: #4d8df7;
+  opacity: 0;
+  pointer-events: auto;
+  cursor: col-resize;
+  transition: opacity 0.15s ease;
+}
+.bn-editor [data-content-type="table"]:hover .column-resize-handle,
+.bn-editor [data-content-type="table"] .column-resize-handle:hover {
+  opacity: 0.78;
+}
+.bn-editor [data-content-type="table"] .column-resize-handle.column-resize-dragging {
+  opacity: 1;
+}
+
 @media (max-width: 760px) {
   .bn-menu-dropdown.bn-color-picker-dropdown {
     width: min(236px, calc(100vw - 20px));
