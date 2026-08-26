@@ -5361,6 +5361,35 @@ button.note-breadcrumb__item:hover {
 }
 @media (max-width:640px) { .mindmap-view{padding:16px 12px;min-height:420px}.mindmap-canvas{padding:28px 18px}.mindmap-hint{font-size:12px}.mindmap-node-card{max-width:76vw;font-size:14px} }
 
+/* Embedded mind map canvas (XMind / ProcessOn inspired). */
+.mindmap-widget-header { display:flex; align-items:center; justify-content:space-between; gap:16px; flex-wrap:wrap; }
+.mindmap-widget-title { display:flex; align-items:center; gap:8px; color:#245e62; }
+.mindmap-widget-title span { color:#829796; font-size:12px; }
+.mindmap-widget-tools { display:flex; align-items:center; gap:4px; }
+.mindmap-widget-tools button { display:inline-flex; align-items:center; gap:4px; min-height:30px; padding:0 8px; border:1px solid #d9e6e4; border-radius:7px; background:#fff; color:#366465; font-size:12px; cursor:pointer; }
+.mindmap-widget-tools button:hover:not(:disabled) { border-color:#6ba8a2; background:#f0f8f7; }
+.mindmap-widget-tools button:disabled { opacity:.45; cursor:not-allowed; }
+.mindmap-zoom-label { min-width:38px; text-align:center; color:#5e7977; font-size:12px; }
+.mindmap-widget-canvas { position:relative; min-height:560px; overflow:auto; padding:14px; border:1px solid #e1ecea; border-radius:12px; background-color:#f7fbfb; background-image:radial-gradient(#d8e7e4 1px,transparent 1px); background-size:18px 18px; }
+.mindmap-widget-stage { position:relative; width:1000px; height:540px; transform-origin:0 0; transition:transform .18s ease; }
+.mindmap-widget-edges { position:absolute; inset:0; overflow:visible; pointer-events:none; }
+.mindmap-widget-edges path { fill:none; stroke:#9dbeba; stroke-width:2.5; stroke-linecap:round; }
+.mindmap-widget-node { position:absolute; z-index:1; display:flex; align-items:center; width:200px; min-height:50px; padding:8px 13px; border:2px solid color-mix(in srgb,var(--mind-color,#5b8def) 72%,#fff); border-radius:12px; background:#fff; box-shadow:0 4px 14px rgba(22,70,70,.12); transition:box-shadow .15s, border-color .15s; cursor:grab; }
+.mindmap-widget-node:active { cursor:grabbing; }
+.mindmap-widget-node.is-selected { border-color:var(--mind-color,#5b8def); box-shadow:0 0 0 3px color-mix(in srgb,var(--mind-color,#5b8def) 20%,transparent),0 7px 18px rgba(22,70,70,.16); }
+.mindmap-widget-node input { width:100%; border:0; outline:0; background:transparent; color:#21494a; font:600 14px/1.4 inherit; text-align:center; }
+.mindmap-widget-node.shape-ellipse { border-radius:50%; }
+.mindmap-widget-node.shape-pill { border-radius:999px; }
+.mindmap-widget-node.shape-diamond { transform:rotate(45deg); border-radius:8px; width:150px; min-height:70px; }
+.mindmap-widget-node.shape-diamond input { transform:rotate(-45deg); }
+.mindmap-widget-node.is-root { color:#fff; background:linear-gradient(135deg,#246d70,#3c9290); border-color:#246d70; }
+.mindmap-widget-node.is-root input { color:#fff; font-size:16px; }
+@media (max-width:640px) {
+  .mindmap-widget-tools button { padding:0 6px; }
+  .mindmap-widget-tools button:not(:has(svg:nth-child(1))) { display:none; }
+  .mindmap-widget-canvas { min-height:470px; }
+}
+
 .notes-overview__hero {
   display: flex;
   align-items: flex-end;

@@ -91,7 +91,6 @@ const ExportPanel = lazy(() =>
 const NotebookEditor = lazy(() =>
   import("./components/NotebookEditor").then((module) => ({ default: module.NotebookEditor }))
 );
-const MindMapView = lazy(() => import("./components/MindMapView").then((module) => ({ default: module.MindMapView })));
 const RevelationQaLibrary = lazy(() =>
   import("./components/RevelationQaLibrary").then((module) => ({
     default: module.RevelationQaLibrary
@@ -115,7 +114,6 @@ type WorkspaceView =
   | "ten-minute"
   | "revelation-qa"
   | "revelation-memorization"
-  | "mindmap"
   | "admin";
 
 type NotesBrowserLocation =
@@ -333,7 +331,6 @@ function App() {
   const isTenMinuteView = workspaceView === "ten-minute";
   const isRevelationQaView = workspaceView === "revelation-qa";
   const isRevelationMemorizationView = workspaceView === "revelation-memorization";
-  const isMindMapView = workspaceView === "mindmap";
 
   useEffect(() => {
     selectedIdRef.current = selectedId;
@@ -4234,20 +4231,6 @@ function App() {
             <Pencil size={16} />
             背诵默写
           </button>
-          <button
-            className="toolbar-button sidebar-view-button"
-            style={{ display: "none" }}
-            disabled={!draft}
-            onClick={() => {
-              setWorkspaceView("mindmap");
-              setMobileSidebarOpen(false);
-            }}
-            title={draft ? "当前笔记的思维导图" : "请先选择一篇笔记"}
-            type="button"
-          >
-            <Network size={16} />
-            思维导图
-          </button>
         </div>
 
         <nav
@@ -4505,8 +4488,6 @@ function App() {
                           ? "启示录问答库"
                           : isRevelationMemorizationView
                             ? "启示录背诵默写"
-                          : isMindMapView
-                            ? "思维导图"
                           : noteCount > 0
                             ? "选择页面"
                             : "还没有页面"}
@@ -4527,7 +4508,7 @@ function App() {
                   返回笔记
                 </button>
               </>
-            ) : isBibleView || isTenMinuteView || isRevelationQaView || isRevelationMemorizationView || isMindMapView ? (
+            ) : isBibleView || isTenMinuteView || isRevelationQaView || isRevelationMemorizationView ? (
               <>
                 <button
                   className="toolbar-button"
@@ -4738,19 +4719,6 @@ function App() {
           <RevelationQaLibrary onError={setAppError} />
         ) : isRevelationMemorizationView ? (
           <RevelationMemorization onError={setAppError} />
-        ) : isMindMapView && draft ? (
-          <MindMapView note={draft} />
-        ) : isMindMapView ? (
-          <section className="workspace-empty">
-            <div className="workspace-empty-panel">
-              <Network size={28} />
-              <h2>请先选择一篇笔记</h2>
-              <p>思维导图会按照笔记中的标题层级自动生成。</p>
-              <button className="primary-button" onClick={() => setWorkspaceView("notes")} type="button">
-                返回笔记
-              </button>
-            </div>
-          </section>
         ) : isNotesOverview ? (
           <section className="notes-overview">
             <header className="notes-overview__hero">

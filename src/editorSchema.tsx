@@ -6,8 +6,8 @@ import {
   type BlockNoteEditor
 } from "@blocknote/core";
 import { createReactBlockSpec, createReactStyleSpec } from "@blocknote/react";
-import type { ReactNode } from "react";
-import { ChevronDown, CircleDot, FileText, Heading, Network, Plus, Trash2 } from "lucide-react";
+import { useEffect, useRef, useState, type CSSProperties, type PointerEvent as ReactPointerEvent, type ReactNode } from "react";
+import { ChevronDown, CircleDot, FileText, Heading, Network, Plus, Trash2, Minus, RotateCcw, Palette, Shapes, Wand2 } from "lucide-react";
 import { formatBibleReference, parseBibleVersePayload } from "./bible";
 import { apiUrl } from "./apiBase";
 import { parseNoteComment } from "./comments";
@@ -75,7 +75,8 @@ type ComparisonItem = {
 };
 
 type ComparisonTone = (typeof COMPARISON_DEFAULT_TONES)[number];
-type MindMapItem = { id: string; parentId: string | null; text: string };
+type MindMapShape = "rounded" | "ellipse" | "diamond" | "pill";
+type MindMapItem = { id: string; parentId: string | null; text: string; x: number; y: number; shape: MindMapShape; color: string };
 
 const fontSize = createReactStyleSpec(
   {
@@ -887,38 +888,97 @@ const comparisonBlock = createReactBlockSpec(
   }
 )();
 
+function mindMapLayout(items: MindMapItem[]): MindMapItem[] {
+  const root = items.find((item) => !item.parentId) ?? items[0];
+  if (!root) return items;
+  const children = (id: string) => items.filter((item) => item.parentId === id);
+  const next = items.map((item) => ({ ...item }));
+  const set = (id: string, x: number, y: number) => {
+    const item = next.find((entry) => entry.id === id);
+    if (item) { item.x = x; item.y = y; }
+  };
+  set(root.id, 480, 250);
+  const first = children(root.id);
+  const left = first.filter((_, index) => index % 2 === 0);
+  const right = first.filter((_, index) => index % 2 === 1);
+  const placeBranch = (branch: MindMapItem[], side: -1 | 1) => {
+    const gap = Math.max(88, 230 / Math.max(1, branch.length));
+    const start = 250 - ((branch.length - 1) * gap) / 2;
+    branch.forEach((node, index) => {
+      const x = side < 0 ? 170 : 790;
+      const y = start + index * gap;
+      set(node.id, x, y);
+      children(node.id).forEach((child, childIndex) => set(child.id, side < 0 ? 35 : 925, y + (childIndex - (children(node.id).length - 1) / 2) * 58));
+    });
+  };
+  placeBranch(left, -1); placeBranch(right, 1);
+  return next;
+}
+
+function MindMapCanvas({ block, editor }: { block: any; editor: any }) {
+  const initial = parseMindMapItems(block.props.payload);
+  const [items, setItems] = useState<MindMapItem[]>(initial);
+  const itemsRef = useRef<MindMapItem[]>(initial);
+  const [selected, setSelected] = useState(initial[0]?.id ?? "");
+  const [zoom, setZoom] = useState(1);
+  const dragRef = useRef<{ id: string; ox: number; oy: number } | null>(null);
+  useEffect(() => { const next = parseMindMapItems(block.props.payload); setItems(next); itemsRef.current = next; }, [block.props.payload]);
+  const root = items.find((item) => !item.parentId) ?? items[0];
+  const children = (id: string) => items.filter((item) => item.parentId === id);
+  const commit = (next: MindMapItem[]) => { itemsRef.current = next; setItems(next); if (editor.isEditable) editor.updateBlock(block, { props: { payload: JSON.stringify(next) } }); };
+  const updateNode = (id: string, patch: Partial<MindMapItem>) => commit(items.map((item) => item.id === id ? { ...item, ...patch } : item));
+  const addNode = (parentId: string | null) => {
+    const parent = parentId ? items.find((item) => item.id === parentId) : root;
+    const id = createWidgetItemId("mind");
+    const node: MindMapItem = { id, parentId: parent?.id ?? null, text: "新主题", x: (parent?.x ?? 480) + 250, y: (parent?.y ?? 250) + 90, shape: "rounded", color: "#5b8def" };
+    commit([...items, node]); setSelected(id);
+  };
+  const removeNode = (id: string) => {
+    if (id === root?.id) return;
+    const doomed = new Set<string>([id]);
+    let changed = true; while (changed) { changed = false; items.forEach((item) => { if (item.parentId && doomed.has(item.parentId) && !doomed.has(item.id)) { doomed.add(item.id); changed = true; } }); }
+    commit(items.filter((item) => !doomed.has(item.id))); setSelected(root?.id ?? "");
+  };
+  const onPointerDown = (event: ReactPointerEvent, id: string) => {
+    if (!editor.isEditable) return;
+    const node = items.find((item) => item.id === id); if (!node) return;
+    const canvas = (event.currentTarget as HTMLElement).closest<HTMLElement>(".mindmap-widget-canvas");
+    const rect = canvas?.getBoundingClientRect(); if (!rect) return;
+    dragRef.current = { id, ox: (event.clientX - rect.left) / zoom - node.x, oy: (event.clientY - rect.top) / zoom - node.y };
+    (event.currentTarget as HTMLElement).setPointerCapture(event.pointerId); setSelected(id);
+  };
+  const onPointerMove = (event: ReactPointerEvent) => {
+    const drag = dragRef.current; if (!drag) return;
+    const canvas = (event.currentTarget as HTMLElement).closest<HTMLElement>(".mindmap-widget-canvas"); const rect = canvas?.getBoundingClientRect(); if (!rect) return;
+    setItems((prev) => { const next = prev.map((item) => item.id === drag.id ? { ...item, x: Math.max(20, (event.clientX - rect.left) / zoom - drag.ox), y: Math.max(20, (event.clientY - rect.top) / zoom - drag.oy) } : item); itemsRef.current = next; return next; });
+  };
+  const onPointerUp = () => { if (dragRef.current) { dragRef.current = null; commit(itemsRef.current); } };
+  const edges = items.filter((item) => item.parentId).map((item) => { const parent = items.find((entry) => entry.id === item.parentId); return parent ? { parent, item } : null; }).filter(Boolean) as Array<{ parent: MindMapItem; item: MindMapItem }>;
+  const selectedNode = items.find((item) => item.id === selected) ?? root;
+  return <section className="content-widget-block content-widget-mindmap" contentEditable={false}>
+    <header className="mindmap-widget-header"><div className="mindmap-widget-title"><Network size={17} /><strong>思维导图</strong><span>拖动主题调整布局 · 双击文字编辑</span></div><div className="mindmap-widget-tools">
+      <button type="button" title="添加子主题" onClick={() => selectedNode && addNode(selectedNode.id)} disabled={!editor.isEditable}><Plus size={15} />子主题</button>
+      <button type="button" title="添加同级主题" onClick={() => selectedNode && addNode(selectedNode.parentId)} disabled={!editor.isEditable}><Plus size={15} />同级</button>
+      <button type="button" title="删除主题" onClick={() => selectedNode && removeNode(selectedNode.id)} disabled={!editor.isEditable || selectedNode?.id === root?.id}><Trash2 size={15} /></button>
+      <button type="button" title="节点形状" onClick={() => selectedNode && updateNode(selectedNode.id, { shape: selectedNode.shape === "rounded" ? "ellipse" : selectedNode.shape === "ellipse" ? "diamond" : selectedNode.shape === "diamond" ? "pill" : "rounded" })} disabled={!editor.isEditable}><Shapes size={15} /></button>
+      <button type="button" title="节点配色" onClick={() => selectedNode && updateNode(selectedNode.id, { color: selectedNode.color === "#5b8def" ? "#e68a5c" : selectedNode.color === "#e68a5c" ? "#8b74c9" : "#5b8def" })} disabled={!editor.isEditable}><Palette size={15} /></button>
+      <button type="button" title="自动布局" onClick={() => commit(mindMapLayout(items))} disabled={!editor.isEditable}><Wand2 size={15} /></button>
+      <button type="button" title="缩小" onClick={() => setZoom((value) => Math.max(.65, +(value - .1).toFixed(2)))}><Minus size={15} /></button><span className="mindmap-zoom-label">{Math.round(zoom * 100)}%</span><button type="button" title="放大" onClick={() => setZoom((value) => Math.min(1.5, +(value + .1).toFixed(2)))}><Plus size={15} /></button><button type="button" title="重置" onClick={() => { setZoom(1); commit(mindMapLayout(items)); }}><RotateCcw size={15} /></button>
+    </div></header>
+    <div className="mindmap-widget-canvas" onPointerMove={onPointerMove} onPointerUp={onPointerUp} onPointerCancel={onPointerUp}>
+      <div className="mindmap-widget-stage" style={{ transform: `scale(${zoom})` }}>
+        <svg className="mindmap-widget-edges" width="1000" height="540" viewBox="0 0 1000 540" aria-hidden="true">{edges.map(({ parent, item }) => <path key={`${parent.id}-${item.id}`} d={`M ${parent.x + 100} ${parent.y + 25} C ${(parent.x + item.x) / 2 + 80} ${parent.y + 25}, ${(parent.x + item.x) / 2 - 80} ${item.y + 25}, ${item.x} ${item.y + 25}`} />)}</svg>
+        {items.map((item) => <div key={item.id} className={`mindmap-widget-node shape-${item.shape} ${item.id === root?.id ? "is-root" : ""} ${selected === item.id ? "is-selected" : ""}`} style={{ left: item.x, top: item.y, "--mind-color": item.color } as CSSProperties} onPointerDown={(event) => onPointerDown(event, item.id)}>
+          <input value={item.text} readOnly={!editor.isEditable} onFocus={() => setSelected(item.id)} onChange={(event) => setItems((prev) => prev.map((entry) => entry.id === item.id ? { ...entry, text: event.target.value } : entry))} onBlur={(event) => updateNode(item.id, { text: event.target.value })} onKeyDown={stopWidgetEditorEvent} onMouseDown={(event) => event.stopPropagation()} aria-label="思维导图节点" />
+        </div>)}
+      </div>
+    </div>
+  </section>;
+}
+
 const mindMapBlock = createReactBlockSpec(
-  {
-    type: "contentMindMap",
-    propSchema: { payload: { default: MINDMAP_DEFAULT_PAYLOAD } },
-    content: "none"
-  },
-  {
-    render: ({ block, editor }) => {
-      const items = parseMindMapItems(block.props.payload);
-      const root = items.find((item) => !item.parentId) ?? items[0];
-      const childrenOf = (id: string) => items.filter((item) => item.parentId === id);
-      const update = (next: MindMapItem[]) => editor.isEditable && editor.updateBlock(block, { props: { payload: JSON.stringify(next) } });
-      const addChild = (parentId: string) => update([...items, { id: createWidgetItemId("mind"), parentId, text: "新分支" }]);
-      const renderNode = (node: MindMapItem, depth = 0): ReactNode => (
-        <li className={`mindmap-widget-node depth-${Math.min(depth, 3)}`} key={node.id}>
-          <div className="mindmap-widget-card">
-            {depth === 0 ? <Network size={17} /> : <span className="mindmap-widget-dot" />}
-            <input value={node.text} readOnly={!editor.isEditable} onChange={(event) => update(items.map((item) => item.id === node.id ? { ...item, text: event.target.value } : item))} onKeyDown={stopWidgetEditorEvent} onMouseDown={stopWidgetEditorEvent} aria-label="思维导图节点" />
-            {editor.isEditable ? <button type="button" className="mindmap-widget-add" onClick={() => addChild(node.id)} aria-label="添加子节点"><Plus size={14} /></button> : null}
-          </div>
-          {childrenOf(node.id).length ? <ul>{childrenOf(node.id).map((child) => renderNode(child, depth + 1))}</ul> : null}
-        </li>
-      );
-      return <section className="content-widget-block content-widget-mindmap" contentEditable={false}><header><Network size={16} /><strong>思维导图</strong><span>点击节点文字编辑，+ 添加分支</span></header><div className="mindmap-widget-canvas">{root ? <ul className="mindmap-widget-tree">{renderNode(root)}</ul> : null}</div></section>;
-    },
-    toExternalHTML: ({ block }) => {
-      const items = parseMindMapItems(block.props.payload);
-      const root = items.find((item) => !item.parentId) ?? items[0];
-      const render = (node: MindMapItem): ReactNode => <li key={node.id}><span>{node.text}</span>{items.filter((item) => item.parentId === node.id).length ? <ul>{items.filter((item) => item.parentId === node.id).map(render)}</ul> : null}</li>;
-      return <section className="content-widget-block content-widget-mindmap"><header><Network size={16} /><strong>思维导图</strong></header><ul>{root ? render(root) : null}</ul></section>;
-    }
-  }
+  { type: "contentMindMap", propSchema: { payload: { default: MINDMAP_DEFAULT_PAYLOAD } }, content: "none" },
+  { render: ({ block, editor }) => <MindMapCanvas block={block} editor={editor} />, toExternalHTML: ({ block }) => { const items = parseMindMapItems(block.props.payload); const root = items.find((item) => !item.parentId) ?? items[0]; return <section className="content-widget-block content-widget-mindmap"><header><Network size={16} /><strong>思维导图</strong></header><p>{root?.text ?? "思维导图"}</p></section>; } }
 )();
 
 const pageLinkBlock = createReactBlockSpec(
@@ -1062,7 +1122,11 @@ function parseMindMapItems(value: unknown): MindMapItem[] {
     .map((item, index) => ({
       id: cleanWidgetText(item.id, createWidgetItemId("mind")),
       parentId: typeof item.parentId === "string" && item.parentId ? item.parentId : null,
-      text: cleanWidgetText(item.text, index === 0 ? "中心主题" : "新分支")
+      text: cleanWidgetText(item.text, index === 0 ? "中心主题" : "新分支"),
+      x: typeof item.x === "number" ? item.x : index === 0 ? 480 : index % 2 ? 790 : 170,
+      y: typeof item.y === "number" ? item.y : index === 0 ? 250 : 120 + index * 90,
+      shape: (item.shape === "ellipse" || item.shape === "diamond" || item.shape === "pill" ? item.shape : "rounded") as MindMapShape,
+      color: typeof item.color === "string" && item.color ? item.color : index === 0 ? "#246d70" : "#5b8def"
     }));
   return items.length ? items : parseMindMapItems(MINDMAP_DEFAULT_PAYLOAD);
 }
