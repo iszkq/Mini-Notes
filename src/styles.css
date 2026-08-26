@@ -5387,6 +5387,25 @@ button.note-breadcrumb__item:hover {
 .mind-elixir-header > div { display:flex; align-items:baseline; gap:10px; }
 .mind-elixir-header strong { font-size:17px; }
 .mind-elixir-header span { color:#78908e; font-size:12px; }
+
+/* Guest QSL links are a focused lobby: hide the editor controls behind the
+   waiting layer until the host starts the shared round. */
+.qsl-standalone .revelation-puzzle-modal.qsl-room-waiting > .revelation-puzzle-difficulty,
+.qsl-standalone .revelation-puzzle-modal.qsl-room-waiting > .revelation-puzzle-loading {
+  display: none !important;
+}
+.qsl-standalone .qsl-waiting-overlay {
+  z-index: 30;
+  display: grid;
+  place-items: center;
+  align-content: center;
+  gap: 10px;
+  text-align: center;
+  background: linear-gradient(145deg, #f7fbff, #eef5ff);
+}
+.qsl-standalone .qsl-waiting-overlay h2 { margin: 0; color: #24538d; font-size: 1.35rem; }
+.qsl-standalone .qsl-waiting-overlay p { max-width: 34rem; margin: 0; color: #55708f; line-height: 1.6; }
+.qsl-standalone .qsl-waiting-overlay span { color: #7892ae; font-size: .84rem; }
 .mind-elixir-header label { display:flex; align-items:center; gap:6px; color:#5f7775; font-size:12px; }
 .mind-elixir-header select { border:1px solid #d4e3e0; border-radius:7px; padding:5px 8px; background:#fff; color:#315f60; }
 .mind-elixir-host { width:100%; height:560px; min-height:420px; border:1px solid #dce9e7; border-radius:12px; overflow:hidden; background:#f8fbfb; }
@@ -7928,9 +7947,14 @@ button.note-breadcrumb__item:hover {
 .qsl-battle-brand { width:64px; height:64px; margin:0 auto 20px; display:grid; place-items:center; border-radius:20px; background:linear-gradient(135deg,#2b777a,#4b9b96); color:#fff; font-size:1.6rem; font-weight:800; box-shadow:0 10px 24px rgba(43,119,122,.25); }
 .qsl-battle-lobby h1 { margin:0; color:#21494a; font-size:1.7rem; }
 .qsl-battle-lobby p { margin:10px 0 28px; color:#6c8380; }
-.qsl-battle-lobby label { display:block; text-align:left; color:#45615f; font-size:.9rem; font-weight:700; }
-.qsl-battle-lobby input { width:100%; margin-top:8px; padding:13px 14px; border:1px solid #c9ddda; border-radius:10px; box-sizing:border-box; font-size:1rem; }
+.qsl-battle-lobby label { display:block; text-align:left; color:#315957; font-size:1rem; font-weight:800; letter-spacing:.02em; }
+.qsl-battle-lobby input { width:100%; margin-top:10px; padding:15px 16px; border:2px solid #9bc9c3; border-radius:14px; box-sizing:border-box; font-size:1.08rem; color:#204b4b; background:#fff; box-shadow:0 5px 14px rgba(43,119,122,.1); outline:none; transition:border-color .2s,box-shadow .2s; }
+.qsl-battle-lobby input::placeholder { color:#9aafad; }
+.qsl-battle-lobby input:focus { border-color:#2b777a; box-shadow:0 0 0 4px rgba(43,119,122,.16),0 8px 18px rgba(43,119,122,.12); }
 .qsl-battle-lobby .primary-button { width:100%; justify-content:center; margin-top:18px; }
+.qsl-guest-waiting { min-height:300px; }
+.qsl-guest-waiting strong { color:#2b777a; font-size:1.15rem; }
+.qsl-guest-waiting span { color:#6c8380; font-size:.9rem; }
 .qsl-standalone > .revelation-memorization-hero, .qsl-standalone > .revelation-memorization-controls, .qsl-standalone > .revelation-memorization-score { display:none; }
 .qsl-standalone { padding-top:18px; }
 

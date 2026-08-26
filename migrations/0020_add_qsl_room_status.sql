@@ -1,2 +1,3 @@
-ALTER TABLE qsl_puzzle_rooms ADD COLUMN status TEXT NOT NULL DEFAULT 'waiting';
-ALTER TABLE qsl_puzzle_rooms ADD COLUMN started_at TEXT;
+-- Room status columns are included in migration 0018 for fresh databases.
+-- This migration is intentionally kept as a no-op so deployments that already
+-- applied the consolidated schema do not fail on a duplicate ALTER TABLE.
