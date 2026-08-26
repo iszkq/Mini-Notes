@@ -102,6 +102,7 @@ const RevelationMemorization = lazy(() =>
     default: module.RevelationMemorization
   }))
 );
+const QslBattleView = lazy(() => import("./components/QslBattleView").then((module) => ({ default: module.QslBattleView })));
 const TenMinuteReader = lazy(() =>
   import("./components/TenMinuteReader").then((module) => ({ default: module.TenMinuteReader }))
 );
@@ -164,6 +165,7 @@ type PublicShareRoute = {
   shareToken: string;
   noteId: string | null;
 };
+type QslRoute = { roomId: string };
 
 type CategoryTreeItem = {
   category: NoteSummary;
@@ -229,7 +231,8 @@ function App() {
   );
   const initialShareToken = initialPublicRoute?.shareToken ?? null;
   const initialPublicNoteId = initialPublicRoute?.noteId ?? null;
-  const initialQslChallenge = typeof window !== "undefined" && /^#qsl(?:room)?=/.test(window.location.hash);
+  const initialQslRoute = typeof window !== "undefined" ? getQslRouteFromPath(window.location.pathname) : null;
+  const initialQslChallenge = Boolean(initialQslRoute) || (typeof window !== "undefined" && /^#qsl(?:room)?=/.test(window.location.hash));
   const isPublicQslView = initialQslChallenge;
   const isPublicView = Boolean(initialShareToken) || isPublicQslView;
 
@@ -3767,7 +3770,7 @@ function App() {
       return (
         <main className="public-shell">
           <Suspense fallback={<LazyViewFallback label="正在加载 QSL 拼拼乐" />}>
-            <RevelationMemorization onError={setAppError} />
+            {initialQslRoute ? <QslBattleView roomId={initialQslRoute.roomId} /> : <RevelationMemorization onError={setAppError} />}
           </Suspense>
         </main>
       );
@@ -5360,6 +5363,11 @@ function getPublicShareRouteFromPath(pathname: string): PublicShareRoute | null 
     shareToken: decodeURIComponent(match[1]),
     noteId: match[2] ? decodeURIComponent(match[2]) : null
   };
+}
+
+function getQslRouteFromPath(pathname: string): QslRoute | null {
+  const match = /^\/qsl\/([A-Za-z0-9_-]+)\/?$/.exec(pathname);
+  return match ? { roomId: decodeURIComponent(match[1]) } : null;
 }
 
 export default App;

@@ -334,6 +334,7 @@ async function handleApi(
     if (
       segments[0] === "qsl" && segments[1] === "rooms" && segments[2] &&
       ((segments[3] === "join" && request.method === "POST") ||
+        (segments[3] === "progress" && request.method === "PATCH") ||
         (segments[3] === "leaderboard" && request.method === "GET"))
     ) {
       const guest: AuthUser = { id: `guest-${segments[2]}`, username: "访客", isAdmin: false };
@@ -635,25 +636,53 @@ async function handleQslApi(request: Request, env: Env, user: AuthUser, segments
     .bind(roomId, new Date().toISOString()).first<{ roomId: string; seed: number; roundCount: number; difficulty: number; expiresAt: string }>();
   if (!room) return error("房间不存在或已过期。", 404);
   if (request.method === "POST" && segments[3] === "join") {
-    if (!guest) {
+    if (guest) {
+      const body = await readJson<{ nickname?: unknown; playerToken?: unknown }>(request);
+      const nickname = typeof body.nickname === "string" ? body.nickname.trim().slice(0, 20) : "";
+      if (!nickname) return error("请输入昵称。", 400);
+      const suppliedToken = typeof body.playerToken === "string" ? body.playerToken.trim() : "";
+      const existing = suppliedToken
+        ? await env.DB.prepare("SELECT player_token AS playerToken FROM qsl_puzzle_guests WHERE room_id = ? AND player_token = ?").bind(roomId, suppliedToken).first<{ playerToken: string }>()
+        : null;
+      const playerToken = existing?.playerToken ?? generateRandomToken(24);
+      if (existing) {
+        await env.DB.prepare("UPDATE qsl_puzzle_guests SET nickname = ?, updated_at = ? WHERE room_id = ? AND player_token = ?")
+          .bind(nickname, new Date().toISOString(), roomId, playerToken).run();
+      } else {
+        await env.DB.prepare("INSERT INTO qsl_puzzle_guests (id, room_id, player_token, nickname, updated_at) VALUES (?, ?, ?, ?, ?)")
+          .bind(crypto.randomUUID(), roomId, playerToken, nickname, new Date().toISOString()).run();
+      }
+      return json({ ...room, playerToken });
+    } else {
       await env.DB.prepare("INSERT INTO qsl_puzzle_players (room_id, user_id, username, updated_at) VALUES (?, ?, ?, ?) ON CONFLICT(room_id, user_id) DO UPDATE SET updated_at = excluded.updated_at")
         .bind(roomId, user.id, user.username, new Date().toISOString()).run();
     }
     return json(room);
   }
   if (request.method === "PATCH" && segments[3] === "progress") {
-    if (guest) return json({ ok: true });
-    const body = await readJson<{ score?: number; completedRounds?: number }>(request);
+    const body = await readJson<{ score?: number; completedRounds?: number; playerToken?: unknown }>(request);
     const score = Math.max(0, Math.floor(Number(body.score) || 0));
     const completedRounds = Math.min(room.roundCount, Math.max(0, Math.floor(Number(body.completedRounds) || 0)));
+    if (guest) {
+      const playerToken = typeof body.playerToken === "string" ? body.playerToken.trim() : "";
+      if (!playerToken) return error("访客身份无效。", 401);
+      await env.DB.prepare("UPDATE qsl_puzzle_guests SET score = MAX(score, ?), completed_rounds = MAX(completed_rounds, ?), updated_at = ? WHERE room_id = ? AND player_token = ?")
+        .bind(score, completedRounds, new Date().toISOString(), roomId, playerToken).run();
+      return json({ ok: true });
+    }
     await env.DB.prepare("INSERT INTO qsl_puzzle_players (room_id, user_id, username, score, completed_rounds, updated_at) VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT(room_id, user_id) DO UPDATE SET score = excluded.score, completed_rounds = excluded.completed_rounds, updated_at = excluded.updated_at")
       .bind(roomId, user.id, user.username, score, completedRounds, new Date().toISOString()).run();
     return json({ ok: true });
   }
   if (request.method === "GET" && segments[3] === "leaderboard") {
-    const rows = await env.DB.prepare("SELECT user_id AS userId, username, score, completed_rounds AS completedRounds, updated_at AS updatedAt FROM qsl_puzzle_players WHERE room_id = ? ORDER BY score DESC, completed_rounds DESC, updated_at ASC LIMIT 100")
-      .bind(roomId).all();
-    return json(rows.results ?? []);
+    const [users, guests] = await Promise.all([
+      env.DB.prepare("SELECT user_id AS userId, username, score, completed_rounds AS completedRounds, updated_at AS updatedAt FROM qsl_puzzle_players WHERE room_id = ?").bind(roomId).all(),
+      env.DB.prepare("SELECT id AS userId, nickname AS username, score, completed_rounds AS completedRounds, updated_at AS updatedAt FROM qsl_puzzle_guests WHERE room_id = ?").bind(roomId).all()
+    ]);
+    const players = [...(users.results ?? []), ...(guests.results ?? [])]
+      .sort((a: any, b: any) => Number(b.score) - Number(a.score) || Number(b.completedRounds) - Number(a.completedRounds) || String(a.updatedAt).localeCompare(String(b.updatedAt)))
+      .slice(0, 100);
+    return json(players);
   }
   return error("未找到接口。", 404);
 }

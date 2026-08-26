@@ -7866,6 +7866,16 @@ button.note-breadcrumb__item:hover {
 .revelation-puzzle-room { display:flex; flex-wrap:wrap; gap:8px; margin:0 36px 14px 0; padding:10px 12px; border-radius:10px; background:#edf6f4; color:#315f5c; font-size:.78rem; }
 .revelation-puzzle-room strong { width:100%; }
 .revelation-puzzle-room span { padding:4px 7px; border-radius:999px; background:#fff; }
+.qsl-battle-shell { min-height:100vh; background:linear-gradient(145deg,#eef7f6,#f9fbfb); }
+.qsl-battle-lobby { width:min(420px,calc(100vw - 32px)); margin:0 auto; padding:72px 24px 40px; text-align:center; }
+.qsl-battle-brand { width:64px; height:64px; margin:0 auto 20px; display:grid; place-items:center; border-radius:20px; background:linear-gradient(135deg,#2b777a,#4b9b96); color:#fff; font-size:1.6rem; font-weight:800; box-shadow:0 10px 24px rgba(43,119,122,.25); }
+.qsl-battle-lobby h1 { margin:0; color:#21494a; font-size:1.7rem; }
+.qsl-battle-lobby p { margin:10px 0 28px; color:#6c8380; }
+.qsl-battle-lobby label { display:block; text-align:left; color:#45615f; font-size:.9rem; font-weight:700; }
+.qsl-battle-lobby input { width:100%; margin-top:8px; padding:13px 14px; border:1px solid #c9ddda; border-radius:10px; box-sizing:border-box; font-size:1rem; }
+.qsl-battle-lobby .primary-button { width:100%; justify-content:center; margin-top:18px; }
+.qsl-standalone > .revelation-memorization-hero, .qsl-standalone > .revelation-memorization-controls, .qsl-standalone > .revelation-memorization-score { display:none; }
+.qsl-standalone { padding-top:18px; }
 
 @media (max-width: 760px) {
   .revelation-memorization-page {

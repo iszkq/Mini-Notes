@@ -4,7 +4,7 @@ import { type BibleData, type BibleVerse, loadBibleChapter, loadBibleData, sortB
 import { createQslPuzzleRoom, getQslPuzzleLeaderboard, joinQslPuzzleRoom, updateQslPuzzleProgress } from "../api";
 import type { QslPuzzlePlayer } from "../shared";
 
-type RevelationMemorizationProps = { onError?: (message: string) => void };
+type RevelationMemorizationProps = { onError?: (message: string) => void; standaloneRoomId?: string; standalonePlayerToken?: string; standaloneNickname?: string };
 type ExerciseMode = "fill-in-blank" | "recite";
 type PuzzleDifficulty = 25 | 17 | 10;
 type PuzzlePhase = "difficulty" | "playing" | "result" | "complete";
@@ -23,7 +23,7 @@ const ENCOURAGEMENTS = [
   "很有进步，继续完成这一章吧！"
 ];
 
-export function RevelationMemorization({ onError }: RevelationMemorizationProps) {
+export function RevelationMemorization({ onError, standaloneRoomId, standalonePlayerToken, standaloneNickname }: RevelationMemorizationProps) {
   const [data, setData] = useState<BibleData | null>(null);
   const [bookName, setBookName] = useState("");
   const [chapter, setChapter] = useState(1);
@@ -46,7 +46,7 @@ export function RevelationMemorization({ onError }: RevelationMemorizationProps)
   const [remainingTime, setRemainingTime] = useState(25);
   const [puzzleScore, setPuzzleScore] = useState(0);
   const [roundCorrect, setRoundCorrect] = useState(false);
-  const [qslRoomId, setQslRoomId] = useState<string | null>(null);
+  const [qslRoomId, setQslRoomId] = useState<string | null>(standaloneRoomId ?? null);
   const [leaderboard, setLeaderboard] = useState<QslPuzzlePlayer[]>([]);
   const requestIdRef = useRef(0);
   const toastTimerRef = useRef<number | null>(null);
@@ -151,7 +151,7 @@ export function RevelationMemorization({ onError }: RevelationMemorizationProps)
       const points = activeRound.segments.length * 10 + Math.round(2 * remainingTimeRef.current);
       setPuzzleScore((score) => {
         const nextScore = score + points;
-        if (qslRoomId) void updateQslPuzzleProgress(qslRoomId, { score: nextScore, completedRounds: roundNumber }).catch(() => undefined);
+        if (qslRoomId) void updateQslPuzzleProgress(qslRoomId, { score: nextScore, completedRounds: roundNumber, playerToken: standalonePlayerToken }).catch(() => undefined);
         return nextScore;
       });
       showToast(`本轮正确，获得 ${points} 分！`);
@@ -224,7 +224,8 @@ export function RevelationMemorization({ onError }: RevelationMemorizationProps)
     try {
       const room = await createQslPuzzleRoom({ roundCount: puzzleRoundTarget, difficulty });
       setQslRoomId(room.roomId);
-      url.hash = `qslroom=${room.roomId}`;
+      url.pathname = `/qsl/${room.roomId}`;
+      url.hash = "";
     } catch {
       url.hash = `qsl=${puzzleRoundTarget}&difficulty=${difficulty}`;
     }
@@ -262,8 +263,13 @@ export function RevelationMemorization({ onError }: RevelationMemorizationProps)
     return () => window.clearInterval(timer);
   }, [qslRoomId]);
 
+  useEffect(() => {
+    if (!standaloneRoomId || !bookName || puzzleLoading || puzzleVerses.length > 0) return;
+    void openPuzzle();
+  }, [bookName, openPuzzle, puzzleLoading, puzzleVerses.length, standaloneRoomId]);
+
   return (
-    <section className="revelation-memorization-page" aria-busy={loading}>
+    <section className={`revelation-memorization-page${standaloneRoomId ? " qsl-standalone" : ""}`} aria-busy={loading}>
       <header className="revelation-memorization-hero">
         <div>
           <span className="revelation-memorization-eyebrow"><BookOpen size={15} />启示录练习</span>

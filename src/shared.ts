@@ -36,6 +36,7 @@ export type QslPuzzleRoom = {
   roundCount: number;
   difficulty: number;
   expiresAt: string;
+  playerToken?: string;
 };
 
 export type QslPuzzlePlayer = {

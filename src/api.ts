@@ -64,10 +64,13 @@ export async function getStatus(): Promise<SessionStatus> {
 export async function createQslPuzzleRoom(input: { roundCount: number; difficulty: number }): Promise<QslPuzzleRoom> {
   return apiRequest("/api/qsl/rooms", { method: "POST", body: JSON.stringify(input) });
 }
-export async function joinQslPuzzleRoom(roomId: string): Promise<QslPuzzleRoom> {
-  return apiRequest(`/api/qsl/rooms/${encodeURIComponent(roomId)}/join`, { method: "POST" });
+export async function joinQslPuzzleRoom(roomId: string, nickname?: string, playerToken?: string): Promise<QslPuzzleRoom> {
+  return apiRequest(`/api/qsl/rooms/${encodeURIComponent(roomId)}/join`, {
+    method: "POST",
+    body: JSON.stringify({ nickname, playerToken })
+  });
 }
-export async function updateQslPuzzleProgress(roomId: string, input: { score: number; completedRounds: number }): Promise<{ ok: true }> {
+export async function updateQslPuzzleProgress(roomId: string, input: { score: number; completedRounds: number; playerToken?: string }): Promise<{ ok: true }> {
   return apiRequest(`/api/qsl/rooms/${encodeURIComponent(roomId)}/progress`, { method: "PATCH", body: JSON.stringify(input) });
 }
 export async function getQslPuzzleLeaderboard(roomId: string): Promise<QslPuzzlePlayer[]> {
