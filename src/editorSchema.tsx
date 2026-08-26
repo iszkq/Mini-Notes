@@ -1438,7 +1438,7 @@ export const tableCellStyleExtension = createExtension({
           rowGuide?.remove();
           rowGuide = null;
         };
-        const showRowGuide = (table: HTMLElement, row: HTMLElement) => {
+        const showRowGuide = (table: HTMLElement, row: HTMLTableRowElement) => {
           if (!rowGuide) {
             rowGuide = document.createElement("div");
             rowGuide.className = "bn-row-resize-guide";
@@ -1456,6 +1456,20 @@ export const tableCellStyleExtension = createExtension({
             left: `${left}px`,
             top: `${rowRect.bottom - 3}px`,
             width: `${Math.max(0, right - left)}px`
+          });
+          const guide = rowGuide;
+          guide.replaceChildren();
+          Array.from(row.cells).forEach((cell: HTMLTableCellElement) => {
+            const cellRect = cell.getBoundingClientRect();
+            const segmentLeft = Math.max(0, cellRect.left - left);
+            const segmentRight = Math.min(right - left, cellRect.right - left);
+            const segmentWidth = segmentRight - segmentLeft;
+            if (segmentWidth <= 1) return;
+            const segment = document.createElement("span");
+            segment.className = "bn-row-resize-guide-segment";
+            segment.style.left = `${segmentLeft}px`;
+            segment.style.width = `${Math.max(1, segmentWidth - 1)}px`;
+            guide.appendChild(segment);
           });
         };
         const resolveCellAtPointer = (event: PointerEvent, target: Element | null) => {
@@ -1502,7 +1516,7 @@ export const tableCellStyleExtension = createExtension({
                   table.querySelectorAll<HTMLElement>('tr[data-row-resize-hover]').forEach((row) => {
                     if (row !== cell.closest("tr")) row.removeAttribute("data-row-resize-hover");
                   });
-                  const row = cell.closest("tr") as HTMLElement | null;
+                  const row = cell.closest("tr") as HTMLTableRowElement | null;
                   // Use a forgiving hit strip like the column resize handle.
                   // A 12px strip is much easier to grab on touchpads and high-DPI screens.
                   const nearBottom = cell.getBoundingClientRect().bottom - event.clientY <= 12;

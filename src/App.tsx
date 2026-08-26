@@ -177,6 +177,39 @@ const SIDEBAR_GROUP_PAGE_STEP = 80;
 const SIDEBAR_SEARCH_PAGE_SIZE = 120;
 const UNCATEGORIZED_GROUP_KEY = "__uncategorized__";
 const SIDEBAR_COLLAPSED_STORAGE_KEY = "mini-notes-sidebar-collapsed";
+const PUBLIC_PASSWORD_STORAGE_PREFIX = "mini-notes-public-password:";
+
+function getPublicPasswordStorageKey(shareToken: string) {
+  return `${PUBLIC_PASSWORD_STORAGE_PREFIX}${encodeURIComponent(shareToken)}`;
+}
+
+function readCachedPublicPassword(shareToken: string) {
+  if (typeof window === "undefined") return "";
+  try {
+    return window.localStorage.getItem(getPublicPasswordStorageKey(shareToken)) ?? "";
+  } catch {
+    return "";
+  }
+}
+
+function cachePublicPassword(shareToken: string, password: string) {
+  if (typeof window === "undefined" || !password) return;
+  try {
+    window.localStorage.setItem(getPublicPasswordStorageKey(shareToken), password);
+  } catch {
+    // Storage may be disabled in private browsing; the in-memory password
+    // still keeps navigation within the current page working.
+  }
+}
+
+function clearCachedPublicPassword(shareToken: string) {
+  if (typeof window === "undefined") return;
+  try {
+    window.localStorage.removeItem(getPublicPasswordStorageKey(shareToken));
+  } catch {
+    // Ignore storage failures.
+  }
+}
 const PAGE_HISTORY_LIMIT = 80;
 const DROP_TARGET_EDGE_RATIO = 0.25;
 const DEFAULT_TITLE_SIZE: NoteTitleSize = "h1";
@@ -581,21 +614,29 @@ function App() {
     publicNoteRequestRef.current = requestId;
     setPublicPending(true);
     setPublicError(null);
+    const suppliedPassword = password?.trim() ?? "";
+    const effectivePassword = suppliedPassword || readCachedPublicPassword(shareToken) || undefined;
 
     try {
-      const note = normalizeNote(await getPublicNote(shareToken, noteId, password));
+      const note = normalizeNote(await getPublicNote(shareToken, noteId, effectivePassword));
       if (publicNoteRequestRef.current !== requestId) {
         return;
       }
 
       setPublicNote(note);
       setPublicPasswordRequired(false);
+      if (effectivePassword) {
+        cachePublicPassword(shareToken, effectivePassword);
+        setPublicPassword(effectivePassword);
+      }
     } catch (error) {
       if (publicNoteRequestRef.current !== requestId) {
         return;
       }
 
       if (error instanceof ApiError && error.status === 401) {
+        if (effectivePassword) clearCachedPublicPassword(shareToken);
+        setPublicPassword("");
         setPublicNote(null);
         setPublicPasswordRequired(true);
       } else if (error instanceof ApiError) {
@@ -638,7 +679,7 @@ function App() {
 
       const nextPath = `/share/${encodeURIComponent(shareToken)}/${encodeURIComponent(noteId)}`;
       window.history.pushState({ shareToken, noteId }, "", nextPath);
-      void loadPublicNote(shareToken, noteId, publicPassword);
+      void loadPublicNote(shareToken, noteId);
     };
 
     const handlePublicPopState = () => {
@@ -647,7 +688,7 @@ function App() {
         return;
       }
 
-      void loadPublicNote(route.shareToken, route.noteId, publicPassword);
+      void loadPublicNote(route.shareToken, route.noteId);
     };
 
     window.addEventListener("mini-notes:open-public-note", handleOpenPublicNote);
@@ -3853,7 +3894,7 @@ function App() {
               <button className="primary-button public-password-submit" disabled={!publicPassword.trim()} type="submit">
                 解锁并查看
               </button>
-              <small className="public-password-hint">密码仅用于本次访问，不会被保存。</small>
+              <small className="public-password-hint">验证成功后会保存在当前浏览器，下次打开无需重复输入。</small>
             </form>
             </div>
           </section>

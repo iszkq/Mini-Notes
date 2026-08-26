@@ -5599,6 +5599,9 @@ button.note-breadcrumb__item:hover {
 .mind-elixir-header select { border:1px solid #d4e3e0; border-radius:7px; padding:5px 8px; background:#fff; color:#315f60; }
 .mind-elixir-host { width:100%; height:560px; min-height:420px; border:1px solid #dce9e7; border-radius:12px; overflow:hidden; background:#f8fbfb; cursor:grab; touch-action:none; user-select:none; overscroll-behavior:contain; }
 .mind-elixir-host:active, .mind-elixir-host .map-container:active { cursor:grabbing; }
+.mind-elixir-host .context-menu { cursor:default; }
+.mind-elixir-host .context-menu .menu-list { min-width:148px; max-width:min(220px,calc(100vw - 24px)); border:1px solid #d9e6e4; border-radius:8px; box-shadow:0 8px 24px rgba(24,65,66,.18); }
+.mind-elixir-host .context-menu .menu-list li { min-width:0; padding:5px 9px; font-size:13px; line-height:18px; }
 .mind-elixir-host .map-canvas { cursor:grab; }
 .mind-elixir-host .map-canvas:active { cursor:grabbing; }
 .mind-elixir-host .map-container { width:100%; height:100%; cursor:grab; touch-action:none; }

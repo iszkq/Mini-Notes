@@ -63,9 +63,13 @@ export function MindElixirMindMap({ block, editor }: { block: any; editor: any }
     const mind = new MindElixir({
       el: host,
       direction: MindElixir.RIGHT,
-      contextMenu: { locale: cn, focus: true, link: true },
-      toolBar: true,
-      keypress: true,
+      editable: editor.isEditable,
+      // The public/preview view must remain a true viewer: Mind Elixir's
+      // focus context menu otherwise leaves its modal state and hand cursor
+      // active after clicking outside the map.
+      contextMenu: editor.isEditable ? { locale: cn, focus: true, link: true } : false,
+      toolBar: editor.isEditable,
+      keypress: editor.isEditable,
       // Left-drag on empty canvas pans; node dragging and node editing remain
       // handled by Mind Elixir itself.
       mouseSelectionButton: 2,
@@ -85,6 +89,14 @@ export function MindElixirMindMap({ block, editor }: { block: any; editor: any }
       if (event.button !== 0 && event.pointerType !== "touch") return;
       const target = event.target instanceof Element ? event.target : null;
       if (!target || target.closest(".me-tpc, .me-epd, .mind-elixir-toolbar")) return;
+      // Mind Elixir renders its context menu as a full-viewport overlay. Do
+      // not start a canvas pan from that overlay; close it when the user taps
+      // outside the compact menu itself so focus mode cannot get stuck.
+      const contextMenu = host.querySelector<HTMLElement>(".context-menu");
+      if (contextMenu && !contextMenu.hidden) {
+        if (!target.closest(".context-menu .menu-list")) contextMenu.hidden = true;
+        return;
+      }
       panGestureRef.current = { pointerId: event.pointerId, x: event.clientX, y: event.clientY };
       host.setPointerCapture?.(event.pointerId);
       event.preventDefault();
@@ -107,6 +119,14 @@ export function MindElixirMindMap({ block, editor }: { block: any; editor: any }
       if (host.hasPointerCapture?.(event.pointerId)) host.releasePointerCapture(event.pointerId);
       event.stopPropagation();
     };
+    const closeContextMenuOnEscape = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") return;
+      const contextMenu = host.querySelector<HTMLElement>(".context-menu");
+      if (contextMenu && !contextMenu.hidden) {
+        contextMenu.hidden = true;
+        event.stopPropagation();
+      }
+    };
     host.addEventListener("dragstart", containNativeDrag);
     host.addEventListener("dragover", containNativeDrag);
     host.addEventListener("drop", containNativeDrag);
@@ -119,6 +139,7 @@ export function MindElixirMindMap({ block, editor }: { block: any; editor: any }
     host.addEventListener("pointermove", moveCanvasPan, true);
     host.addEventListener("pointerup", endCanvasPan, true);
     host.addEventListener("pointercancel", endCanvasPan, true);
+    host.addEventListener("keydown", closeContextMenuOnEscape, true);
 
     let wasFullscreen = document.fullscreenElement === host;
     let centerTimer: number | null = null;
@@ -162,6 +183,7 @@ export function MindElixirMindMap({ block, editor }: { block: any; editor: any }
       host.removeEventListener("pointermove", moveCanvasPan, true);
       host.removeEventListener("pointerup", endCanvasPan, true);
       host.removeEventListener("pointercancel", endCanvasPan, true);
+      host.removeEventListener("keydown", closeContextMenuOnEscape, true);
       mind.bus.removeListener("operation", onOperation);
       mind.destroy();
       mindRef.current = null;
