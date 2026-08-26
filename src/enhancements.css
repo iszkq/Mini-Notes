@@ -1753,7 +1753,7 @@ button.collapsible-content-block__toggle:hover {
 .color-block {
   position: relative;
   margin: 12px 0;
-  padding: 16px 20px;
+  padding: 14px 16px;
   border-radius: 12px;
   border: 1px solid rgba(66, 80, 78, 0.08);
   box-sizing: border-box;
@@ -1771,6 +1771,10 @@ button.collapsible-content-block__toggle:hover {
   align-items: flex-start;
   gap: 10px;
   min-height: 28px;
+}
+
+.color-block:has(.color-block__tools) .color-block__body {
+  padding-top: 36px;
 }
 
 .color-block__icon {
@@ -1811,32 +1815,22 @@ button.collapsible-content-block__toggle:hover {
   right: 9px;
   z-index: 2;
   display: flex;
+  max-width: calc(100% - 18px);
   align-items: center;
   gap: 5px;
+  overflow-x: auto;
+  overflow-y: hidden;
   opacity: 0;
   transition: opacity 0.15s ease;
+}
+
+.color-block__tools::-webkit-scrollbar {
+  display: none;
 }
 
 .color-block:hover .color-block__tools,
 .color-block:focus-within .color-block__tools {
   opacity: 1;
-}
-
-.color-block__icon-input {
-  width: 38px;
-  height: 25px;
-  padding: 0 3px;
-  border: 1px solid rgba(66, 80, 78, 0.18);
-  border-radius: 6px;
-  background: rgba(255, 255, 255, 0.72);
-  text-align: center;
-  font-size: 15px;
-  line-height: 1;
-}
-
-.color-block__icon-input:focus {
-  outline: 2px solid rgba(64, 126, 117, 0.35);
-  outline-offset: 1px;
 }
 
 .color-block__emoji-button {
@@ -1913,6 +1907,20 @@ button.collapsible-content-block__toggle:hover {
 
 .note-editor-layout.is-readonly .color-block__tools {
   display: none;
+}
+
+.note-editor-layout.is-readonly .color-block__body {
+  padding-top: 0;
+}
+
+@media (max-width: 560px) {
+  .color-block {
+    padding: 12px 13px;
+  }
+
+  .color-block:has(.color-block__tools) .color-block__body {
+    padding-top: 38px;
+  }
 }
 
 /* Keep the slash command list inside the viewport.  The stock menu can grow

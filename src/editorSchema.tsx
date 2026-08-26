@@ -453,17 +453,6 @@ const colorBlock = createReactBlockSpec(
           }}
         >
           <div className="color-block__tools" contentEditable={false}>
-            <input
-              aria-label="色块图标"
-              className="color-block__icon-input"
-              onChange={(event) => updateProps({ icon: event.target.value })}
-              onClick={(event) => event.stopPropagation()}
-              onKeyDown={(event) => event.stopPropagation()}
-              onMouseDown={(event) => event.stopPropagation()}
-              placeholder="图标"
-              readOnly={!editor.isEditable}
-              value={icon}
-            />
             <button
               aria-label="从表情包选择图标"
               className="color-block__emoji-button"
@@ -1793,7 +1782,11 @@ function insertHardBreakInEmbeddedCard(editor: BlockNoteEditor<any, any, any>): 
           : null
         : editor.getTextCursorPosition().block;
 
-    if (currentBlock?.type !== "collapsibleContent" && currentBlock?.type !== "bibleVerseCard") {
+    if (
+      currentBlock?.type !== "collapsibleContent" &&
+      currentBlock?.type !== "bibleVerseCard" &&
+      currentBlock?.type !== "colorBlock"
+    ) {
       return false;
     }
 
