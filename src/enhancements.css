@@ -591,6 +591,7 @@
 .page-context-menu__section {
   display: grid;
   gap: 3px;
+  white-space: nowrap;
   max-height: 150px;
   overflow-y: auto;
   margin: 2px 0;
@@ -3137,6 +3138,9 @@ button.collapsible-content-block__toggle:hover {
   min-height: 34px;
   min-width: 92px;
   flex: 0 0 auto;
+  width: auto !important;
+  max-width: 150px;
+  padding-inline: 10px !important;
   border-radius: 7px;
   background: #ffffff !important;
   color: #334e5f;

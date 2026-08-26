@@ -1445,13 +1445,31 @@ export const tableCellStyleExtension = createExtension({
             rowGuide.setAttribute("aria-hidden", "true");
             document.body.appendChild(rowGuide);
           }
-          const tableRect = table.getBoundingClientRect();
+          const tableElement = table.querySelector("table") as HTMLElement | null;
+          const wrapper = table.querySelector(".tableWrapper") as HTMLElement | null;
+          const tableRect = tableElement?.getBoundingClientRect() ?? table.getBoundingClientRect();
+          const visibleRect = wrapper?.getBoundingClientRect();
+          const left = Math.max(tableRect.left, visibleRect?.left ?? tableRect.left);
+          const right = Math.min(tableRect.right, visibleRect?.right ?? tableRect.right);
           const rowRect = row.getBoundingClientRect();
           Object.assign(rowGuide.style, {
-            left: `${tableRect.left}px`,
+            left: `${left}px`,
             top: `${rowRect.bottom - 3}px`,
-            width: `${tableRect.width}px`
+            width: `${Math.max(0, right - left)}px`
           });
+        };
+        const resolveCellAtPointer = (event: PointerEvent, target: Element | null) => {
+          const candidates: HTMLElement[] = [];
+          for (const offset of [0, -2, 2, -6, 6, -10, 10]) {
+            const candidate = document.elementFromPoint(event.clientX, event.clientY + offset);
+            const found = candidate?.closest("td, th") as HTMLElement | null;
+            if (found && !candidates.includes(found)) candidates.push(found);
+          }
+          const fallback = target?.closest("td, th") as HTMLElement | null;
+          if (fallback && !candidates.includes(fallback)) candidates.push(fallback);
+          return candidates
+            .map((cell) => ({ cell, distance: Math.abs(cell.getBoundingClientRect().bottom - event.clientY) }))
+            .sort((a, b) => a.distance - b.distance)[0]?.cell ?? null;
         };
         return [
           new ProseMirrorPlugin({
@@ -1478,15 +1496,7 @@ export const tableCellStyleExtension = createExtension({
                     return false;
                   }
                   const target = event.target instanceof Element ? event.target : null;
-                  const findCell = (offsets: number[] = [0]) => {
-                    for (const offset of offsets) {
-                      const candidate = document.elementFromPoint(event.clientX, event.clientY + offset);
-                      const found = candidate?.closest("td, th") as HTMLElement | null;
-                      if (found) return found;
-                    }
-                    return target?.closest("td, th") as HTMLElement | null;
-                  };
-                  const cell = findCell([0, -2, 2, -6, 6]);
+                  const cell = resolveCellAtPointer(event, target);
                   const table = cell?.closest('[data-content-type="table"]') as HTMLElement | null;
                   if (!cell || !table || !view.dom.contains(cell)) return false;
                   table.querySelectorAll<HTMLElement>('tr[data-row-resize-hover]').forEach((row) => {
@@ -1510,14 +1520,7 @@ export const tableCellStyleExtension = createExtension({
                   if (!view.editable) return false;
                   if (event.button !== 0) return false;
                   const target = event.target instanceof Element ? event.target : null;
-                  const cell = (() => {
-                    for (const offset of [0, -2, 2, -6, 6]) {
-                      const candidate = document.elementFromPoint(event.clientX, event.clientY + offset);
-                      const found = candidate?.closest("td, th") as HTMLElement | null;
-                      if (found) return found;
-                    }
-                    return target?.closest("td, th") as HTMLElement | null;
-                  })();
+                  const cell = resolveCellAtPointer(event, target);
                   const row = cell?.closest("tr") as HTMLElement | null;
                   const table = cell?.closest('[data-content-type="table"]') as HTMLElement | null;
                   if (!cell || !row || !view.dom.contains(row)) return false;
