@@ -3113,11 +3113,11 @@ button.collapsible-content-block__toggle:hover {
 .bn-editor [data-content-type="table"] .column-resize-handle.column-resize-dragging {
   opacity: 1;
 }
-.selectable-table-handle { display:grid; place-items:center; border:1px solid #d5dfe7; border-radius:7px; background:#fff; color:#647b8b; box-shadow:0 2px 8px rgba(32,65,90,.16); cursor:pointer; }
+.selectable-table-handle { display:grid; place-items:center; width:24px; min-width:24px; height:24px; min-height:24px; box-sizing:border-box; padding:0; border:1px solid #d5dfe7; border-radius:7px; background:#fff; color:#647b8b; box-shadow:0 2px 8px rgba(32,65,90,.16); cursor:pointer; }
 .selectable-table-handle:hover { color:#2f6f9f; background:#edf6ff; border-color:#85b9dd; }
-.selectable-table-handle.is-column { transform:rotate(0deg) !important; }
-.selectable-table-handle.is-row { transform:rotate(90deg) !important; }
-.bn-editor .selectedCell:after { z-index: 2; inset: 0; width: 100%; height: 100%; box-sizing: border-box; }
+.bn-editor [data-content-type="table"] td,
+.bn-editor [data-content-type="table"] th { position:relative; overflow:visible; }
+.bn-editor .selectedCell:after { position:absolute; z-index:2; inset:-1px; width:auto; height:auto; box-sizing:border-box; border:2px solid rgba(77,145,224,.9); border-radius:1px; pointer-events:none; }
 
 /* Drag the lower edge of any row to increase its height. */
 .bn-editor [data-content-type="table"] tr[data-row-height] {

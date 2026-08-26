@@ -12,6 +12,7 @@ import {
   FileRenameButton,
   FileReplaceButton,
   FormattingToolbar,
+  TableHandleMenu,
   type TableHandleProps,
   type FormattingToolbarProps,
   NestBlockButton,
@@ -148,31 +149,47 @@ export function SelectableTableHandle(props: TableHandleProps) {
   };
 
   return (
-    <HandleRoot
-      aria-label={props.orientation === "column" ? "选择并拖动整列" : "选择并拖动整行"}
-      className={mergeCSSClasses(
-        "bn-table-handle selectable-table-handle",
-        `is-${props.orientation}`,
-        isDragging ? "bn-table-handle-dragging" : "",
-        !isDraggable ? "bn-table-handle-not-draggable" : ""
-      )}
-      draggable={isDraggable}
-      onClick={selectWholeAxis}
-      onDragStart={(event: ReactDragEvent<Element>) => {
-        setIsDragging(true);
-        props.hideOtherElements(true);
-        if (props.orientation === "column") tableHandles.colDragStart(event);
-        else tableHandles.rowDragStart(event);
+    <Components.Generic.Menu.Root
+      onOpenChange={(open: boolean) => {
+        if (open) {
+          tableHandles.freezeHandles();
+          props.hideOtherElements(true);
+        } else {
+          tableHandles.unfreezeHandles();
+          props.hideOtherElements(false);
+          editor.focus();
+        }
       }}
-      onDragEnd={() => {
-        tableHandles.dragEnd();
-        props.hideOtherElements(false);
-        setIsDragging(false);
-      }}
-      style={undefined}
+      position="right"
     >
-      {props.orientation === "column" ? <GripHorizontal size={20} /> : <GripVertical size={20} />}
-    </HandleRoot>
+      <Components.Generic.Menu.Trigger>
+        <HandleRoot
+          aria-label={props.orientation === "column" ? "选择整列，拖动可移动" : "选择整行，拖动可移动"}
+          className={mergeCSSClasses(
+            "bn-table-handle selectable-table-handle",
+            isDragging ? "bn-table-handle-dragging" : "",
+            !isDraggable ? "bn-table-handle-not-draggable" : ""
+          )}
+          draggable={isDraggable}
+          onClick={selectWholeAxis}
+          onDragStart={(event: ReactDragEvent<Element>) => {
+            setIsDragging(true);
+            props.hideOtherElements(true);
+            if (props.orientation === "column") tableHandles.colDragStart(event);
+            else tableHandles.rowDragStart(event);
+          }}
+          onDragEnd={() => {
+            tableHandles.dragEnd();
+            props.hideOtherElements(false);
+            setIsDragging(false);
+          }}
+          style={props.orientation === "column" ? { transform: "rotate(0.25turn)" } : undefined}
+        >
+          {props.orientation === "column" ? <GripHorizontal size={20} data-test="tableHandle" /> : <GripVertical size={20} data-test="tableHandle" />}
+        </HandleRoot>
+      </Components.Generic.Menu.Trigger>
+      <TableHandleMenu orientation={props.orientation} />
+    </Components.Generic.Menu.Root>
   );
 }
 
