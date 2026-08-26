@@ -22,6 +22,22 @@ function readNodes(payload: unknown): LegacyNode[] {
 }
 
 function toMindData(payload: unknown): MindElixirData {
+  // Keep native Mind Elixir payloads intact. This preserves node styles,
+  // positions, summaries, arrows and metadata when a document is reopened.
+  try {
+    const parsed = typeof payload === "string" ? JSON.parse(payload) : payload;
+    if (parsed && typeof parsed === "object" && !Array.isArray(parsed) && "nodeData" in parsed) {
+      const native = parsed as Partial<MindElixirData>;
+      if (native.nodeData && typeof native.nodeData === "object") {
+        return {
+          ...native,
+          direction: native.direction ?? MindElixir.RIGHT
+        } as MindElixirData;
+      }
+    }
+  } catch {
+    // Fall through to the legacy block-array converter below.
+  }
   const source = readNodes(payload).filter((item) => !item.kind || item.kind === "node");
   const root = source.find((item) => !item.parentId) ?? source[0] ?? { id: "mind-root", text: "中心主题" };
   const build = (item: LegacyNode): NodeObj => ({
