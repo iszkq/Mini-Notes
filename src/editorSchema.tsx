@@ -1437,38 +1437,49 @@ export const tableCellStyleExtension = createExtension({
           new ProseMirrorPlugin({
             props: {
               handleDOMEvents: {
-                pointerout(view, event) {
-                  const target = event.target instanceof Element ? event.target : null;
-                  const related = event.relatedTarget instanceof Node ? event.relatedTarget : null;
-                  if (!target || (related && target.contains(related))) return false;
-                  const row = target.closest('tr[data-row-resize-hover]') as HTMLElement | null;
-                  row?.removeAttribute("data-row-resize-hover");
-                  return false;
-                },
                 pointermove(view, event) {
                   const target = event.target instanceof Element ? event.target : null;
-                  const cell = target?.closest("td, th") as HTMLElement | null;
+                  const findCell = (offsets: number[] = [0]) => {
+                    for (const offset of offsets) {
+                      const candidate = document.elementFromPoint(event.clientX, event.clientY + offset);
+                      const found = candidate?.closest("td, th") as HTMLElement | null;
+                      if (found) return found;
+                    }
+                    return target?.closest("td, th") as HTMLElement | null;
+                  };
+                  const cell = findCell([0, -2, 2, -6, 6]);
                   const table = cell?.closest('[data-content-type="table"]') as HTMLElement | null;
                   if (!cell || !table || !view.dom.contains(cell)) return false;
                   table.querySelectorAll<HTMLElement>('tr[data-row-resize-hover]').forEach((row) => {
                     if (row !== cell.closest("tr")) row.removeAttribute("data-row-resize-hover");
                   });
                   const row = cell.closest("tr") as HTMLElement | null;
-                  const nearBottom = cell.getBoundingClientRect().bottom - event.clientY <= 7;
+                  // Use a forgiving hit strip like the column resize handle.
+                  // A 12px strip is much easier to grab on touchpads and high-DPI screens.
+                  const nearBottom = cell.getBoundingClientRect().bottom - event.clientY <= 12;
                   if (row) {
                     if (nearBottom) row.setAttribute("data-row-resize-hover", "true");
                     else row.removeAttribute("data-row-resize-hover");
                   }
                   cell.style.cursor = nearBottom ? "row-resize" : "";
+                  table.style.cursor = nearBottom ? "row-resize" : "";
                   return false;
                 },
                 pointerdown(view, event) {
                   if (event.button !== 0) return false;
                   const target = event.target instanceof Element ? event.target : null;
-                  const cell = target?.closest("td, th") as HTMLElement | null;
+                  const cell = (() => {
+                    for (const offset of [0, -2, 2, -6, 6]) {
+                      const candidate = document.elementFromPoint(event.clientX, event.clientY + offset);
+                      const found = candidate?.closest("td, th") as HTMLElement | null;
+                      if (found) return found;
+                    }
+                    return target?.closest("td, th") as HTMLElement | null;
+                  })();
                   const row = cell?.closest("tr") as HTMLElement | null;
+                  const table = cell?.closest('[data-content-type="table"]') as HTMLElement | null;
                   if (!cell || !row || !view.dom.contains(row)) return false;
-                  if (cell.getBoundingClientRect().bottom - event.clientY > 7) return false;
+                  if (cell.getBoundingClientRect().bottom - event.clientY > 12) return false;
 
                   const mappedPos = view.posAtDOM(row, 0);
                   const rowPos = [mappedPos - 1, mappedPos].find(
@@ -1489,16 +1500,20 @@ export const tableCellStyleExtension = createExtension({
                     const height = Math.max(32, Math.round(startHeight + moveEvent.clientY - startY));
                     const currentNode = view.state.doc.nodeAt(rowPos);
                     if (!currentNode || currentNode.type.name !== "tableRow") return;
-                    row.style.height = `${height}px`;
+                    const liveRow = (view.nodeDOM(rowPos) as HTMLElement | null) ?? row;
+                    liveRow.style.height = `${height}px`;
                     view.dispatch(
                       view.state.tr.setNodeMarkup(rowPos, undefined, {
                         ...currentNode.attrs,
                         rowHeight: height
                       })
                     );
+                    const renderedRow = view.nodeDOM(rowPos) as HTMLElement | null;
+                    renderedRow?.setAttribute("data-row-resize-active", "true");
                   };
                   const finish = () => {
                     document.body.style.cursor = previousCursor;
+                    if (table) table.style.cursor = "";
                     row.removeAttribute("data-row-resize-active");
                     row.removeAttribute("data-row-resize-hover");
                     window.removeEventListener("pointermove", resize);

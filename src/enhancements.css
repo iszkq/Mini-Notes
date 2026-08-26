@@ -3116,6 +3116,30 @@ button.collapsible-content-block__toggle:hover {
 }
 .selectable-table-handle { display:grid; place-items:center; width:24px; min-width:24px; height:24px; min-height:24px; box-sizing:border-box; padding:0; border:1px solid #d5dfe7; border-radius:7px; background:#fff; color:#647b8b; box-shadow:0 2px 8px rgba(32,65,90,.16); cursor:pointer; }
 .selectable-table-handle:hover { color:#2f6f9f; background:#edf6ff; border-color:#85b9dd; }
+.bn-mantine .bn-table-handle-menu,
+.bn-table-handle-menu {
+  z-index: 1000 !important;
+  min-width: 148px;
+  padding: 5px !important;
+  border: 1px solid #d8e2e8 !important;
+  border-radius: 10px !important;
+  background: #ffffff !important;
+  box-shadow: 0 12px 30px rgba(27, 52, 69, 0.2) !important;
+  opacity: 1 !important;
+  isolation: isolate;
+}
+.bn-table-handle-menu .mantine-Menu-item {
+  min-height: 34px;
+  border-radius: 7px;
+  background: #ffffff !important;
+  color: #334e5f;
+  font-size: 0.84rem;
+  line-height: 1.2;
+}
+.bn-table-handle-menu .mantine-Menu-item:hover {
+  background: #edf5fb !important;
+  color: #1f5b86;
+}
 .bn-editor [data-content-type="table"] td,
 .bn-editor [data-content-type="table"] th { position:relative; overflow:visible; }
 .bn-editor [data-content-type="table"] .tableWrapper,
@@ -3138,7 +3162,7 @@ button.collapsible-content-block__toggle:hover {
   right: 0;
   bottom: -3px;
   left: 0;
-  z-index: 25;
+  z-index: 100;
   height: 6px;
   border-radius: 3px;
   background: #4d8df7;
@@ -3146,6 +3170,14 @@ button.collapsible-content-block__toggle:hover {
   content: "";
   opacity: .9;
   pointer-events: none;
+}
+.bn-editor [data-content-type="table"] tr[data-row-resize-hover] {
+  position: relative;
+  z-index: 90;
+}
+.bn-editor [data-content-type="table"] tr[data-row-resize-hover] > td,
+.bn-editor [data-content-type="table"] tr[data-row-resize-hover] > th {
+  cursor: row-resize !important;
 }
 .bn-editor [data-content-type="table"] tr[data-row-resize-active] > td::after,
 .bn-editor [data-content-type="table"] tr[data-row-resize-active] > th::after {
