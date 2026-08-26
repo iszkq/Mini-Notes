@@ -1,3 +1,4 @@
+import { getColspan, getRowspan, mergeCSSClasses } from "@blocknote/core";
 import { TableHandlesExtension } from "@blocknote/core/extensions";
 import {
   BasicTextStyleButton,
@@ -11,6 +12,7 @@ import {
   FileRenameButton,
   FileReplaceButton,
   FormattingToolbar,
+  type TableHandleProps,
   type FormattingToolbarProps,
   NestBlockButton,
   TextAlignButton,
@@ -18,18 +20,21 @@ import {
   useBlockNoteEditor,
   useComponentsContext,
   useEditorState,
-  useExtension
+  useExtension,
+  useExtensionState
 } from "@blocknote/react";
 import {
   Copy,
   Crop,
+  GripHorizontal,
+  GripVertical,
   MessageSquarePlus,
   Palette,
   TableCellsMerge,
   TableCellsSplit,
   Type
 } from "lucide-react";
-import { useCallback } from "react";
+import { useCallback, useMemo, useState, type DragEvent as ReactDragEvent } from "react";
 import {
   getImageBlockById,
   getSelectedImageBlock,
@@ -102,6 +107,72 @@ export function NotebookFormattingToolbar(props: NotebookFormattingToolbarProps)
       <CreateLinkButton />
       <CommentButton onAddComment={props.onAddComment} />
     </FormattingToolbar>
+  );
+}
+
+export function SelectableTableHandle(props: TableHandleProps) {
+  const Components = useComponentsContext();
+  const editor = useBlockNoteEditor<any, any, any>();
+  const tableHandles = useExtension(TableHandlesExtension);
+  const state = useExtensionState(TableHandlesExtension);
+  const [isDragging, setIsDragging] = useState(false);
+
+  const isDraggable = useMemo(() => {
+    if (!state?.block || state.block.type !== "table") return false;
+    return props.orientation === "column"
+      ? tableHandles.getCellsAtColumnHandle(state.block, state.colIndex!).every(({ cell }) => getColspan(cell) === 1)
+      : tableHandles.getCellsAtRowHandle(state.block, state.rowIndex!).every(({ cell }) => getRowspan(cell) === 1);
+  }, [props.orientation, state, tableHandles]);
+
+  if (!Components || !state?.block || state.block.type !== "table") return null;
+  const HandleRoot = Components.TableHandle.Root as any;
+
+  const selectWholeAxis = () => {
+    const cells = props.orientation === "column"
+      ? tableHandles.getCellsAtColumnHandle(state.block, state.colIndex!)
+      : tableHandles.getCellsAtRowHandle(state.block, state.rowIndex!);
+    if (cells.length === 0) return;
+    const start = props.orientation === "column"
+      ? cells.reduce((best, cell) => cell.row < best.row ? cell : best, cells[0])
+      : cells.reduce((best, cell) => cell.col < best.col ? cell : best, cells[0]);
+    const end = props.orientation === "column"
+      ? cells.reduce((best, cell) => cell.row > best.row ? cell : best, cells[0])
+      : cells.reduce((best, cell) => cell.col > best.col ? cell : best, cells[0]);
+    const nextState = tableHandles.setCellSelection(
+      editor.prosemirrorState,
+      { row: start.row, col: start.col },
+      { row: end.row, col: end.col }
+    );
+    editor.prosemirrorView.updateState(nextState);
+    editor.focus();
+  };
+
+  return (
+    <HandleRoot
+      aria-label={props.orientation === "column" ? "选择并拖动整列" : "选择并拖动整行"}
+      className={mergeCSSClasses(
+        "bn-table-handle selectable-table-handle",
+        `is-${props.orientation}`,
+        isDragging ? "bn-table-handle-dragging" : "",
+        !isDraggable ? "bn-table-handle-not-draggable" : ""
+      )}
+      draggable={isDraggable}
+      onClick={selectWholeAxis}
+      onDragStart={(event: ReactDragEvent<Element>) => {
+        setIsDragging(true);
+        props.hideOtherElements(true);
+        if (props.orientation === "column") tableHandles.colDragStart(event);
+        else tableHandles.rowDragStart(event);
+      }}
+      onDragEnd={() => {
+        tableHandles.dragEnd();
+        props.hideOtherElements(false);
+        setIsDragging(false);
+      }}
+      style={undefined}
+    >
+      {props.orientation === "column" ? <GripHorizontal size={20} /> : <GripVertical size={20} />}
+    </HandleRoot>
   );
 }
 

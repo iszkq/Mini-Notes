@@ -3113,6 +3113,11 @@ button.collapsible-content-block__toggle:hover {
 .bn-editor [data-content-type="table"] .column-resize-handle.column-resize-dragging {
   opacity: 1;
 }
+.selectable-table-handle { display:grid; place-items:center; border:1px solid #d5dfe7; border-radius:7px; background:#fff; color:#647b8b; box-shadow:0 2px 8px rgba(32,65,90,.16); cursor:pointer; }
+.selectable-table-handle:hover { color:#2f6f9f; background:#edf6ff; border-color:#85b9dd; }
+.selectable-table-handle.is-column { transform:rotate(0deg) !important; }
+.selectable-table-handle.is-row { transform:rotate(90deg) !important; }
+.bn-editor .selectedCell:after { z-index: 2; inset: 0; width: 100%; height: 100%; box-sizing: border-box; }
 
 /* Drag the lower edge of any row to increase its height. */
 .bn-editor [data-content-type="table"] tr[data-row-height] {

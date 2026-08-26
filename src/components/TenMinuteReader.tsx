@@ -8,6 +8,7 @@ import {
   CreateLinkButton,
   FormattingToolbar,
   FormattingToolbarController,
+  TableHandlesController,
   NestBlockButton,
   type FormattingToolbarProps,
   UnnestBlockButton,
@@ -34,7 +35,7 @@ import {
   updateTenMinuteReaderSettings
 } from "../api";
 import { noteSchema, tableCellStyleExtension } from "../editorSchema";
-import { TableAwareColorStyleButton } from "./NotebookFormattingToolbar";
+import { SelectableTableHandle, TableAwareColorStyleButton } from "./NotebookFormattingToolbar";
 import type {
   TenMinuteLesson,
   TenMinuteReaderSettings,
@@ -576,9 +577,11 @@ function TenMinuteLessonEditor({ blocks, onChange }: TenMinuteLessonEditorProps)
       formattingToolbar={false}
       onChange={() => onChange(editor.document as NoteBlock[])}
       slashMenu={false}
+      tableHandles={false}
       theme="light"
     >
       <FormattingToolbarController formattingToolbar={renderFormattingToolbar} />
+      <TableHandlesController tableHandle={SelectableTableHandle} />
     </BlockNoteView>
   );
 }

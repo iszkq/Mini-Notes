@@ -8,6 +8,7 @@ import {
   ExperimentalMobileFormattingToolbarController,
   getDefaultReactSlashMenuItems,
   SuggestionMenuController,
+  TableHandlesController,
   type DefaultReactSuggestionItem,
   type FormattingToolbarProps,
   useCreateBlockNote
@@ -61,7 +62,7 @@ import {
 import type { Note, NoteBlock, NoteSummary } from "../shared";
 import type { EmojiItem } from "../emojiPacks";
 import { ConfirmDialog } from "./ConfirmDialog";
-import { NotebookFormattingToolbar } from "./NotebookFormattingToolbar";
+import { NotebookFormattingToolbar, SelectableTableHandle } from "./NotebookFormattingToolbar";
 import {
   collectNoteComments,
   createNoteComment,
@@ -1410,6 +1411,7 @@ export function NotebookEditor({
             }}
             formattingToolbar={false}
             slashMenu={false}
+            tableHandles={false}
             theme="light"
           >
               {!readOnly ? (
@@ -1417,6 +1419,7 @@ export function NotebookEditor({
                 <FormattingToolbarController formattingToolbar={renderFormattingToolbar} />
                 <ExperimentalMobileFormattingToolbarController formattingToolbar={renderFormattingToolbar} />
                 <SuggestionMenuController getItems={getSlashMenuItems} triggerCharacter="/" />
+                <TableHandlesController tableHandle={SelectableTableHandle} />
               </>
             ) : null}
           </BlockNoteView>
