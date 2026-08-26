@@ -160,7 +160,7 @@ export function SelectableTableHandle(props: TableHandleProps) {
           editor.focus();
         }
       }}
-      position="right"
+      position={props.orientation === "column" ? "bottom" : "right"}
     >
       <Components.Generic.Menu.Trigger>
         <HandleRoot

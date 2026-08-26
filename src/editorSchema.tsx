@@ -1433,8 +1433,31 @@ export const tableCellStyleExtension = createExtension({
         ];
       },
       addProseMirrorPlugins() {
+        let rowGuide: HTMLDivElement | null = null;
+        const removeRowGuide = () => {
+          rowGuide?.remove();
+          rowGuide = null;
+        };
+        const showRowGuide = (table: HTMLElement, row: HTMLElement) => {
+          if (!rowGuide) {
+            rowGuide = document.createElement("div");
+            rowGuide.className = "bn-row-resize-guide";
+            rowGuide.setAttribute("aria-hidden", "true");
+            document.body.appendChild(rowGuide);
+          }
+          const tableRect = table.getBoundingClientRect();
+          const rowRect = row.getBoundingClientRect();
+          Object.assign(rowGuide.style, {
+            left: `${tableRect.left}px`,
+            top: `${rowRect.bottom - 3}px`,
+            width: `${tableRect.width}px`
+          });
+        };
         return [
           new ProseMirrorPlugin({
+            destroy() {
+              removeRowGuide();
+            },
             props: {
               handleDOMEvents: {
                 pointermove(view, event) {
@@ -1461,6 +1484,8 @@ export const tableCellStyleExtension = createExtension({
                     if (nearBottom) row.setAttribute("data-row-resize-hover", "true");
                     else row.removeAttribute("data-row-resize-hover");
                   }
+                  if (row && nearBottom) showRowGuide(table, row);
+                  else removeRowGuide();
                   cell.style.cursor = nearBottom ? "row-resize" : "";
                   table.style.cursor = nearBottom ? "row-resize" : "";
                   return false;
@@ -1514,6 +1539,7 @@ export const tableCellStyleExtension = createExtension({
                   const finish = () => {
                     document.body.style.cursor = previousCursor;
                     if (table) table.style.cursor = "";
+                    removeRowGuide();
                     row.removeAttribute("data-row-resize-active");
                     row.removeAttribute("data-row-resize-hover");
                     window.removeEventListener("pointermove", resize);
