@@ -1412,6 +1412,7 @@ export function NotebookEditor({
             formattingToolbar={false}
             slashMenu={false}
             tableHandles={false}
+            portalElements={{ tableHandles: null }}
             theme="light"
           >
               {!readOnly ? (
