@@ -1774,7 +1774,7 @@ button.collapsible-content-block__toggle:hover {
 }
 
 .color-block:has(.color-block__tools) .color-block__body {
-  padding-top: 36px;
+  padding-right: 170px;
 }
 
 .color-block__icon {
@@ -1918,6 +1918,7 @@ button.collapsible-content-block__toggle:hover {
 
 .note-editor-layout.is-readonly .color-block__body {
   padding-top: 0;
+  padding-right: 0;
 }
 
 @media (max-width: 560px) {
@@ -1926,7 +1927,7 @@ button.collapsible-content-block__toggle:hover {
   }
 
   .color-block:has(.color-block__tools) .color-block__body {
-    padding-top: 38px;
+    padding-right: 120px;
   }
 }
 
