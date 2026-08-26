@@ -649,6 +649,38 @@ button:disabled {
   font-weight: 600;
 }
 
+.share-password-input-wrap,
+.public-password-input-wrap {
+  position: relative;
+}
+
+.share-password-input-wrap .share-link-input,
+.public-password-input-wrap input {
+  padding-right: 44px;
+}
+
+.password-visibility-button {
+  position: absolute;
+  top: 50%;
+  right: 8px;
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  border: 0;
+  border-radius: 7px;
+  color: #6c7774;
+  background: transparent;
+  cursor: pointer;
+  transform: translateY(-50%);
+}
+
+.password-visibility-button:hover {
+  color: #2f6f73;
+  background: #edf5f3;
+}
+
 .share-status-row {
   display: grid;
   gap: 6px;
@@ -3614,6 +3646,18 @@ button:disabled {
   border-radius: 24px;
   background: rgba(255, 255, 255, 0.9);
   box-shadow: 0 26px 80px rgba(57, 47, 32, 0.08);
+}
+
+.public-password-page {
+  display: grid;
+  min-height: 100dvh;
+  place-items: center;
+  padding: 32px 22px;
+}
+
+.public-password-card {
+  width: min(100%, 520px);
+  padding: 46px 34px;
 }
 
 .public-note {

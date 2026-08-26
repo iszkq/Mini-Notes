@@ -10,6 +10,8 @@ import {
   Copy,
   Download,
   ExternalLink,
+  Eye,
+  EyeOff,
   FileText,
   Folder,
   FolderPlus,
@@ -258,6 +260,7 @@ function App() {
   const [sharePending, setSharePending] = useState(false);
   const [shareCopied, setShareCopied] = useState(false);
   const [sharePassword, setSharePassword] = useState("");
+  const [showSharePassword, setShowSharePassword] = useState(false);
   const [exportOpen, setExportOpen] = useState(false);
   const [exportPending, setExportPending] = useState(false);
   const [exportSelection, setExportSelection] = useState<string[]>([]);
@@ -268,6 +271,7 @@ function App() {
   const [publicPending, setPublicPending] = useState(isPublicView);
   const [publicError, setPublicError] = useState<string | null>(null);
   const [publicPassword, setPublicPassword] = useState("");
+  const [showPublicPassword, setShowPublicPassword] = useState(false);
   const [publicPasswordRequired, setPublicPasswordRequired] = useState(false);
   const [workspaceView, setWorkspaceView] = useState<WorkspaceView>(() =>
     typeof window !== "undefined" && /^\/console\/?$/.test(window.location.pathname) ? "admin" : "notes"
@@ -3172,14 +3176,24 @@ function App() {
 
               <label className="share-panel-field">
                 <span>分享密码（至少 6 位，留空表示无密码）</span>
-                <input
-                  className="share-link-input"
-                  maxLength={72}
-                  onChange={(event) => setSharePassword(event.target.value)}
-                  placeholder={draft.sharePasswordProtected ? "当前已设置密码；输入新密码可更换" : "可选"}
-                  type="password"
-                  value={sharePassword}
-                />
+                <div className="share-password-input-wrap">
+                  <input
+                    className="share-link-input"
+                    maxLength={72}
+                    onChange={(event) => setSharePassword(event.target.value)}
+                    placeholder={draft.sharePasswordProtected ? "当前已设置密码；输入新密码可更换" : "可选"}
+                    type={showSharePassword ? "text" : "password"}
+                    value={sharePassword}
+                  />
+                  <button
+                    aria-label={showSharePassword ? "隐藏分享密码" : "显示分享密码"}
+                    className="password-visibility-button"
+                    onClick={() => setShowSharePassword((visible) => !visible)}
+                    type="button"
+                  >
+                    {showSharePassword ? <EyeOff size={18} /> : <Eye size={18} />}
+                  </button>
+                </div>
               </label>
 
               {draft.shareToken ? (
@@ -3784,7 +3798,7 @@ function App() {
     if (publicPasswordRequired) {
       return (
         <main className="public-shell">
-          <section className="public-page">
+          <section className="public-page public-password-page">
             <form
               className="public-empty public-password-card"
               onSubmit={(event) => {
@@ -3797,14 +3811,24 @@ function App() {
               <Lock size={24} />
               <h1>此分享页面受密码保护</h1>
               <p>请输入分享者提供的密码后查看内容。</p>
-              <input
-                autoComplete="current-password"
-                autoFocus
-                onChange={(event) => setPublicPassword(event.target.value)}
-                placeholder="分享密码"
-                type="password"
-                value={publicPassword}
-              />
+              <div className="public-password-input-wrap">
+                <input
+                  autoComplete="current-password"
+                  autoFocus
+                  onChange={(event) => setPublicPassword(event.target.value)}
+                  placeholder="分享密码"
+                  type={showPublicPassword ? "text" : "password"}
+                  value={publicPassword}
+                />
+                <button
+                  aria-label={showPublicPassword ? "隐藏分享密码" : "显示分享密码"}
+                  className="password-visibility-button"
+                  onClick={() => setShowPublicPassword((visible) => !visible)}
+                  type="button"
+                >
+                  {showPublicPassword ? <EyeOff size={18} /> : <Eye size={18} />}
+                </button>
+              </div>
               <button className="primary-button" disabled={!publicPassword.trim()} type="submit">
                 查看页面
               </button>
