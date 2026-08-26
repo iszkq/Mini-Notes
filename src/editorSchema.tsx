@@ -7,7 +7,7 @@ import {
 } from "@blocknote/core";
 import { createReactBlockSpec, createReactStyleSpec } from "@blocknote/react";
 import { useEffect, useRef, useState, type CSSProperties, type PointerEvent as ReactPointerEvent, type ReactNode } from "react";
-import { ChevronDown, CircleDot, FileText, Heading, Network, Plus, Trash2, Minus, RotateCcw, Palette, Shapes, Wand2 } from "lucide-react";
+import { ChevronDown, CircleDot, FileText, Heading, Network, Plus, Trash2, Minus, RotateCcw, Palette, Shapes, Wand2, Maximize2, Minimize2, Scan } from "lucide-react";
 import { formatBibleReference, parseBibleVersePayload } from "./bible";
 import { apiUrl } from "./apiBase";
 import { parseNoteComment } from "./comments";
@@ -921,9 +921,31 @@ function MindMapCanvas({ block, editor }: { block: any; editor: any }) {
   const itemsRef = useRef<MindMapItem[]>(initial);
   const [selected, setSelected] = useState(initial[0]?.id ?? "");
   const [zoom, setZoom] = useState(1);
+  const [fitMode, setFitMode] = useState(true);
+  const [fitScale, setFitScale] = useState(1);
+  const [isFullscreen, setIsFullscreen] = useState(false);
+  const canvasRef = useRef<HTMLDivElement | null>(null);
   const dragRef = useRef<{ id: string; ox: number; oy: number } | null>(null);
   useEffect(() => { const next = parseMindMapItems(block.props.payload); setItems(next); itemsRef.current = next; }, [block.props.payload]);
   const root = items.find((item) => !item.parentId) ?? items[0];
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const fit = () => {
+      if (!items.length) return;
+      const minX = Math.min(...items.map((item) => item.x));
+      const minY = Math.min(...items.map((item) => item.y));
+      const maxX = Math.max(...items.map((item) => item.x + 200));
+      const maxY = Math.max(...items.map((item) => item.y + 70));
+      const scale = Math.min(1.15, Math.max(.45, Math.min((canvas.clientWidth - 34) / Math.max(1, maxX - minX), (canvas.clientHeight - 34) / Math.max(1, maxY - minY))));
+      setFitScale(Number(scale.toFixed(2)));
+    };
+    fit();
+    const observer = new ResizeObserver(fit);
+    observer.observe(canvas);
+    return () => observer.disconnect();
+  }, [items, isFullscreen]);
+  const scale = fitMode ? fitScale : zoom;
   const children = (id: string) => items.filter((item) => item.parentId === id);
   const commit = (next: MindMapItem[]) => { itemsRef.current = next; setItems(next); if (editor.isEditable) editor.updateBlock(block, { props: { payload: JSON.stringify(next) } }); };
   const updateNode = (id: string, patch: Partial<MindMapItem>) => commit(items.map((item) => item.id === id ? { ...item, ...patch } : item));
@@ -944,29 +966,31 @@ function MindMapCanvas({ block, editor }: { block: any; editor: any }) {
     const node = items.find((item) => item.id === id); if (!node) return;
     const canvas = (event.currentTarget as HTMLElement).closest<HTMLElement>(".mindmap-widget-canvas");
     const rect = canvas?.getBoundingClientRect(); if (!rect) return;
-    dragRef.current = { id, ox: (event.clientX - rect.left) / zoom - node.x, oy: (event.clientY - rect.top) / zoom - node.y };
+    dragRef.current = { id, ox: (event.clientX - rect.left) / scale - node.x, oy: (event.clientY - rect.top) / scale - node.y };
     (event.currentTarget as HTMLElement).setPointerCapture(event.pointerId); setSelected(id);
   };
   const onPointerMove = (event: ReactPointerEvent) => {
     const drag = dragRef.current; if (!drag) return;
     const canvas = (event.currentTarget as HTMLElement).closest<HTMLElement>(".mindmap-widget-canvas"); const rect = canvas?.getBoundingClientRect(); if (!rect) return;
-    setItems((prev) => { const next = prev.map((item) => item.id === drag.id ? { ...item, x: Math.max(20, (event.clientX - rect.left) / zoom - drag.ox), y: Math.max(20, (event.clientY - rect.top) / zoom - drag.oy) } : item); itemsRef.current = next; return next; });
+    setItems((prev) => { const next = prev.map((item) => item.id === drag.id ? { ...item, x: Math.max(20, (event.clientX - rect.left) / scale - drag.ox), y: Math.max(20, (event.clientY - rect.top) / scale - drag.oy) } : item); itemsRef.current = next; return next; });
   };
   const onPointerUp = () => { if (dragRef.current) { dragRef.current = null; commit(itemsRef.current); } };
   const edges = items.filter((item) => item.parentId).map((item) => { const parent = items.find((entry) => entry.id === item.parentId); return parent ? { parent, item } : null; }).filter(Boolean) as Array<{ parent: MindMapItem; item: MindMapItem }>;
   const selectedNode = items.find((item) => item.id === selected) ?? root;
-  return <section className="content-widget-block content-widget-mindmap" contentEditable={false}>
+  return <section className={`content-widget-block content-widget-mindmap ${isFullscreen ? "is-fullscreen" : ""}`} contentEditable={false}>
     <header className="mindmap-widget-header"><div className="mindmap-widget-title"><Network size={17} /><strong>思维导图</strong><span>拖动主题调整布局 · 双击文字编辑</span></div><div className="mindmap-widget-tools">
       <button type="button" title="添加子主题" onClick={() => selectedNode && addNode(selectedNode.id)} disabled={!editor.isEditable}><Plus size={15} />子主题</button>
       <button type="button" title="添加同级主题" onClick={() => selectedNode && addNode(selectedNode.parentId)} disabled={!editor.isEditable}><Plus size={15} />同级</button>
       <button type="button" title="删除主题" onClick={() => selectedNode && removeNode(selectedNode.id)} disabled={!editor.isEditable || selectedNode?.id === root?.id}><Trash2 size={15} /></button>
       <button type="button" title="节点形状" onClick={() => selectedNode && updateNode(selectedNode.id, { shape: selectedNode.shape === "rounded" ? "ellipse" : selectedNode.shape === "ellipse" ? "diamond" : selectedNode.shape === "diamond" ? "pill" : "rounded" })} disabled={!editor.isEditable}><Shapes size={15} /></button>
       <button type="button" title="节点配色" onClick={() => selectedNode && updateNode(selectedNode.id, { color: selectedNode.color === "#5b8def" ? "#e68a5c" : selectedNode.color === "#e68a5c" ? "#8b74c9" : "#5b8def" })} disabled={!editor.isEditable}><Palette size={15} /></button>
-      <button type="button" title="自动布局" onClick={() => commit(mindMapLayout(items))} disabled={!editor.isEditable}><Wand2 size={15} /></button>
-      <button type="button" title="缩小" onClick={() => setZoom((value) => Math.max(.65, +(value - .1).toFixed(2)))}><Minus size={15} /></button><span className="mindmap-zoom-label">{Math.round(zoom * 100)}%</span><button type="button" title="放大" onClick={() => setZoom((value) => Math.min(1.5, +(value + .1).toFixed(2)))}><Plus size={15} /></button><button type="button" title="重置" onClick={() => { setZoom(1); commit(mindMapLayout(items)); }}><RotateCcw size={15} /></button>
+      <button type="button" title="自动布局" onClick={() => { commit(mindMapLayout(items)); setFitMode(true); }} disabled={!editor.isEditable}><Wand2 size={15} />布局</button>
+      <button type="button" title="适配画布" className={fitMode ? "is-active" : ""} onClick={() => setFitMode(true)}><Scan size={15} />适配</button>
+      <button type="button" title="缩小" onClick={() => { setFitMode(false); setZoom((value) => Math.max(.45, +(value - .1).toFixed(2))); }}><Minus size={15} /></button><span className="mindmap-zoom-label">{Math.round((fitMode ? fitScale : zoom) * 100)}%</span><button type="button" title="放大" onClick={() => { setFitMode(false); setZoom((value) => Math.min(1.8, +(value + .1).toFixed(2))); }}><Plus size={15} /></button><button type="button" title="重置" onClick={() => { setZoom(1); setFitMode(true); commit(mindMapLayout(items)); }}><RotateCcw size={15} /></button>
+      <button type="button" title={isFullscreen ? "退出全屏" : "全屏编辑"} onClick={() => setIsFullscreen((value) => !value)}>{isFullscreen ? <Minimize2 size={15} /> : <Maximize2 size={15} />}<span>{isFullscreen ? "退出" : "全屏"}</span></button>
     </div></header>
-    <div className="mindmap-widget-canvas" onPointerMove={onPointerMove} onPointerUp={onPointerUp} onPointerCancel={onPointerUp}>
-      <div className="mindmap-widget-stage" style={{ transform: `scale(${zoom})` }}>
+    <div ref={canvasRef} className="mindmap-widget-canvas" onPointerMove={onPointerMove} onPointerUp={onPointerUp} onPointerCancel={onPointerUp}>
+      <div className="mindmap-widget-stage" style={{ transform: `scale(${scale})` }}>
         <svg className="mindmap-widget-edges" width="1000" height="540" viewBox="0 0 1000 540" aria-hidden="true">{edges.map(({ parent, item }) => <path key={`${parent.id}-${item.id}`} d={`M ${parent.x + 100} ${parent.y + 25} C ${(parent.x + item.x) / 2 + 80} ${parent.y + 25}, ${(parent.x + item.x) / 2 - 80} ${item.y + 25}, ${item.x} ${item.y + 25}`} />)}</svg>
         {items.map((item) => <div key={item.id} className={`mindmap-widget-node shape-${item.shape} ${item.id === root?.id ? "is-root" : ""} ${selected === item.id ? "is-selected" : ""}`} style={{ left: item.x, top: item.y, "--mind-color": item.color } as CSSProperties} onPointerDown={(event) => onPointerDown(event, item.id)}>
           <input value={item.text} readOnly={!editor.isEditable} onFocus={() => setSelected(item.id)} onChange={(event) => setItems((prev) => prev.map((entry) => entry.id === item.id ? { ...entry, text: event.target.value } : entry))} onBlur={(event) => updateNode(item.id, { text: event.target.value })} onKeyDown={stopWidgetEditorEvent} onMouseDown={(event) => event.stopPropagation()} aria-label="思维导图节点" />
