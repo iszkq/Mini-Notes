@@ -329,6 +329,17 @@ async function handleApi(
       return getPublicStoredFile(request, env, segments[2], url.searchParams.get("share"));
     }
 
+    // Shared QSL rooms can be opened by guests. Guests may join and view the
+    // leaderboard without an account; progress is kept locally in the client.
+    if (
+      segments[0] === "qsl" && segments[1] === "rooms" && segments[2] &&
+      ((segments[3] === "join" && request.method === "POST") ||
+        (segments[3] === "leaderboard" && request.method === "GET"))
+    ) {
+      const guest: AuthUser = { id: `guest-${segments[2]}`, username: "访客", isAdmin: false };
+      return handleQslApi(request, env, guest, segments);
+    }
+
     const user = await requireUser(request, env);
     if (!user) {
       return error("请先登录。", 401);
@@ -604,6 +615,7 @@ async function handleAdminApi(
 
 async function handleQslApi(request: Request, env: Env, user: AuthUser, segments: string[]): Promise<Response> {
   const roomId = segments[2];
+  const guest = user.id.startsWith("guest-");
   if (request.method === "POST" && !roomId) {
     const body = await readJson<{ roundCount?: number; difficulty?: number }>(request);
     const roundCount = Math.min(500, Math.max(1, Math.floor(Number(body.roundCount) || 100)));
@@ -623,11 +635,14 @@ async function handleQslApi(request: Request, env: Env, user: AuthUser, segments
     .bind(roomId, new Date().toISOString()).first<{ roomId: string; seed: number; roundCount: number; difficulty: number; expiresAt: string }>();
   if (!room) return error("房间不存在或已过期。", 404);
   if (request.method === "POST" && segments[3] === "join") {
-    await env.DB.prepare("INSERT INTO qsl_puzzle_players (room_id, user_id, username, updated_at) VALUES (?, ?, ?, ?) ON CONFLICT(room_id, user_id) DO UPDATE SET updated_at = excluded.updated_at")
-      .bind(roomId, user.id, user.username, new Date().toISOString()).run();
+    if (!guest) {
+      await env.DB.prepare("INSERT INTO qsl_puzzle_players (room_id, user_id, username, updated_at) VALUES (?, ?, ?, ?) ON CONFLICT(room_id, user_id) DO UPDATE SET updated_at = excluded.updated_at")
+        .bind(roomId, user.id, user.username, new Date().toISOString()).run();
+    }
     return json(room);
   }
   if (request.method === "PATCH" && segments[3] === "progress") {
+    if (guest) return json({ ok: true });
     const body = await readJson<{ score?: number; completedRounds?: number }>(request);
     const score = Math.max(0, Math.floor(Number(body.score) || 0));
     const completedRounds = Math.min(room.roundCount, Math.max(0, Math.floor(Number(body.completedRounds) || 0)));

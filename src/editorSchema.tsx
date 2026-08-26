@@ -6,7 +6,8 @@ import {
   type BlockNoteEditor
 } from "@blocknote/core";
 import { createReactBlockSpec, createReactStyleSpec } from "@blocknote/react";
-import { ChevronDown, CircleDot, FileText, Heading, Plus, Trash2 } from "lucide-react";
+import type { ReactNode } from "react";
+import { ChevronDown, CircleDot, FileText, Heading, Network, Plus, Trash2 } from "lucide-react";
 import { formatBibleReference, parseBibleVersePayload } from "./bible";
 import { apiUrl } from "./apiBase";
 import { parseNoteComment } from "./comments";
@@ -41,6 +42,11 @@ export const COMPARISON_DEFAULT_PAYLOAD = JSON.stringify([
   { body: "之前的内容", id: "compare-1", title: "之前" },
   { body: "现在的内容", id: "compare-2", title: "现在" }
 ]);
+export const MINDMAP_DEFAULT_PAYLOAD = JSON.stringify([
+  { id: "mind-root", parentId: null, text: "中心主题" },
+  { id: "mind-a", parentId: "mind-root", text: "分支一" },
+  { id: "mind-b", parentId: "mind-root", text: "分支二" }
+]);
 const COMPARISON_MAX_ITEMS = 3;
 const COMPARISON_DEFAULT_TITLES = ["之前", "现在", "之后"] as const;
 const COMPARISON_DEFAULT_TONES = ["neutral", "accent", "danger"] as const;
@@ -69,6 +75,7 @@ type ComparisonItem = {
 };
 
 type ComparisonTone = (typeof COMPARISON_DEFAULT_TONES)[number];
+type MindMapItem = { id: string; parentId: string | null; text: string };
 
 const fontSize = createReactStyleSpec(
   {
@@ -880,6 +887,40 @@ const comparisonBlock = createReactBlockSpec(
   }
 )();
 
+const mindMapBlock = createReactBlockSpec(
+  {
+    type: "contentMindMap",
+    propSchema: { payload: { default: MINDMAP_DEFAULT_PAYLOAD } },
+    content: "none"
+  },
+  {
+    render: ({ block, editor }) => {
+      const items = parseMindMapItems(block.props.payload);
+      const root = items.find((item) => !item.parentId) ?? items[0];
+      const childrenOf = (id: string) => items.filter((item) => item.parentId === id);
+      const update = (next: MindMapItem[]) => editor.isEditable && editor.updateBlock(block, { props: { payload: JSON.stringify(next) } });
+      const addChild = (parentId: string) => update([...items, { id: createWidgetItemId("mind"), parentId, text: "新分支" }]);
+      const renderNode = (node: MindMapItem, depth = 0): ReactNode => (
+        <li className={`mindmap-widget-node depth-${Math.min(depth, 3)}`} key={node.id}>
+          <div className="mindmap-widget-card">
+            {depth === 0 ? <Network size={17} /> : <span className="mindmap-widget-dot" />}
+            <input value={node.text} readOnly={!editor.isEditable} onChange={(event) => update(items.map((item) => item.id === node.id ? { ...item, text: event.target.value } : item))} onKeyDown={stopWidgetEditorEvent} onMouseDown={stopWidgetEditorEvent} aria-label="思维导图节点" />
+            {editor.isEditable ? <button type="button" className="mindmap-widget-add" onClick={() => addChild(node.id)} aria-label="添加子节点"><Plus size={14} /></button> : null}
+          </div>
+          {childrenOf(node.id).length ? <ul>{childrenOf(node.id).map((child) => renderNode(child, depth + 1))}</ul> : null}
+        </li>
+      );
+      return <section className="content-widget-block content-widget-mindmap" contentEditable={false}><header><Network size={16} /><strong>思维导图</strong><span>点击节点文字编辑，+ 添加分支</span></header><div className="mindmap-widget-canvas">{root ? <ul className="mindmap-widget-tree">{renderNode(root)}</ul> : null}</div></section>;
+    },
+    toExternalHTML: ({ block }) => {
+      const items = parseMindMapItems(block.props.payload);
+      const root = items.find((item) => !item.parentId) ?? items[0];
+      const render = (node: MindMapItem): ReactNode => <li key={node.id}><span>{node.text}</span>{items.filter((item) => item.parentId === node.id).length ? <ul>{items.filter((item) => item.parentId === node.id).map(render)}</ul> : null}</li>;
+      return <section className="content-widget-block content-widget-mindmap"><header><Network size={16} /><strong>思维导图</strong></header><ul>{root ? render(root) : null}</ul></section>;
+    }
+  }
+)();
+
 const pageLinkBlock = createReactBlockSpec(
   {
     type: "pageLink",
@@ -1014,6 +1055,16 @@ function parseComparisonItems(value: unknown): ComparisonItem[] {
   }
 
   return items;
+}
+
+function parseMindMapItems(value: unknown): MindMapItem[] {
+  const items = parseWidgetItems(value, MINDMAP_DEFAULT_PAYLOAD)
+    .map((item, index) => ({
+      id: cleanWidgetText(item.id, createWidgetItemId("mind")),
+      parentId: typeof item.parentId === "string" && item.parentId ? item.parentId : null,
+      text: cleanWidgetText(item.text, index === 0 ? "中心主题" : "新分支")
+    }));
+  return items.length ? items : parseMindMapItems(MINDMAP_DEFAULT_PAYLOAD);
 }
 
 function parseWidgetItems(value: unknown, fallbackPayload: string): Array<Record<string, unknown>> {
@@ -1181,6 +1232,7 @@ export const noteSchema = BlockNoteSchema.create({
     contentTimeline: timelineBlock,
     contentSteps: stepsBlock,
     contentComparison: comparisonBlock,
+    contentMindMap: mindMapBlock,
     pageLink: pageLinkBlock
   },
   styleSpecs: {

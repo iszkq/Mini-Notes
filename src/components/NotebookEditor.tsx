@@ -19,6 +19,7 @@ import {
   GitCompareArrows,
   ListChecks,
   MessageSquareText,
+  Network,
   Pencil,
   RotateCcw,
   Timer,
@@ -795,7 +796,7 @@ export function NotebookEditor({
 
   const insertContentWidgetBlock = useCallback(
     (
-      blockType: "contentTimeline" | "contentSteps" | "contentComparison",
+      blockType: "contentTimeline" | "contentSteps" | "contentComparison" | "contentMindMap",
       payload: string
     ) => {
       const currentBlock = getCurrentTextBlock();
@@ -841,6 +842,14 @@ export function NotebookEditor({
 
   const insertComparison = useCallback(() => {
     insertContentWidgetBlock("contentComparison", COMPARISON_DEFAULT_PAYLOAD);
+  }, [insertContentWidgetBlock]);
+
+  const insertMindMap = useCallback(() => {
+    insertContentWidgetBlock("contentMindMap", JSON.stringify([
+      { id: "mind-root", parentId: null, text: "中心主题" },
+      { id: "mind-a", parentId: "mind-root", text: "分支一" },
+      { id: "mind-b", parentId: "mind-root", text: "分支二" }
+    ]));
   }, [insertContentWidgetBlock]);
 
   const insertSubPage = useCallback(async () => {
@@ -1276,6 +1285,14 @@ export function NotebookEditor({
         icon: <GitCompareArrows size={18} />,
         onItemClick: insertComparison
       };
+      const mindMapItem: DefaultReactSuggestionItem = {
+        title: "思维导图",
+        subtext: "在文档中插入可编辑的节点关系图",
+        aliases: ["思维导图", "脑图", "mindmap", "mind map"],
+        group: "高级功能",
+        icon: <Network size={18} />,
+        onItemClick: insertMindMap
+      };
       const bibleItem: DefaultReactSuggestionItem = {
         title: "圣经",
         subtext: "插入经文",
@@ -1311,7 +1328,8 @@ export function NotebookEditor({
         collapsibleItem,
         timelineItem,
         stepsItem,
-        comparisonItem
+        comparisonItem,
+        mindMapItem
       ]);
       items.push(emojiItem);
 
@@ -1321,6 +1339,7 @@ export function NotebookEditor({
       editor,
       insertCollapsibleContent,
       insertComparison,
+      insertMindMap,
       insertSteps,
       insertSubPage,
       insertTimeline,

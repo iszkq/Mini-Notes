@@ -91,9 +91,7 @@ const ExportPanel = lazy(() =>
 const NotebookEditor = lazy(() =>
   import("./components/NotebookEditor").then((module) => ({ default: module.NotebookEditor }))
 );
-const MindMapView = lazy(() =>
-  import("./components/MindMapView").then((module) => ({ default: module.MindMapView }))
-);
+const MindMapView = lazy(() => import("./components/MindMapView").then((module) => ({ default: module.MindMapView })));
 const RevelationQaLibrary = lazy(() =>
   import("./components/RevelationQaLibrary").then((module) => ({
     default: module.RevelationQaLibrary
@@ -231,7 +229,9 @@ function App() {
   );
   const initialShareToken = initialPublicRoute?.shareToken ?? null;
   const initialPublicNoteId = initialPublicRoute?.noteId ?? null;
-  const isPublicView = Boolean(initialShareToken);
+  const initialQslChallenge = typeof window !== "undefined" && /^#qsl(?:room)?=/.test(window.location.hash);
+  const isPublicQslView = initialQslChallenge;
+  const isPublicView = Boolean(initialShareToken) || isPublicQslView;
 
   const [authMode, setAuthMode] = useState<AuthMode>("login");
   const [sessionUser, setSessionUser] = useState<AuthUser | null>(null);
@@ -3763,6 +3763,15 @@ function App() {
   };
 
   if (isPublicView) {
+    if (isPublicQslView) {
+      return (
+        <main className="public-shell">
+          <Suspense fallback={<LazyViewFallback label="正在加载 QSL 拼拼乐" />}>
+            <RevelationMemorization onError={setAppError} />
+          </Suspense>
+        </main>
+      );
+    }
     if (publicPending) {
       return (
         <main className="center-screen">
@@ -4223,7 +4232,8 @@ function App() {
             背诵默写
           </button>
           <button
-            className={clsx("toolbar-button sidebar-view-button", workspaceView === "mindmap" && "active")}
+            className="toolbar-button sidebar-view-button"
+            style={{ display: "none" }}
             disabled={!draft}
             onClick={() => {
               setWorkspaceView("mindmap");

@@ -5317,6 +5317,19 @@ button.note-breadcrumb__item:hover {
 .mindmap-node.level-2 > .mindmap-node-card { background:#f7fbfb; }
 .mindmap-toggle { display:inline-flex; align-items:center; justify-content:center; width:22px; height:22px; padding:0; border:0; border-radius:6px; background:#e8f1f0; color:#2b777a; cursor:pointer; }
 .mindmap-toggle-placeholder { width:22px; }
+.content-widget-mindmap { margin:16px 0; padding:18px; border:1px solid #cfe0df; border-radius:16px; background:linear-gradient(145deg,#f7fbfb,#fff); }
+.content-widget-mindmap > header { display:flex; align-items:center; gap:8px; color:#245e62; margin-bottom:14px; }
+.content-widget-mindmap > header span { margin-left:auto; color:#78908e; font-size:.78rem; }
+.mindmap-widget-canvas { overflow:auto; padding:12px 8px 8px; }
+.mindmap-widget-tree,.mindmap-widget-tree ul { list-style:none; margin:0; padding:0; }
+.mindmap-widget-node { position:relative; margin:12px 0; padding-left:34px; }
+.mindmap-widget-node > ul { margin:8px 0 0 20px; padding-left:26px; border-left:2px solid #b8d2cf; }
+.mindmap-widget-node > ul > .mindmap-widget-node::before { content:""; position:absolute; left:-26px; top:22px; width:26px; border-top:2px solid #b8d2cf; }
+.mindmap-widget-card { display:inline-flex; align-items:center; gap:8px; min-width:180px; padding:9px 12px; border:1px solid #c6dcda; border-radius:12px; background:#fff; box-shadow:0 4px 12px rgba(26,76,76,.08); }
+.mindmap-widget-node.depth-0 > .mindmap-widget-card { border:2px solid #2b777a; background:#e8f3f1; font-weight:700; }
+.mindmap-widget-card input { width:100%; min-width:100px; border:0; outline:0; background:transparent; color:#21494a; font:inherit; }
+.mindmap-widget-dot { width:8px; height:8px; border-radius:50%; background:#5eaaa4; }
+.mindmap-widget-add { display:inline-flex; align-items:center; justify-content:center; width:22px; height:22px; border:0; border-radius:6px; background:#edf6f4; color:#2b777a; cursor:pointer; }
 @media (max-width:640px) { .mindmap-view{padding:16px 12px;min-height:420px}.mindmap-canvas{padding:28px 18px}.mindmap-hint{font-size:12px}.mindmap-node-card{max-width:76vw;font-size:14px} }
 
 .notes-overview__hero {
