@@ -1,4 +1,5 @@
 import MindElixir, { type MindElixirData, type NodeObj } from "mind-elixir";
+import { cn } from "mind-elixir/i18n";
 import "mind-elixir/style.css";
 import { useEffect, useRef, useState } from "react";
 
@@ -49,7 +50,7 @@ export function MindElixirMindMap({ block, editor }: { block: any; editor: any }
     const mind = new MindElixir({
       el: host,
       direction: MindElixir.RIGHT,
-      contextMenu: true,
+      contextMenu: { locale: cn, focus: true, link: true },
       toolBar: true,
       keypress: true,
       overflowHidden: false,
