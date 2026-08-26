@@ -7,6 +7,7 @@ import {
 } from "@blocknote/core";
 import { createReactBlockSpec, createReactStyleSpec } from "@blocknote/react";
 import { Extension as TiptapExtension } from "@tiptap/core";
+import { Plugin as ProseMirrorPlugin } from "@tiptap/pm/state";
 import { useEffect, useRef, useState, type CSSProperties, type PointerEvent as ReactPointerEvent, type ReactNode } from "react";
 import { ChevronDown, CircleDot, FileText, Heading, Network, Plus, Trash2, Minus, RotateCcw, Palette, Shapes, Wand2, Maximize2, Minimize2, Scan, LayoutTemplate } from "lucide-react";
 import { formatBibleReference, parseBibleVersePayload } from "./bible";
@@ -1410,7 +1411,88 @@ export const tableCellStyleExtension = createExtension({
                 }
               }
             }
+          },
+          {
+            types: ["tableRow"],
+            attributes: {
+              rowHeight: {
+                default: null,
+                parseHTML: (element: HTMLElement) => {
+                  const value = Number(element.getAttribute("data-row-height"));
+                  return Number.isFinite(value) && value >= 32 ? value : null;
+                },
+                renderHTML: (attributes: { rowHeight?: number | null }) => {
+                  const height = Number(attributes.rowHeight);
+                  return Number.isFinite(height) && height >= 32
+                    ? { "data-row-height": String(height), style: `height:${height}px` }
+                    : {};
+                }
+              }
+            }
           }
+        ];
+      },
+      addProseMirrorPlugins() {
+        return [
+          new ProseMirrorPlugin({
+            props: {
+              handleDOMEvents: {
+                pointermove(view, event) {
+                  const target = event.target instanceof Element ? event.target : null;
+                  const cell = target?.closest("td, th") as HTMLElement | null;
+                  if (!cell || !view.dom.contains(cell)) return false;
+                  const nearBottom = cell.getBoundingClientRect().bottom - event.clientY <= 7;
+                  cell.style.cursor = nearBottom ? "row-resize" : "";
+                  return false;
+                },
+                pointerdown(view, event) {
+                  if (event.button !== 0) return false;
+                  const target = event.target instanceof Element ? event.target : null;
+                  const cell = target?.closest("td, th") as HTMLElement | null;
+                  const row = cell?.closest("tr") as HTMLElement | null;
+                  if (!cell || !row || !view.dom.contains(row)) return false;
+                  if (cell.getBoundingClientRect().bottom - event.clientY > 7) return false;
+
+                  const mappedPos = view.posAtDOM(row, 0);
+                  const rowPos = [mappedPos - 1, mappedPos].find(
+                    (pos) => pos >= 0 && view.state.doc.nodeAt(pos)?.type.name === "tableRow"
+                  );
+                  if (rowPos === undefined) return false;
+                  const rowNode = view.state.doc.nodeAt(rowPos);
+                  if (!rowNode || rowNode.type.name !== "tableRow") return false;
+
+                  event.preventDefault();
+                  const startY = event.clientY;
+                  const startHeight = row.getBoundingClientRect().height;
+                  const previousCursor = document.body.style.cursor;
+                  document.body.style.cursor = "row-resize";
+
+                  const resize = (moveEvent: PointerEvent) => {
+                    const height = Math.max(32, Math.round(startHeight + moveEvent.clientY - startY));
+                    const currentNode = view.state.doc.nodeAt(rowPos);
+                    if (!currentNode || currentNode.type.name !== "tableRow") return;
+                    row.style.height = `${height}px`;
+                    view.dispatch(
+                      view.state.tr.setNodeMarkup(rowPos, undefined, {
+                        ...currentNode.attrs,
+                        rowHeight: height
+                      })
+                    );
+                  };
+                  const finish = () => {
+                    document.body.style.cursor = previousCursor;
+                    window.removeEventListener("pointermove", resize);
+                    window.removeEventListener("pointerup", finish);
+                    window.removeEventListener("pointercancel", finish);
+                  };
+                  window.addEventListener("pointermove", resize);
+                  window.addEventListener("pointerup", finish, { once: true });
+                  window.addEventListener("pointercancel", finish, { once: true });
+                  return true;
+                }
+              }
+            }
+          })
         ];
       }
     })

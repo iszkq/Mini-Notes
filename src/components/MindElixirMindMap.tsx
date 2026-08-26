@@ -84,18 +84,68 @@ export function MindElixirMindMap({ block, editor }: { block: any; editor: any }
       contextMenu: { locale: cn, focus: true, link: true },
       toolBar: true,
       keypress: true,
+      // Use the primary pointer on empty canvas space for panning.  Mind
+      // Elixir's default reserves left-drag for box selection, which makes a
+      // blank canvas feel non-interactive in an embedded editor.
+      mouseSelectionButton: 2,
       overflowHidden: false,
       allowUndo: true,
       newTopicName: "新主题"
     });
     mindRef.current = mind;
     void mind.init(toMindData(block.props.payload));
+    let panPointerId: number | null = null;
+    let panX = 0;
+    let panY = 0;
+    const startCanvasPan = (event: PointerEvent) => {
+      if (event.button !== 0) return;
+      const target = event.target instanceof Element ? event.target : null;
+      if (!target || target.closest(".me-tpc, .me-epd, .mind-elixir-toolbar, .context-menu")) return;
+      if (!target.closest(".map-container, .map-canvas")) return;
+      event.preventDefault();
+      event.stopPropagation();
+      panPointerId = event.pointerId;
+      panX = event.clientX;
+      panY = event.clientY;
+      host.classList.add("is-panning");
+      host.setPointerCapture?.(event.pointerId);
+    };
+    const moveCanvasPan = (event: PointerEvent) => {
+      if (panPointerId !== event.pointerId) return;
+      event.preventDefault();
+      event.stopPropagation();
+      const deltaX = event.clientX - panX;
+      const deltaY = event.clientY - panY;
+      panX = event.clientX;
+      panY = event.clientY;
+      mind.move(deltaX, deltaY);
+    };
+    const finishCanvasPan = (event: PointerEvent) => {
+      if (panPointerId !== event.pointerId) return;
+      event.preventDefault();
+      event.stopPropagation();
+      panPointerId = null;
+      host.classList.remove("is-panning");
+      if (host.hasPointerCapture?.(event.pointerId)) host.releasePointerCapture(event.pointerId);
+    };
+    host.addEventListener("pointerdown", startCanvasPan, true);
+    host.addEventListener("pointermove", moveCanvasPan, true);
+    host.addEventListener("pointerup", finishCanvasPan, true);
+    host.addEventListener("pointercancel", finishCanvasPan, true);
     const onOperation = () => {
       if (!editor.isEditable) return;
       saveAll();
     };
     mind.bus.addListener("operation", onOperation);
-    return () => { mind.bus.removeListener("operation", onOperation); mind.destroy(); mindRef.current = null; };
+    return () => {
+      host.removeEventListener("pointerdown", startCanvasPan, true);
+      host.removeEventListener("pointermove", moveCanvasPan, true);
+      host.removeEventListener("pointerup", finishCanvasPan, true);
+      host.removeEventListener("pointercancel", finishCanvasPan, true);
+      mind.bus.removeListener("operation", onOperation);
+      mind.destroy();
+      mindRef.current = null;
+    };
   }, [block.id, editor]);
 
   useEffect(() => {

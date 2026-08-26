@@ -32,6 +32,9 @@ importers:
       '@tiptap/core':
         specifier: ^3.27.1
         version: 3.27.1(@tiptap/pm@3.27.1)
+      '@tiptap/pm':
+        specifier: ^3.27.1
+        version: 3.27.1
       clsx:
         specifier: ^2.1.1
         version: 2.1.1

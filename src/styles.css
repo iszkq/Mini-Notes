@@ -5412,7 +5412,10 @@ button.note-breadcrumb__item:hover {
 .mind-elixir-host:active, .mind-elixir-host .map-container:active { cursor:grabbing; }
 .mind-elixir-host .map-canvas { cursor:grab; }
 .mind-elixir-host .map-canvas:active { cursor:grabbing; }
-.mind-elixir-host .map-container { width:100%; height:100%; }
+.mind-elixir-host .map-container { width:100%; height:100%; cursor:grab; }
+.mind-elixir-host .map-container .map-canvas { cursor:grab; }
+.mind-elixir-host .map-container:active, .mind-elixir-host .map-container .map-canvas:active { cursor:grabbing; }
+.mind-elixir-host.is-panning, .mind-elixir-host.is-panning * { cursor:grabbing !important; }
 .mind-elixir-stage { position:relative; overflow:hidden; border-radius:12px; }
 .mind-elixir-shape-toolbar { position:absolute; z-index:20; top:12px; left:50%; display:flex; align-items:center; gap:5px; max-width:calc(100% - 32px); padding:7px 9px; border:1px solid #d8e5e3; border-radius:11px; background:rgba(255,255,255,.96); box-shadow:0 8px 24px rgba(29,67,65,.12); transform:translateX(-50%); overflow-x:auto; white-space:nowrap; }
 .mind-elixir-shape-toolbar span { color:#6f8582; font-size:11px; font-weight:800; }

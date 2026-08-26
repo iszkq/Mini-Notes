@@ -5,7 +5,6 @@ import { BlockNoteView } from "@blocknote/mantine";
 import "@blocknote/mantine/style.css";
 import {
   BasicTextStyleButton,
-  ColorStyleButton,
   CreateLinkButton,
   FormattingToolbar,
   FormattingToolbarController,
@@ -35,6 +34,7 @@ import {
   updateTenMinuteReaderSettings
 } from "../api";
 import { noteSchema, tableCellStyleExtension } from "../editorSchema";
+import { TableAwareColorStyleButton } from "./NotebookFormattingToolbar";
 import type {
   TenMinuteLesson,
   TenMinuteReaderSettings,
@@ -553,9 +553,9 @@ function TenMinuteLessonEditor({ blocks, onChange }: TenMinuteLessonEditorProps)
       initialContent: blocks as PartialBlock[],
       schema: noteSchema,
       tables: {
-        splitCells: true,
-        cellBackgroundColor: true,
-        cellTextColor: true
+        splitCells: false,
+        cellBackgroundColor: false,
+        cellTextColor: false
       },
       extensions: [tableCellStyleExtension]
     },
@@ -592,7 +592,7 @@ function TenMinuteFormattingToolbar(props: FormattingToolbarProps) {
       <BasicTextStyleButton basicTextStyle="italic" />
       <BasicTextStyleButton basicTextStyle="underline" />
       <BasicTextStyleButton basicTextStyle="strike" />
-      <ColorStyleButton />
+      <TableAwareColorStyleButton />
       <TenMinuteTextSizeSelect />
       <NestBlockButton />
       <UnnestBlockButton />

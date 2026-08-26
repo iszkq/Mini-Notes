@@ -24,6 +24,7 @@ import {
   Copy,
   Crop,
   MessageSquarePlus,
+  Palette,
   TableCellsMerge,
   TableCellsSplit,
   Type
@@ -42,6 +43,8 @@ type CellNodeLike = {
     colSpan?: number;
     rowspan?: number;
     rowSpan?: number;
+    backgroundColor?: string;
+    [key: string]: unknown;
   };
   type?: {
     name?: string;
@@ -61,6 +64,7 @@ type SelectionLike = {
     depth: number;
     node: (depth: number) => CellNodeLike;
   };
+  forEachCell?: (callback: (node: CellNodeLike, pos: number) => void) => void;
 };
 
 type NotebookFormattingToolbarProps = FormattingToolbarProps & {
@@ -91,7 +95,7 @@ export function NotebookFormattingToolbar(props: NotebookFormattingToolbarProps)
       <TextAlignButton textAlignment="left" />
       <TextAlignButton textAlignment="center" />
       <TextAlignButton textAlignment="right" />
-      <ColorStyleButton />
+      <TableAwareColorStyleButton />
       <TextSizeSelect />
       <NestBlockButton />
       <UnnestBlockButton />
@@ -224,7 +228,7 @@ function TableCellToolbarTools() {
     editor,
     on: "selection",
     selector: ({ editor }) => {
-      if (!editor.isEditable || !editor.settings.tables.splitCells) {
+      if (!editor.isEditable) {
         return undefined;
       }
 
@@ -284,6 +288,116 @@ function TableCellToolbarTools() {
       />
     </>
   );
+}
+
+const TABLE_COLOR_OPTIONS = [
+  { label: "自动", value: "default", swatch: "#ffffff" },
+  { label: "灰色", value: "gray", swatch: "#ebeced" },
+  { label: "棕色", value: "brown", swatch: "#e9e5e3" },
+  { label: "红色", value: "red", swatch: "#fbe4e4" },
+  { label: "橙色", value: "orange", swatch: "#f6e9d9" },
+  { label: "黄色", value: "yellow", swatch: "#fbf3db" },
+  { label: "绿色", value: "green", swatch: "#ddedea" },
+  { label: "蓝色", value: "blue", swatch: "#ddebf1" },
+  { label: "紫色", value: "purple", swatch: "#eae4f2" },
+  { label: "粉色", value: "pink", swatch: "#f4dfeb" }
+];
+const TABLE_TEXT_COLOR_OPTIONS = TABLE_COLOR_OPTIONS.map(({ label, value, swatch }) => ({
+  label,
+  value,
+  swatch: value === "default" ? "#4b5553" : swatch
+}));
+
+export function TableAwareColorStyleButton() {
+  const Components = useComponentsContext();
+  const editor = useBlockNoteEditor<any, any, any>();
+  const tableState = useEditorState({
+    editor,
+    on: "selection",
+    selector: ({ editor }) => {
+      const cells = getSelectedTableCells(editor.prosemirrorState.selection as unknown as SelectionLike);
+      if (!editor.isEditable || cells.length === 0) return undefined;
+      const colors = cells.map(({ node }) => String(node.attrs?.backgroundColor || "default"));
+      return {
+        backgroundColor: colors.every((color) => color === colors[0]) ? colors[0] : "default"
+      };
+    }
+  });
+
+  if (tableState === undefined) {
+    return <ColorStyleButton />;
+  }
+  if (!Components) return null;
+
+  const setBackgroundColor = (color: string) => {
+    editor.transact((tr) => {
+      const cells = getSelectedTableCells(tr.selection as unknown as SelectionLike);
+      cells.forEach(({ node, pos }) => {
+        tr.setNodeMarkup(pos, undefined, { ...node.attrs, backgroundColor: color });
+      });
+    });
+    window.setTimeout(() => editor.focus(), 0);
+  };
+  const setTextColor = (color: string) => {
+    if (color === "default") editor.removeStyles({ textColor: "default" });
+    else editor.addStyles({ textColor: color });
+    window.setTimeout(() => editor.focus(), 0);
+  };
+
+  return (
+    <Components.Generic.Menu.Root>
+      <Components.Generic.Menu.Trigger>
+        <Components.FormattingToolbar.Button
+          className="bn-button"
+          data-test="colors"
+          icon={<Palette size={19} />}
+          label="颜色"
+          mainTooltip="文字颜色和表格背景色"
+        />
+      </Components.Generic.Menu.Trigger>
+      <Components.Generic.Menu.Dropdown className="bn-menu-dropdown bn-color-picker-dropdown">
+        <Components.Generic.Menu.Label>文字颜色</Components.Generic.Menu.Label>
+        {TABLE_TEXT_COLOR_OPTIONS.map((color) => (
+          <Components.Generic.Menu.Item
+            icon={<span className="table-cell-color-swatch table-cell-text-swatch" style={{ color: color.swatch }}>A</span>}
+            key={`text-${color.value}`}
+            onClick={() => setTextColor(color.value)}
+          >
+            {color.label}
+          </Components.Generic.Menu.Item>
+        ))}
+        <Components.Generic.Menu.Label>背景色（整格）</Components.Generic.Menu.Label>
+        {TABLE_COLOR_OPTIONS.map((color) => (
+          <Components.Generic.Menu.Item
+            checked={tableState.backgroundColor === color.value}
+            icon={<span className="table-cell-color-swatch" style={{ backgroundColor: color.swatch }} />}
+            key={color.value}
+            onClick={() => setBackgroundColor(color.value)}
+          >
+            {color.label}
+          </Components.Generic.Menu.Item>
+        ))}
+      </Components.Generic.Menu.Dropdown>
+    </Components.Generic.Menu.Root>
+  );
+}
+
+function getSelectedTableCells(selection: SelectionLike): Array<{ node: CellNodeLike; pos: number }> {
+  const selected: Array<{ node: CellNodeLike; pos: number }> = [];
+  if (typeof selection.forEachCell === "function") {
+    selection.forEachCell((node, pos) => selected.push({ node, pos }));
+    return selected;
+  }
+  for (let depth = selection.$from.depth; depth > 0; depth -= 1) {
+    const node = selection.$from.node(depth);
+    const name = node.type?.name;
+    if (name === "tableCell" || name === "tableHeader") {
+      const resolved = selection.$from as unknown as { before: (depth: number) => number };
+      selected.push({ node, pos: resolved.before(depth) });
+      break;
+    }
+  }
+  return selected;
 }
 
 const TEXT_SIZE_OPTIONS = [

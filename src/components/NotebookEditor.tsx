@@ -264,9 +264,9 @@ export function NotebookEditor({
       initialContent,
       schema: noteSchema,
       tables: {
-        splitCells: true,
-        cellBackgroundColor: true,
-        cellTextColor: true
+        splitCells: false,
+        cellBackgroundColor: false,
+        cellTextColor: false
       },
       extensions: [collapsibleEnterExtension, tableCellStyleExtension],
       uploadFile: handleUpload,

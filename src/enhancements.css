@@ -3114,6 +3114,35 @@ button.collapsible-content-block__toggle:hover {
   opacity: 1;
 }
 
+/* Drag the lower edge of any row to increase its height. */
+.bn-editor [data-content-type="table"] tr[data-row-height] {
+  height: attr(data-row-height px);
+}
+.bn-editor [data-content-type="table"] td,
+.bn-editor [data-content-type="table"] th {
+  transition: height .12s ease;
+}
+.bn-editor [data-content-type="table"] tr:hover > td:last-child::after,
+.bn-editor [data-content-type="table"] tr:hover > th:last-child::after {
+  position:absolute;
+  right:0;
+  bottom:-3px;
+  left:0;
+  z-index:25;
+  height:6px;
+  content:"";
+  cursor:row-resize;
+}
+
+.table-cell-color-swatch {
+  display:inline-block;
+  width:22px;
+  height:22px;
+  border:1px solid rgba(66,81,76,.25);
+  border-radius:6px;
+}
+.table-cell-text-swatch { display:grid; place-items:center; background:#fff !important; font-weight:800; }
+
 @media (max-width: 760px) {
   .bn-menu-dropdown.bn-color-picker-dropdown {
     width: min(236px, calc(100vw - 20px));
