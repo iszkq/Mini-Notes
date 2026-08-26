@@ -11,6 +11,7 @@ import { ChevronDown, CircleDot, FileText, Heading, Network, Plus, Trash2, Minus
 import { formatBibleReference, parseBibleVersePayload } from "./bible";
 import { apiUrl } from "./apiBase";
 import { parseNoteComment } from "./comments";
+import { MindElixirMindMap } from "./components/MindElixirMindMap";
 
 const FONT_SIZE_VALUES = new Set(["12px", "14px", "16px", "18px", "20px", "24px", "28px", "32px"]);
 export const COLLAPSIBLE_CONTENT_DEFAULT_TITLE = "这是标题可以自定义";
@@ -1025,7 +1026,7 @@ function MindMapCanvas({ block, editor }: { block: any; editor: any }) {
 
 const mindMapBlock = createReactBlockSpec(
   { type: "contentMindMap", propSchema: { payload: { default: MINDMAP_DEFAULT_PAYLOAD } }, content: "none" },
-  { render: ({ block, editor }) => <MindMapCanvas block={block} editor={editor} />, toExternalHTML: ({ block }) => { const items = parseMindMapItems(block.props.payload); const root = items.find((item) => !item.parentId) ?? items[0]; return <section className="content-widget-block content-widget-mindmap"><header><Network size={16} /><strong>思维导图</strong></header><p>{root?.text ?? "思维导图"}</p></section>; } }
+  { render: ({ block, editor }) => <MindElixirMindMap block={block} editor={editor} />, toExternalHTML: ({ block }) => { const items = parseMindMapItems(block.props.payload); const root = items.find((item) => !item.parentId) ?? items[0]; return <section className="content-widget-block content-widget-mindmap"><header><Network size={16} /><strong>思维导图</strong></header><p>{root?.text ?? "思维导图"}</p></section>; } }
 )();
 
 const pageLinkBlock = createReactBlockSpec(
