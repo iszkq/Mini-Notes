@@ -7955,6 +7955,8 @@ button.note-breadcrumb__item:hover {
 .qsl-guest-waiting { min-height:300px; }
 .qsl-guest-waiting strong { color:#2b777a; font-size:1.15rem; }
 .qsl-guest-waiting span { color:#6c8380; font-size:.9rem; }
+.qsl-host-waiting strong { color:#2b777a; font-size:1rem; }
+.qsl-host-waiting p { max-width:32rem; }
 .qsl-standalone > .revelation-memorization-hero, .qsl-standalone > .revelation-memorization-controls, .qsl-standalone > .revelation-memorization-score { display:none; }
 .qsl-standalone { padding-top:18px; }
 
