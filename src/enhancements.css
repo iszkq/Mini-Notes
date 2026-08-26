@@ -2839,6 +2839,31 @@ button.collapsible-content-block__toggle:hover {
 }
 
 @media (max-width: 760px) {
+  /* Keep the app formatting toolbar visible above the keyboard on touch devices. */
+  .bn-mobile-formatting-toolbar {
+    position: fixed;
+    z-index: 120;
+    left: 8px;
+    right: 8px;
+    bottom: calc(8px + var(--bn-mobile-keyboard-offset, 0px));
+    display: flex;
+    max-width: calc(100vw - 16px);
+    overflow-x: auto;
+    border: 1px solid var(--ui-line, #d8e4e3);
+    border-radius: 12px;
+    background: #fff;
+    box-shadow: 0 8px 24px rgba(20, 60, 60, .18);
+  }
+
+  .bn-mobile-formatting-toolbar .bn-toolbar {
+    position: static;
+    display: flex;
+    flex: 1;
+    max-width: none;
+    border: 0;
+    box-shadow: none;
+  }
+
   .bn-toolbar {
     max-width: calc(100vw - 20px);
     overflow-x: auto;
