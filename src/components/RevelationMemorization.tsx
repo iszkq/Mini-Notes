@@ -278,9 +278,14 @@ export function RevelationMemorization({ onError, standaloneRoomId, standalonePl
 
   const startRoom = useCallback(async () => {
     if (!qslRoomId) return;
-    try { await startQslPuzzleRoom(qslRoomId); setQslStatus("started"); showToast("房主已开始比赛，所有玩家使用同一套题目"); }
+    try { await startQslPuzzleRoom(qslRoomId); setQslStatus("started"); showToast("房主已开始比赛，所有玩家使用同一套题目"); if (puzzleVerses.length > 0) createPuzzleRound(1); }
     catch (error) { onError?.(error instanceof Error ? error.message : "开始比赛失败"); }
-  }, [onError, qslRoomId, showToast]);
+  }, [createPuzzleRound, onError, puzzleVerses.length, qslRoomId, showToast]);
+
+  useEffect(() => {
+    if (!standaloneRoomId || qslStatus !== "started" || puzzlePhase !== "difficulty" || roundNumber > 0 || puzzleVerses.length === 0) return;
+    createPuzzleRound(1);
+  }, [createPuzzleRound, puzzlePhase, puzzleVerses.length, qslStatus, roundNumber, standaloneRoomId]);
 
   useEffect(() => {
     if (!standaloneRoomId || !bookName || puzzleLoading || puzzleVerses.length > 0) return;
@@ -343,6 +348,7 @@ export function RevelationMemorization({ onError, standaloneRoomId, standalonePl
         {qslRoomId ? <aside className="revelation-puzzle-room"><strong>在线 PK 房间 {qslRoomId}</strong><span>{leaderboard.length} 人参赛</span>{leaderboard.slice(0, 5).map((player, index) => <span key={player.userId}>#{index + 1} {player.username} · {player.score} 分 · {player.completedRounds} 节</span>)}</aside> : null}
         {puzzleLoading ? <div className="revelation-puzzle-loading">正在准备 QSL 拼拼乐题库…</div> : puzzlePhase === "difficulty" ? <div className="revelation-puzzle-difficulty"><h2>QSL 拼拼乐</h2><p>将被打散的经文分句按正确顺序拼回。</p><label><span>本次挑战节数</span><input min={1} max={500} onChange={(event) => setPuzzleRoundTarget(Math.min(500, Math.max(1, Number(event.target.value) || 1)))} type="number" value={puzzleRoundTarget} /></label><fieldset><legend>选择挑战难度</legend>{([{ value: 25, label: "简单 · 25 秒" }, { value: 17, label: "一般 · 17 秒" }, { value: 10, label: "高手 · 10 秒" }] as Array<{ label: string; value: PuzzleDifficulty }>).map((item) => <label key={item.value}><input checked={difficulty === item.value} name="difficulty" onChange={() => setDifficulty(item.value)} type="radio" value={item.value} />{item.label}</label>)}</fieldset><div className="revelation-puzzle-actions"><button className="primary-button" onClick={startPuzzle} type="button">开始挑战</button><button className="toolbar-button" onClick={() => void sharePuzzleChallenge()} type="button">分享挑战</button></div></div> : puzzlePhase === "complete" ? <div className="revelation-puzzle-difficulty"><h2>挑战完成！</h2><p>你已完成 {puzzleRoundTarget} 节经文拼拼乐，最终得分 {puzzleScore}。</p><button className="primary-button" onClick={() => setPuzzlePhase("difficulty")} type="button">再次挑战</button></div> : round ? <div className="revelation-puzzle-game"><header><div><span>⏱ {remainingTime.toFixed(2)}s</span><span>✓ 得分 {puzzleScore}</span></div><small>第 {roundNumber} / {puzzleRoundTarget} 节</small></header><h2>启示录 {round.verse.chapterNumber}:{round.verse.verseNumber}</h2><div className="revelation-puzzle-blanks">{round.segments.map((segment, index) => <button className={puzzlePhase === "result" ? selectedTokens[index]?.value === segment ? "is-correct" : "is-wrong" : selectedTokens[index] ? "is-filled" : ""} disabled={puzzlePhase !== "playing" || !selectedTokens[index]} key={`${round.id}-blank-${index}`} onClick={() => removePuzzleToken(index)} style={{ minWidth: `${Math.min(250, Math.max(48, segment.length * 18 + 20))}px` }} type="button">{selectedTokens[index]?.value}</button>)}</div><div className="revelation-puzzle-tokens">{round.tokens.map((token) => <button className={selectedTokens.some((selected) => selected.id === token.id) ? "is-used" : ""} disabled={puzzlePhase !== "playing" || selectedTokens.some((selected) => selected.id === token.id)} key={token.id} onClick={() => selectPuzzleToken(token)} type="button">{token.value}</button>)}</div><footer><button className="primary-button" onClick={puzzlePhase === "playing" ? finishPuzzleRound : continuePuzzle} type="button">{puzzlePhase === "playing" ? "完成" : roundCorrect ? roundNumber >= puzzleRoundTarget ? "查看结果" : "继续" : "重新挑战"}</button></footer></div> : null}
       </section></div> : null}
+      {qslRoomId && !standaloneRoomId && qslStatus !== "started" && puzzleOpen ? <button className="primary-button qsl-host-start" onClick={() => void startRoom()} type="button">房主开始比赛</button> : null}
       {standaloneRoomId && qslStatus !== "started" && puzzleOpen ? <div className="qsl-waiting-overlay"><h2>等待房主开始比赛</h2><p>所有参赛者将使用同一套题目、同一顺序。</p><span>房主开始后会自动进入对决…</span></div> : null}
     </section>
   );
@@ -378,7 +384,7 @@ function splitVerseIntoSegments(text: string): string[] {
     return text.slice(start, end + punctuation).trim();
   }).filter(Boolean);
   if (clauses.length >= 2) return clauses;
-  const targetCount = text.length < 22 ? Math.floor(Math.random() * 3) + 4 : Math.floor(Math.random() * 5) + 5;
+  const targetCount = text.length < 22 ? 4 : 6;
   const segmentSize = Math.max(1, Math.floor(text.length / targetCount));
   return Array.from({ length: targetCount }, (_, index) => index === targetCount - 1 ? text.slice(index * segmentSize) : text.slice(index * segmentSize, (index + 1) * segmentSize)).filter(Boolean);
 }

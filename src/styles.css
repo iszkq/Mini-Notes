@@ -7917,7 +7917,11 @@ button.note-breadcrumb__item:hover {
 .revelation-puzzle-room strong { width:100%; }
 .revelation-puzzle-room span { padding:4px 7px; border-radius:999px; background:#fff; }
 .qsl-battle-shell { min-height:100vh; background:linear-gradient(145deg,#eef7f6,#f9fbfb); }
+.qsl-standalone > *:not(.revelation-puzzle-backdrop) { display:none !important; }
+.qsl-standalone .revelation-puzzle-backdrop { position:fixed; inset:0; z-index:10; background:#f7fbfb; }
+.qsl-standalone .revelation-puzzle-modal { width:100%; max-width:none; min-height:100vh; border-radius:0; box-shadow:none; }
 .qsl-waiting-overlay { position:fixed; inset:0; z-index:20; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:10px; background:rgba(247,252,251,.97); color:#245e62; text-align:center; }
+.qsl-host-start { position:fixed; left:50%; top:28px; z-index:30; transform:translateX(-50%); }
 .qsl-waiting-overlay h2 { margin:0; font-size:1.8rem; }
 .qsl-waiting-overlay p { margin:0; color:#66817d; }
 .qsl-battle-lobby { width:min(420px,calc(100vw - 32px)); margin:0 auto; padding:72px 24px 40px; text-align:center; }
