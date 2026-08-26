@@ -1595,6 +1595,12 @@
   }
 }
 
+@media (min-width: 761px) {
+  .bn-mobile-formatting-toolbar {
+    display: none !important;
+  }
+}
+
 .collapsible-content-block {
   overflow: hidden;
   border: 1px solid #e8e2d7;
