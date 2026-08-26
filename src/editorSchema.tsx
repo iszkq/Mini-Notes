@@ -1616,6 +1616,7 @@ export const tableCellStyleExtension = createExtension({
       },
       addProseMirrorPlugins() {
         let rowGuide: HTMLDivElement | null = null;
+        let latestView: { dom: HTMLElement } | null = null;
         const removeRowGuide = () => {
           rowGuide?.remove();
           rowGuide = null;
@@ -1654,6 +1655,22 @@ export const tableCellStyleExtension = createExtension({
             guide.appendChild(segment);
           });
         };
+        const clearRowResizeState = (view: { dom: HTMLElement }) => {
+          view.dom
+            .querySelectorAll<HTMLElement>('tr[data-row-resize-hover], tr[data-row-resize-active]')
+            .forEach((row) => {
+              row.removeAttribute("data-row-resize-hover");
+              row.removeAttribute("data-row-resize-active");
+            });
+          view.dom.querySelectorAll<HTMLElement>('[data-content-type="table"]').forEach((table) => {
+            table.style.cursor = "";
+          });
+          removeRowGuide();
+        };
+        const handleWindowScroll = () => {
+          if (latestView) clearRowResizeState(latestView);
+        };
+        window.addEventListener("scroll", handleWindowScroll, true);
         const resolveCellAtPointer = (event: PointerEvent, target: Element | null) => {
           const candidates: HTMLElement[] = [];
           for (const offset of [0, -2, 2, -6, 6, -10, 10]) {
@@ -1670,23 +1687,26 @@ export const tableCellStyleExtension = createExtension({
         return [
           new ProseMirrorPlugin({
             destroy() {
+              window.removeEventListener("scroll", handleWindowScroll, true);
               removeRowGuide();
             },
             props: {
               handleDOMEvents: {
                 pointerup(view) {
+                  latestView = view;
                   if (!view.editable) return false;
-                  view.dom.querySelectorAll<HTMLElement>('tr[data-row-resize-hover], tr[data-row-resize-active]').forEach((row) => {
-                    row.removeAttribute("data-row-resize-hover");
-                    row.removeAttribute("data-row-resize-active");
-                  });
-                  view.dom.querySelectorAll<HTMLElement>('[data-content-type="table"]').forEach((table) => {
-                    table.style.cursor = "";
-                  });
-                  removeRowGuide();
+                  clearRowResizeState(view);
+                  return false;
+                },
+                scroll(view) {
+                  latestView = view;
+                  // A fixed guide otherwise stays painted at its old viewport
+                  // coordinates when the document scrolls without a pointermove.
+                  clearRowResizeState(view);
                   return false;
                 },
                 pointermove(view, event) {
+                  latestView = view;
                   if (!view.editable) {
                     removeRowGuide();
                     return false;
@@ -1713,6 +1733,7 @@ export const tableCellStyleExtension = createExtension({
                   return false;
                 },
                 pointerdown(view, event) {
+                  latestView = view;
                   if (!view.editable) return false;
                   if (event.button !== 0) return false;
                   const target = event.target instanceof Element ? event.target : null;
