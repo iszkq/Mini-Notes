@@ -68,7 +68,9 @@ export function MindElixirMindMap({ block, editor }: { block: any; editor: any }
       // focus context menu otherwise leaves its modal state and hand cursor
       // active after clicking outside the map.
       contextMenu: editor.isEditable ? { locale: cn, focus: true, link: true } : false,
-      toolBar: editor.isEditable,
+      // Keep the native view controls (fullscreen, locate, zoom) available
+      // in public previews while context-menu editing stays disabled.
+      toolBar: true,
       keypress: editor.isEditable,
       // Left-drag on empty canvas pans; node dragging and node editing remain
       // handled by Mind Elixir itself.
