@@ -468,22 +468,6 @@ const colorBlock = createReactBlockSpec(
             >
               <Smile size={14} />
             </button>
-            {icon ? (
-              <button
-                aria-label="删除色块图标"
-                className="color-block__emoji-button color-block__remove-icon-button"
-                onClick={(event) => {
-                  event.preventDefault();
-                  event.stopPropagation();
-                  updateProps({ icon: "" });
-                }}
-                onMouseDown={(event) => event.stopPropagation()}
-                title="删除图标（保留色块）"
-                type="button"
-              >
-                <Trash2 size={14} />
-              </button>
-            ) : null}
             <label className="color-block__color-picker" title="更改色块背景颜色">
               <span aria-hidden="true" className="color-block__color-dot" style={{ backgroundColor }} />
               <input
@@ -542,6 +526,24 @@ const colorBlock = createReactBlockSpec(
                 role="button"
                 tabIndex={editor.isEditable ? 0 : -1}
                 title={editor.isEditable ? "点击后可直接粘贴图片表情或 emoji" : undefined}
+                onClick={(event) => {
+                  event.preventDefault();
+                  event.stopPropagation();
+                  if (editor.isEditable) {
+                    editor.setTextCursorPosition(block, "start");
+                    editor.focus();
+                  }
+                }}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter" || event.key === " ") {
+                    event.preventDefault();
+                    event.stopPropagation();
+                    if (editor.isEditable) {
+                      editor.setTextCursorPosition(block, "start");
+                      editor.focus();
+                    }
+                  }
+                }}
               >
                 {iconIsImage ? <img alt="" src={icon} /> : icon}
               </div>
@@ -1301,6 +1303,7 @@ export const collapsibleEnterExtension = createExtension({
   key: "embedded-card-enter-hard-break",
   keyboardShortcuts: {
     Backspace: ({ editor }) => preserveColorBlockOnIconDelete(editor),
+    Delete: ({ editor }) => preserveColorBlockOnIconDelete(editor),
     Enter: ({ editor }) => insertHardBreakInEmbeddedCard(editor),
     "Shift-Enter": ({ editor }) => insertHardBreakInEmbeddedCard(editor)
   }
