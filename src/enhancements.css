@@ -3152,8 +3152,15 @@ button.collapsible-content-block__toggle:hover {
 }
 .bn-editor [data-content-type="table"] td,
 .bn-editor [data-content-type="table"] th { position:relative; overflow:visible; }
-.bn-editor [data-content-type="table"] .tableWrapper,
-.bn-editor [data-content-type="table"] table { overflow:visible !important; }
+.bn-editor [data-content-type="table"] .tableWrapper {
+  display: block;
+  max-width: 100%;
+  overflow-x: auto !important;
+  overflow-y: visible !important;
+}
+.bn-editor [data-content-type="table"] table {
+  overflow: visible !important;
+}
 .bn-editor .selectedCell { overflow:visible !important; outline:2px solid rgba(77,145,224,.9) !important; outline-offset:-1px !important; }
 .bn-editor .selectedCell:after { position:absolute !important; z-index:30 !important; inset:0 !important; width:100% !important; height:100% !important; box-sizing:border-box !important; border:2px solid rgba(77,145,224,.9) !important; border-radius:1px !important; background:rgba(77,145,224,.2) !important; pointer-events:none !important; }
 
@@ -3204,6 +3211,12 @@ button.collapsible-content-block__toggle:hover {
   background: #4d8df7;
   box-shadow: 0 0 0 2px rgba(77, 141, 247, 0.18), 0 2px 8px rgba(43, 98, 176, 0.28);
   pointer-events: none;
+}
+.bn-editor:not([contenteditable="true"]) tr[data-row-resize-hover] > td,
+.bn-editor:not([contenteditable="true"]) tr[data-row-resize-hover] > th,
+.bn-editor:not([contenteditable="true"]) tr[data-row-resize-active] > td,
+.bn-editor:not([contenteditable="true"]) tr[data-row-resize-active] > th {
+  box-shadow: none !important;
 }
 .bn-editor [data-content-type="table"] tr[data-row-resize-active] > td::after,
 .bn-editor [data-content-type="table"] tr[data-row-resize-active] > th::after {

@@ -1460,7 +1460,23 @@ export const tableCellStyleExtension = createExtension({
             },
             props: {
               handleDOMEvents: {
+                pointerup(view) {
+                  if (!view.editable) return false;
+                  view.dom.querySelectorAll<HTMLElement>('tr[data-row-resize-hover], tr[data-row-resize-active]').forEach((row) => {
+                    row.removeAttribute("data-row-resize-hover");
+                    row.removeAttribute("data-row-resize-active");
+                  });
+                  view.dom.querySelectorAll<HTMLElement>('[data-content-type="table"]').forEach((table) => {
+                    table.style.cursor = "";
+                  });
+                  removeRowGuide();
+                  return false;
+                },
                 pointermove(view, event) {
+                  if (!view.editable) {
+                    removeRowGuide();
+                    return false;
+                  }
                   const target = event.target instanceof Element ? event.target : null;
                   const findCell = (offsets: number[] = [0]) => {
                     for (const offset of offsets) {
@@ -1491,6 +1507,7 @@ export const tableCellStyleExtension = createExtension({
                   return false;
                 },
                 pointerdown(view, event) {
+                  if (!view.editable) return false;
                   if (event.button !== 0) return false;
                   const target = event.target instanceof Element ? event.target : null;
                   const cell = (() => {
