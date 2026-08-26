@@ -3119,6 +3119,7 @@ button.collapsible-content-block__toggle:hover {
 .bn-editor [data-content-type="table"] th { position:relative; overflow:visible; }
 .bn-editor [data-content-type="table"] .tableWrapper,
 .bn-editor [data-content-type="table"] table { overflow:visible !important; }
+.bn-editor .selectedCell { overflow:visible !important; outline:2px solid rgba(77,145,224,.9) !important; outline-offset:-1px !important; }
 .bn-editor .selectedCell:after { position:absolute !important; z-index:30 !important; inset:0 !important; width:100% !important; height:100% !important; box-sizing:border-box !important; border:2px solid rgba(77,145,224,.9) !important; border-radius:1px !important; background:rgba(77,145,224,.2) !important; pointer-events:none !important; }
 
 /* Drag the lower edge of any row to increase its height. */

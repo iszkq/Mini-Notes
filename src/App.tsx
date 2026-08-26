@@ -81,6 +81,7 @@ import type { AuthUser, Note, NoteBlock, NoteSummary, NoteTitleSize } from "./sh
 const AdminPanel = lazy(() =>
   import("./components/AdminPanel").then((module) => ({ default: module.AdminPanel }))
 );
+const SHARE_PASSWORD_STORAGE_PREFIX = "mini-notes.share-password.";
 const BibleReader = lazy(() =>
   import("./components/BibleReader").then((module) => ({ default: module.BibleReader }))
 );
@@ -2772,7 +2773,10 @@ function App() {
     setCategoryActionMenu(null);
     setShareOpen((current) => !current);
     setShareCopied(false);
-    setSharePassword("");
+    const storedPassword = draft && typeof window !== "undefined"
+      ? window.localStorage.getItem(`${SHARE_PASSWORD_STORAGE_PREFIX}${draft.id}`) || ""
+      : "";
+    setSharePassword(storedPassword);
   };
 
   const openExportPanel = () => {
@@ -3180,7 +3184,14 @@ function App() {
                   <input
                     className="share-link-input"
                     maxLength={72}
-                    onChange={(event) => setSharePassword(event.target.value)}
+                    onChange={(event) => {
+                      const value = event.target.value;
+                      setSharePassword(value);
+                      if (draft && typeof window !== "undefined") {
+                        if (value) window.localStorage.setItem(`${SHARE_PASSWORD_STORAGE_PREFIX}${draft.id}`, value);
+                        else window.localStorage.removeItem(`${SHARE_PASSWORD_STORAGE_PREFIX}${draft.id}`);
+                      }
+                    }}
                     placeholder={draft.sharePasswordProtected ? "当前已设置密码；输入新密码可更换" : "可选"}
                     type={showSharePassword ? "text" : "password"}
                     value={sharePassword}
