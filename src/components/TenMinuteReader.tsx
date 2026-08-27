@@ -34,7 +34,7 @@ import {
   updateTenMinuteLessonDocument,
   updateTenMinuteReaderSettings
 } from "../api";
-import { noteSchema, tableCellStyleExtension } from "../editorSchema";
+import { collapsiblePasteExtension, noteSchema, tableCellStyleExtension } from "../editorSchema";
 import { SelectableTableHandle, TableAwareColorStyleButton } from "./NotebookFormattingToolbar";
 import type {
   TenMinuteLesson,
@@ -558,7 +558,7 @@ function TenMinuteLessonEditor({ blocks, onChange }: TenMinuteLessonEditorProps)
         cellBackgroundColor: false,
         cellTextColor: false
       },
-      extensions: [tableCellStyleExtension]
+      extensions: [tableCellStyleExtension, collapsiblePasteExtension]
     },
     [dictionary]
   );

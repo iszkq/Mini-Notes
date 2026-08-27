@@ -7,9 +7,10 @@ import {
 } from "@blocknote/core";
 import { createReactBlockSpec, createReactStyleSpec } from "@blocknote/react";
 import { Extension as TiptapExtension } from "@tiptap/core";
+import { Fragment, Schema, Slice } from "@tiptap/pm/model";
 import { Plugin as ProseMirrorPlugin } from "@tiptap/pm/state";
 import { useEffect, useRef, useState, type CSSProperties, type PointerEvent as ReactPointerEvent, type ReactNode } from "react";
-import { ChevronDown, CircleDot, FileText, Heading, Network, Plus, Trash2, Minus, RotateCcw, Palette, Shapes, Wand2, Maximize2, Minimize2, Scan, LayoutTemplate, Smile } from "lucide-react";
+import { ChevronDown, CircleDot, FileText, Heading, Network, Plus, Trash2, Minus, RotateCcw, Palette, Shapes, Wand2, Maximize2, Minimize2, Scan, LayoutTemplate } from "lucide-react";
 import { formatBibleReference, parseBibleVersePayload } from "./bible";
 import { apiUrl } from "./apiBase";
 import { parseNoteComment } from "./comments";
@@ -18,10 +19,8 @@ import { MindElixirMindMap } from "./components/MindElixirMindMap";
 const FONT_SIZE_VALUES = new Set(["12px", "14px", "16px", "18px", "20px", "24px", "28px", "32px"]);
 export const COLLAPSIBLE_CONTENT_DEFAULT_TITLE = "这是标题可以自定义";
 export const COLLAPSIBLE_CONTENT_DEFAULT_BODY = "这是内容。。。。";
-export const COLOR_BLOCK_DEFAULT_BACKGROUND = "#fce8e6";
-export const COLOR_BLOCK_DEFAULT_ICON = "☀️";
-export const COLOR_BLOCK_DEFAULT_TEXT = "在这里输入重点内容";
-const COLOR_BLOCK_PRESET_COLORS = [
+export const COLLAPSIBLE_CONTENT_DEFAULT_BACKGROUND = "#ffffff";
+const BACKGROUND_PRESET_COLORS = [
   { label: "粉色", value: "#fce8e6" },
   { label: "蓝色", value: "#e4f1fb" },
   { label: "绿色", value: "#e4f4ea" },
@@ -137,7 +136,7 @@ const collapsibleContent = createReactBlockSpec(
         default: false
       },
       backgroundColor: {
-        default: COLOR_BLOCK_DEFAULT_BACKGROUND
+        default: COLLAPSIBLE_CONTENT_DEFAULT_BACKGROUND
       },
       title: {
         default: COLLAPSIBLE_CONTENT_DEFAULT_TITLE
@@ -151,7 +150,10 @@ const collapsibleContent = createReactBlockSpec(
     },
     render: ({ block, editor, contentRef }) => {
       const collapsed = Boolean(block.props.collapsed);
-      const backgroundColor = normalizeColorBlockColor(block.props.backgroundColor);
+      const backgroundColor = normalizeBackgroundColor(
+        block.props.backgroundColor,
+        COLLAPSIBLE_CONTENT_DEFAULT_BACKGROUND
+      );
       const title = block.props.title || "";
 
       return (
@@ -159,7 +161,7 @@ const collapsibleContent = createReactBlockSpec(
           className={getClassName("collapsible-content-block", collapsed ? "is-collapsed" : undefined)}
           style={{ backgroundColor }}
         >
-          <div className="collapsible-content-block__header">
+          <div className="collapsible-content-block__header" contentEditable={false}>
             <button
               aria-expanded={!collapsed}
               aria-label={collapsed ? "展开折叠内容" : "收起折叠内容"}
@@ -255,7 +257,7 @@ const collapsibleContent = createReactBlockSpec(
                 />
               </label>
               <div className="collapsible-content-block__presets" role="group" aria-label="常用背景颜色">
-                {COLOR_BLOCK_PRESET_COLORS.map((preset) => (
+                {BACKGROUND_PRESET_COLORS.map((preset) => (
                   <button
                     aria-label={`使用${preset.label}背景色`}
                     className="collapsible-content-block__preset"
@@ -306,9 +308,14 @@ const collapsibleContent = createReactBlockSpec(
           "collapsible-content-block",
           block.props.collapsed ? "is-collapsed" : undefined
         )}
-        style={{ backgroundColor: normalizeColorBlockColor(block.props.backgroundColor) }}
+        style={{
+          backgroundColor: normalizeBackgroundColor(
+            block.props.backgroundColor,
+            COLLAPSIBLE_CONTENT_DEFAULT_BACKGROUND
+          )
+        }}
       >
-        <div className="collapsible-content-block__header">
+        <div className="collapsible-content-block__header" contentEditable={false}>
           <span className="collapsible-content-block__toggle" aria-hidden="true">
             <ChevronDown size={18} strokeWidth={2.2} />
           </span>
@@ -454,173 +461,6 @@ const bibleVerseCard = createReactBlockSpec(
             ) : null}
           </div>
         </div>
-      );
-    }
-  }
-)();
-
-/**
- * A lightweight callout-style block.  Its body is native BlockNote inline
- * content, so the regular formatting toolbar (bold, colors, font size, etc.)
- * works exactly like it does in a paragraph.  The icon and background color
- * are block properties and therefore survive document export/import.
- */
-const colorBlock = createReactBlockSpec(
-  {
-    type: "colorBlock",
-    propSchema: {
-      backgroundColor: {
-        default: COLOR_BLOCK_DEFAULT_BACKGROUND
-      },
-      icon: {
-        default: COLOR_BLOCK_DEFAULT_ICON
-      }
-    },
-    content: "inline"
-  },
-  {
-    meta: {
-      hardBreakShortcut: "enter"
-    },
-    render: ({ block, editor, contentRef }) => {
-      const backgroundColor = normalizeColorBlockColor(block.props.backgroundColor);
-      const icon = typeof block.props.icon === "string" ? block.props.icon : COLOR_BLOCK_DEFAULT_ICON;
-      const iconIsImage = isImageIconValue(icon);
-      const updateProps = (props: Record<string, string>) => {
-        if (!editor.isEditable) return;
-        editor.updateBlock(block, { props });
-      };
-
-      return (
-        <section
-          className="color-block"
-          style={{ backgroundColor }}
-          onMouseDown={(event) => {
-            const target = event.target as HTMLElement;
-            if (target.closest("input, button")) event.stopPropagation();
-          }}
-        >
-          <div className="color-block__tools" contentEditable={false}>
-            <button
-              aria-label="从表情包选择图标"
-              className="color-block__emoji-button"
-              onClick={(event) => {
-                event.preventDefault();
-                event.stopPropagation();
-                if (!editor.isEditable) return;
-                window.dispatchEvent(new CustomEvent("mininotes:color-block-emoji", { detail: { blockId: block.id } }));
-              }}
-              onMouseDown={(event) => event.stopPropagation()}
-              title="从表情包选择图标"
-              type="button"
-            >
-              <Smile size={14} />
-            </button>
-            <label className="color-block__color-picker" title="更改色块背景颜色">
-              <span aria-hidden="true" className="color-block__color-dot" style={{ backgroundColor }} />
-              <input
-                aria-label="色块背景颜色"
-                disabled={!editor.isEditable}
-                onChange={(event) => updateProps({ backgroundColor: event.target.value })}
-                onClick={(event) => event.stopPropagation()}
-                onMouseDown={(event) => event.stopPropagation()}
-                type="color"
-                value={toColorInputValue(backgroundColor)}
-              />
-            </label>
-            <div className="color-block__presets" role="group" aria-label="常用背景颜色">
-              {COLOR_BLOCK_PRESET_COLORS.map((preset) => (
-                <button
-                  aria-label={`使用${preset.label}背景色`}
-                  className="color-block__preset"
-                  key={preset.value}
-                  onClick={(event) => {
-                    event.preventDefault();
-                    event.stopPropagation();
-                    updateProps({ backgroundColor: preset.value });
-                  }}
-                  onMouseDown={(event) => event.stopPropagation()}
-                  style={{ backgroundColor: preset.value }}
-                  title={preset.label}
-                  type="button"
-                />
-              ))}
-            </div>
-          </div>
-          <div
-            className="color-block__body"
-            onKeyDownCapture={(event) => {
-              if (
-                event.key !== "Enter" ||
-                event.altKey ||
-                event.ctrlKey ||
-                event.metaKey ||
-                event.nativeEvent.isComposing
-              ) {
-                return;
-              }
-              event.preventDefault();
-              event.stopPropagation();
-              event.nativeEvent.stopImmediatePropagation();
-              insertHardBreak(editor);
-            }}
-          >
-            {icon ? (
-              <div
-                aria-label="色块图标；点击后可直接粘贴表情"
-                className="color-block__icon"
-                contentEditable={false}
-                data-color-block-id={block.id}
-                role="button"
-                tabIndex={editor.isEditable ? 0 : -1}
-                title={editor.isEditable ? "点击后可直接粘贴图片表情或 emoji" : undefined}
-                onClick={(event) => {
-                  event.preventDefault();
-                  event.stopPropagation();
-                  if (editor.isEditable) {
-                    editor.setTextCursorPosition(block, "start");
-                    editor.focus();
-                  }
-                }}
-                onKeyDown={(event) => {
-                  if (event.key === "Enter" || event.key === " ") {
-                    event.preventDefault();
-                    event.stopPropagation();
-                    if (editor.isEditable) {
-                      editor.setTextCursorPosition(block, "start");
-                      editor.focus();
-                    }
-                  }
-                }}
-              >
-                {iconIsImage ? <img alt="" src={icon} /> : icon}
-              </div>
-            ) : null}
-            <div
-              className="color-block__content"
-              data-placeholder={COLOR_BLOCK_DEFAULT_TEXT}
-              ref={contentRef}
-            />
-          </div>
-        </section>
-      );
-    },
-    toExternalHTML: ({ block, contentRef }) => {
-      const backgroundColor = normalizeColorBlockColor(block.props.backgroundColor);
-      const icon = typeof block.props.icon === "string" ? block.props.icon : COLOR_BLOCK_DEFAULT_ICON;
-      const iconIsImage = isImageIconValue(icon);
-
-      return (
-        <section className="color-block" style={{ backgroundColor }}>
-          <div className="color-block__body">
-            {icon ? (
-              <div className="color-block__icon" aria-hidden="true">
-                {iconIsImage ? <img alt="" src={icon} /> : icon}
-              </div>
-            ) : null}
-            <div className="color-block__content" ref={contentRef} />
-          </div>
-        </section>
       );
     }
   }
@@ -1350,11 +1190,8 @@ const pageLinkBlock = createReactBlockSpec(
 export const collapsibleEnterExtension = createExtension({
   key: "embedded-card-enter-hard-break",
   keyboardShortcuts: {
-    Backspace: ({ editor }) => preserveColorBlockOnIconDelete(editor),
-    Delete: ({ editor }) => preserveColorBlockOnIconDelete(editor),
     Enter: ({ editor }) => insertHardBreakInEmbeddedCard(editor),
-    "Shift-Enter": ({ editor }) => insertHardBreakInEmbeddedCard(editor),
-    Tab: ({ editor }) => insertColorBlockFirstLineIndent(editor)
+    "Shift-Enter": ({ editor }) => insertHardBreakInEmbeddedCard(editor)
   }
 });
 
@@ -1576,7 +1413,6 @@ export const noteSchema = BlockNoteSchema.create({
     ...defaultBlockSpecs,
     collapsibleContent,
     bibleVerseCard,
-    colorBlock,
     contentTimeline: timelineBlock,
     contentSteps: stepsBlock,
     contentComparison: comparisonBlock,
@@ -1845,22 +1681,76 @@ export const tableCellStyleExtension = createExtension({
   ]
 });
 
+function convertPastedBlocksToInline(content: Fragment, schema: Schema): Fragment {
+  const hardBreak = schema.nodes.hardBreak;
+  let result = Fragment.empty;
+
+  content.forEach((node) => {
+    if (node.isTextblock && node.childCount > 0) {
+      result = result.append(node.content);
+      if (hardBreak) result = result.addToEnd(hardBreak.create());
+    } else if (node.isInline) {
+      result = result.addToEnd(node);
+    } else if (node.isBlock && node.childCount > 0) {
+      result = result.append(convertPastedBlocksToInline(node.content, schema));
+      if (hardBreak) result = result.addToEnd(hardBreak.create());
+    }
+  });
+
+  if (hardBreak && result.lastChild?.type === hardBreak) {
+    result = result.cut(0, result.size - 1);
+  }
+  return result;
+}
+
+export const collapsiblePasteExtension = createExtension({
+  key: "collapsible-content-paste",
+  tiptapExtensions: [
+    TiptapExtension.create({
+      name: "collapsibleContentPaste",
+      addProseMirrorPlugins() {
+        return [
+          new ProseMirrorPlugin({
+            props: {
+              transformPasted(slice, view) {
+                const target = view.state.selection.$from.parent;
+                if (target.type.name !== "collapsibleContent") {
+                  return slice;
+                }
+
+                return new Slice(
+                  convertPastedBlocksToInline(slice.content, view.state.schema),
+                  0,
+                  0
+                );
+              }
+            }
+          })
+        ];
+      }
+    })
+  ]
+});
+
 function normalizeFontSize(value: string): string {
   return FONT_SIZE_VALUES.has(value) ? value : "16px";
 }
 
-function normalizeColorBlockColor(value: unknown): string {
-  if (typeof value !== "string") return COLOR_BLOCK_DEFAULT_BACKGROUND;
+function normalizeBackgroundColor(
+  value: unknown,
+  fallback = COLLAPSIBLE_CONTENT_DEFAULT_BACKGROUND
+): string {
+  if (typeof value !== "string") return fallback;
   const color = value.trim();
   if (/^#[0-9a-f]{6}$/i.test(color)) return color;
   if (/^#[0-9a-f]{3}$/i.test(color)) {
     return `#${color.slice(1).split("").map((part) => part + part).join("")}`;
   }
-  return COLOR_BLOCK_DEFAULT_BACKGROUND;
+  return fallback;
 }
 
 function toColorInputValue(value: string): string {
-  return normalizeColorBlockColor(value);
+  return normalizeBackgroundColor(value);
 }
 
 function focusCollapsibleContent(editor: BlockNoteEditor<any, any, any>, blockId: string) {
@@ -1886,53 +1776,12 @@ function insertHardBreakInEmbeddedCard(editor: BlockNoteEditor<any, any, any>): 
 
     if (
       currentBlock?.type !== "collapsibleContent" &&
-      currentBlock?.type !== "bibleVerseCard" &&
-      currentBlock?.type !== "colorBlock"
+      currentBlock?.type !== "bibleVerseCard"
     ) {
       return false;
     }
 
     return insertHardBreak(editor);
-  } catch {
-    return false;
-  }
-}
-
-function preserveColorBlockOnIconDelete(editor: BlockNoteEditor<any, any, any>): boolean {
-  if (!editor.isEditable) return false;
-
-  try {
-    const state = editor.prosemirrorState;
-    if (!state.selection.empty || state.selection.$from.parentOffset !== 0) return false;
-    const currentBlock = editor.getTextCursorPosition().block;
-    if (currentBlock?.type !== "colorBlock") return false;
-
-    const icon = typeof currentBlock.props?.icon === "string" ? currentBlock.props.icon : "";
-    if (icon) {
-      editor.updateBlock(currentBlock, { props: { icon: "" } });
-    }
-
-    // At the beginning of a color block Backspace is reserved for removing
-    // the optional icon.  It must never unwrap the block into a paragraph.
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-function insertColorBlockFirstLineIndent(editor: BlockNoteEditor<any, any, any>): boolean {
-  if (!editor.isEditable) return false;
-
-  try {
-    const currentBlock = editor.getTextCursorPosition().block;
-    if (currentBlock?.type !== "colorBlock") return false;
-
-    const state = editor.prosemirrorState;
-    const indent = state.schema.text("\u3000\u3000");
-    editor.prosemirrorView.dispatch(
-      state.tr.replaceSelectionWith(indent).scrollIntoView()
-    );
-    return true;
   } catch {
     return false;
   }

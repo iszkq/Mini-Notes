@@ -22,7 +22,6 @@ import {
   ListChecks,
   MessageSquareText,
   Network,
-  Palette,
   Pencil,
   RotateCcw,
   Timer,
@@ -44,6 +43,7 @@ import {
 } from "react";
 import { importImageAsset, uploadAsset } from "../api";
 import { apiUrl } from "../apiBase";
+import { Fragment, Slice } from "@tiptap/pm/model";
 import {
   formatBibleReference,
   parseBibleVersePayload,
@@ -53,12 +53,11 @@ import {
 import {
   COLLAPSIBLE_CONTENT_DEFAULT_BODY,
   COLLAPSIBLE_CONTENT_DEFAULT_TITLE,
-  COLOR_BLOCK_DEFAULT_BACKGROUND,
-  COLOR_BLOCK_DEFAULT_ICON,
-  COLOR_BLOCK_DEFAULT_TEXT,
+  COLLAPSIBLE_CONTENT_DEFAULT_BACKGROUND,
   COMPARISON_DEFAULT_PAYLOAD,
   STEPS_DEFAULT_PAYLOAD,
   TIMELINE_DEFAULT_PAYLOAD,
+  collapsiblePasteExtension,
   collapsibleEnterExtension,
   noteSchema,
   tableCellStyleExtension
@@ -210,7 +209,6 @@ export function NotebookEditor({
   const [bibleModalOpen, setBibleModalOpen] = useState(false);
   const [bibleInsertTarget, setBibleInsertTarget] = useState<BibleInsertTarget | null>(null);
   const [emojiPickerOpen, setEmojiPickerOpen] = useState(false);
-  const [colorBlockIconTarget, setColorBlockIconTarget] = useState<string | null>(null);
   const [activeCommentId, setActiveCommentId] = useState<string | null>(null);
   const [commentAnchorPositions, setCommentAnchorPositions] = useState<CommentAnchorPositions>({});
   const [commentComposer, setCommentComposer] = useState<CommentComposer | null>(null);
@@ -274,44 +272,13 @@ export function NotebookEditor({
         cellBackgroundColor: false,
         cellTextColor: false
       },
-      extensions: [collapsibleEnterExtension, tableCellStyleExtension],
+      extensions: [collapsibleEnterExtension, tableCellStyleExtension, collapsiblePasteExtension],
       uploadFile: handleUpload,
       resolveFileUrl: async (url: string) => apiUrl(url)
     },
     [dictionary, handleUpload, note.id]
   );
 
-  useEffect(() => {
-    const handleColorBlockEmoji = (event: Event) => {
-      const blockId = (event as CustomEvent<{ blockId?: string }>).detail?.blockId;
-      if (blockId) {
-        setColorBlockIconTarget(blockId);
-      }
-    };
-    window.addEventListener("mininotes:color-block-emoji", handleColorBlockEmoji);
-    return () => window.removeEventListener("mininotes:color-block-emoji", handleColorBlockEmoji);
-  }, []);
-
-  const updateColorBlockIcon = useCallback(
-    (blockId: string, icon: string) => {
-      const block = editor.getBlock(blockId);
-      if (block?.type === "colorBlock") {
-        editor.updateBlock(block, { props: { icon } } as PartialBlock);
-        return true;
-      }
-      return false;
-    },
-    [editor]
-  );
-
-  const selectColorBlockIcon = useCallback(
-    (item: EmojiItem) => {
-      if (!colorBlockIconTarget) return;
-      updateColorBlockIcon(colorBlockIconTarget, item.url);
-      setColorBlockIconTarget(null);
-    },
-    [colorBlockIconTarget, updateColorBlockIcon]
-  );
 
   const resolveRemoteImageUrl = useCallback(
     async (url: string): Promise<string | null> => {
@@ -800,7 +767,7 @@ export function NotebookEditor({
       type: "collapsibleContent",
       props: {
         collapsed: false,
-        backgroundColor: COLOR_BLOCK_DEFAULT_BACKGROUND,
+        backgroundColor: COLLAPSIBLE_CONTENT_DEFAULT_BACKGROUND,
         title: COLLAPSIBLE_CONTENT_DEFAULT_TITLE
       },
       content: [
@@ -832,33 +799,6 @@ export function NotebookEditor({
       if (cursorBlock) {
         editor.setTextCursorPosition(cursorBlock);
       }
-    }
-
-    editor.focus();
-  }, [editor, getCurrentBlockTextFromDom, getCurrentTextBlock]);
-
-  const insertColorBlock = useCallback(() => {
-    const currentBlock = getCurrentTextBlock();
-    const plainText = getCurrentBlockTextFromDom();
-    const colorBlock = {
-      type: "colorBlock",
-      props: {
-        backgroundColor: COLOR_BLOCK_DEFAULT_BACKGROUND,
-        icon: COLOR_BLOCK_DEFAULT_ICON
-      },
-      content: [{ type: "text", text: COLOR_BLOCK_DEFAULT_TEXT, styles: {} }]
-    } as unknown as PartialBlock;
-    const spacerBlock = { type: "paragraph", content: [] } as PartialBlock;
-    const blocksToInsert = [colorBlock, spacerBlock];
-
-    if (!plainText || plainText.startsWith("/")) {
-      const result = editor.replaceBlocks([currentBlock.id], blocksToInsert);
-      const cursorBlock = result.insertedBlocks[0] ?? result.insertedBlocks[1];
-      if (cursorBlock) editor.setTextCursorPosition(cursorBlock, "end");
-    } else {
-      const insertedBlocks = editor.insertBlocks(blocksToInsert, currentBlock.id, "after");
-      const cursorBlock = insertedBlocks[0] ?? insertedBlocks[1];
-      if (cursorBlock) editor.setTextCursorPosition(cursorBlock, "end");
     }
 
     editor.focus();
@@ -1105,47 +1045,20 @@ export function NotebookEditor({
         return;
       }
 
-      const colorBlockIcon = target.closest<HTMLElement>(
-        ".color-block__icon[data-color-block-id]"
+      // Custom inline blocks must never let a multi-paragraph paste escape
+      // into sibling blocks. Insert the clipboard text directly into the
+      // current inline selection and represent line breaks as hard breaks.
+      const inlineContentTarget = target.closest(
+        ".collapsible-content-block__content"
       );
-      const colorBlockId = colorBlockIcon?.dataset.colorBlockId;
-      if (colorBlockId) {
-        const iconFiles = getClipboardImageFiles(clipboardData);
-        const iconSource = getClipboardImageSource(clipboardData);
-        const pastedText = clipboardData.getData("text/plain").trim();
-        if (iconFiles.length > 0 || iconSource || pastedText) {
+      if (inlineContentTarget) {
+        const pastedText = clipboardData.getData("text/plain");
+        if (pastedText) {
           handledClipboardPasteEventsRef.current.add(event);
           event.preventDefault();
           event.stopPropagation();
           event.stopImmediatePropagation();
-
-          void (async () => {
-            try {
-              if (iconFiles.length > 0) {
-                const uploaded = await uploadAsset(normalizeClipboardImageFile(iconFiles[0]));
-                updateColorBlockIcon(colorBlockId, uploaded.url);
-                return;
-              }
-
-              if (iconSource) {
-                if (/^data:/i.test(iconSource)) {
-                  const file = await fileFromImageDataUrl(iconSource);
-                  if (!file) throw new Error("粘贴的图片表情无法读取。");
-                  const uploaded = await uploadAsset(file);
-                  updateColorBlockIcon(colorBlockId, uploaded.url);
-                } else {
-                  updateColorBlockIcon(colorBlockId, normalizePastedImageUrl(iconSource));
-                }
-                return;
-              }
-
-              // Plain emoji and other short text icons are kept as text. This
-              // also lets users paste symbols from outside the built-in packs.
-              updateColorBlockIcon(colorBlockId, Array.from(pastedText).slice(0, 12).join(""));
-            } catch (error) {
-              onError?.(error instanceof Error ? error.message : "图标粘贴失败。");
-            }
-          })();
+          insertClipboardTextInInlineBlock(editor, pastedText);
           return;
         }
       }
@@ -1186,7 +1099,7 @@ export function NotebookEditor({
 
     root.addEventListener("paste", handlePaste, true);
     return () => root.removeEventListener("paste", handlePaste, true);
-  }, [insertClipboardImageFiles, insertClipboardImageSource, onError, readOnly, updateColorBlockIcon]);
+  }, [editor, insertClipboardImageFiles, insertClipboardImageSource, onError, readOnly]);
 
   useEffect(() => {
     if (readOnly || focusRequest <= 0 || typeof window === "undefined") {
@@ -1368,7 +1281,6 @@ export function NotebookEditor({
             !item.aliases?.some((alias) => ["emoji", "emoticon"].includes(alias.toLowerCase()))
         );
       const heading3Title = editor.dictionary.slash_menu.heading_3.title;
-      const codeBlockTitle = editor.dictionary.slash_menu.code_block.title;
       const toggleListTitle = editor.dictionary.slash_menu.toggle_list.title;
       const dividerTitle = editor.dictionary.slash_menu.divider.title;
       const collapsibleItem: DefaultReactSuggestionItem = {
@@ -1378,14 +1290,6 @@ export function NotebookEditor({
         group: "高级功能",
         icon: <ChevronDown size={18} />,
         onItemClick: insertCollapsibleContent
-      };
-      const colorBlockItem: DefaultReactSuggestionItem = {
-        title: "色块",
-        subtext: "可自定义背景颜色、图标和文字格式的重点区块",
-        aliases: ["色块", "高亮块", "提示块", "callout", "color block"],
-        group: "基本块",
-        icon: <Palette size={18} />,
-        onItemClick: insertColorBlock
       };
       const timelineItem: DefaultReactSuggestionItem = {
         title: "时间轴",
@@ -1446,14 +1350,6 @@ export function NotebookEditor({
       };
       const items = [...defaultItems];
       moveSuggestionItemToGroup(items, dividerTitle, "基本块");
-      const codeIndex = codeBlockTitle
-        ? items.findIndex((item) => item.title === codeBlockTitle)
-        : -1;
-      if (codeIndex >= 0) {
-        items.splice(codeIndex, 0, colorBlockItem);
-      } else {
-        insertSuggestionItemsInGroup(items, "基本块", [colorBlockItem]);
-      }
       const heading3Index = items.findIndex((item) => item.title === heading3Title);
       const toggleListIndex = items.findIndex((item) => item.title === toggleListTitle);
       items.splice(toggleListIndex >= 0 ? toggleListIndex + 1 : 0, 0, subPageItem);
@@ -1472,7 +1368,6 @@ export function NotebookEditor({
     [
       editor,
       insertCollapsibleContent,
-      insertColorBlock,
       insertComparison,
       insertMindMap,
       insertSteps,
@@ -1610,18 +1505,6 @@ export function NotebookEditor({
             onSelect={insertEmojiImage}
             open
             title="插入表情包"
-          />
-        </Suspense>
-      ) : null}
-
-      {!readOnly && colorBlockIconTarget ? (
-        <Suspense fallback={null}>
-          <EmojiPackPicker
-            onClose={() => setColorBlockIconTarget(null)}
-            onSelect={selectColorBlockIcon}
-            open
-            title="选择色块图标"
-            confirmLabel="设置图标"
           />
         </Suspense>
       ) : null}
@@ -2629,6 +2512,23 @@ function insertImageBlockAtCursor(
 
 function isEmptyParagraph(block: { content?: unknown; type?: string }) {
   return block.type === "paragraph" && Array.isArray(block.content) && block.content.length === 0;
+}
+
+function insertClipboardTextInInlineBlock(
+  editor: BlockNoteEditor<any, any, any>,
+  value: string
+) {
+  const state = editor.prosemirrorState;
+  const hardBreak = state.schema.nodes.hardBreak;
+  const nodes = value.split(/\r?\n/).flatMap((line, index, lines) => {
+    const parts = line ? [state.schema.text(line)] : [];
+    if (hardBreak && index < lines.length - 1) parts.push(hardBreak.create());
+    return parts;
+  });
+  if (nodes.length === 0) return;
+  editor.prosemirrorView.dispatch(
+    state.tr.replaceSelection(new Slice(Fragment.fromArray(nodes), 0, 0)).scrollIntoView()
+  );
 }
 
 function getClipboardImageFiles(clipboardData: DataTransfer): File[] {
