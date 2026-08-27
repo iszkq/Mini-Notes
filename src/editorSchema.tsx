@@ -136,6 +136,9 @@ const collapsibleContent = createReactBlockSpec(
       collapsed: {
         default: false
       },
+      backgroundColor: {
+        default: COLOR_BLOCK_DEFAULT_BACKGROUND
+      },
       title: {
         default: COLLAPSIBLE_CONTENT_DEFAULT_TITLE
       }
@@ -148,11 +151,13 @@ const collapsibleContent = createReactBlockSpec(
     },
     render: ({ block, editor, contentRef }) => {
       const collapsed = Boolean(block.props.collapsed);
+      const backgroundColor = normalizeColorBlockColor(block.props.backgroundColor);
       const title = block.props.title || "";
 
       return (
         <section
           className={getClassName("collapsible-content-block", collapsed ? "is-collapsed" : undefined)}
+          style={{ backgroundColor }}
         >
           <div className="collapsible-content-block__header">
             <button
@@ -228,6 +233,48 @@ const collapsibleContent = createReactBlockSpec(
               type="text"
               value={title}
             />
+            <div
+              className="collapsible-content-block__tools"
+              contentEditable={false}
+              onMouseDown={(event) => event.stopPropagation()}
+            >
+              <label className="collapsible-content-block__color-picker" title="更改折叠内容背景颜色">
+                <span aria-hidden="true" className="collapsible-content-block__color-dot" style={{ backgroundColor }} />
+                <input
+                  aria-label="折叠内容背景颜色"
+                  disabled={!editor.isEditable}
+                  onChange={(event) => {
+                    if (editor.isEditable) {
+                      editor.updateBlock(block, { props: { backgroundColor: event.target.value } });
+                    }
+                  }}
+                  onClick={(event) => event.stopPropagation()}
+                  onMouseDown={(event) => event.stopPropagation()}
+                  type="color"
+                  value={toColorInputValue(backgroundColor)}
+                />
+              </label>
+              <div className="collapsible-content-block__presets" role="group" aria-label="常用背景颜色">
+                {COLOR_BLOCK_PRESET_COLORS.map((preset) => (
+                  <button
+                    aria-label={`使用${preset.label}背景色`}
+                    className="collapsible-content-block__preset"
+                    key={preset.value}
+                    onClick={(event) => {
+                      event.preventDefault();
+                      event.stopPropagation();
+                      if (editor.isEditable) {
+                        editor.updateBlock(block, { props: { backgroundColor: preset.value } });
+                      }
+                    }}
+                    onMouseDown={(event) => event.stopPropagation()}
+                    style={{ backgroundColor: preset.value }}
+                    title={preset.label}
+                    type="button"
+                  />
+                ))}
+              </div>
+            </div>
           </div>
           <div
             className="collapsible-content-block__body"
@@ -259,6 +306,7 @@ const collapsibleContent = createReactBlockSpec(
           "collapsible-content-block",
           block.props.collapsed ? "is-collapsed" : undefined
         )}
+        style={{ backgroundColor: normalizeColorBlockColor(block.props.backgroundColor) }}
       >
         <div className="collapsible-content-block__header">
           <span className="collapsible-content-block__toggle" aria-hidden="true">

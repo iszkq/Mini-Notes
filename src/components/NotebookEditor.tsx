@@ -800,6 +800,7 @@ export function NotebookEditor({
       type: "collapsibleContent",
       props: {
         collapsed: false,
+        backgroundColor: COLOR_BLOCK_DEFAULT_BACKGROUND,
         title: COLLAPSIBLE_CONTENT_DEFAULT_TITLE
       },
       content: [

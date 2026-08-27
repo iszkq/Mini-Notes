@@ -268,6 +268,8 @@ function buildExportDocument(notes: Array<ExportableNote & { html: string }>): s
       }
 
       .collapsible-content-block {
+        width: 100%;
+        box-sizing: border-box;
         margin: 0 0 1em;
         overflow: hidden;
         border: 1px solid #e8e2d7;
