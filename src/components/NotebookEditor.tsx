@@ -2417,7 +2417,12 @@ async function cropImageBlob(sourceBlob: Blob, crop: CropRect): Promise<Blob> {
 
 function hydrateBibleVerseCards(blocks: NoteBlock[]): PartialBlock[] {
   return blocks.map((block) => {
-    const next = { ...block };
+    const next: Record<string, unknown> = block.type === "colorBlock"
+      ? (() => {
+          const { props: _removedProps, ...legacyBlock } = block;
+          return { ...legacyBlock, type: "paragraph" };
+        })()
+      : { ...block };
     const children = next.children;
 
     if (Array.isArray(children)) {
