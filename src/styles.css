@@ -3847,6 +3847,84 @@ button:disabled {
   line-height: 1.12;
 }
 
+.public-folder-icon {
+  color: #b4792d;
+  background: #fff0cf;
+}
+
+.public-folder-subtitle {
+  margin: -2px 0 0;
+  color: #8b8274;
+  font-size: .86rem;
+}
+
+.public-folder-list {
+  display: grid;
+  gap: 10px;
+  margin-top: 28px;
+}
+
+.public-folder-item {
+  display: flex;
+  align-items: center;
+  gap: 13px;
+  width: 100%;
+  padding: 14px 16px;
+  border: 1px solid #e8e1d5;
+  border-radius: 14px;
+  color: #2f302d;
+  background: #fffdf9;
+  text-align: left;
+  cursor: pointer;
+  transition: border-color .18s ease, background .18s ease, transform .18s ease;
+}
+
+.public-folder-item:hover {
+  border-color: #b9d4cc;
+  background: #f7fbf9;
+  transform: translateY(-1px);
+}
+
+.public-folder-item-icon {
+  display: grid;
+  width: 36px;
+  height: 36px;
+  place-items: center;
+  flex: 0 0 auto;
+  border-radius: 10px;
+  background: #fff4cf;
+  font-size: 1.15rem;
+}
+
+.public-folder-item-icon.is-folder {
+  color: #b4792d;
+  background: #fff0cf;
+}
+
+.public-folder-item-copy {
+  display: grid;
+  min-width: 0;
+  flex: 1;
+  gap: 3px;
+}
+
+.public-folder-item-copy strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.public-folder-item-copy small {
+  color: #978e82;
+  font-size: .75rem;
+}
+
+.public-folder-empty {
+  padding: 34px 16px;
+  color: #918a80;
+  text-align: center;
+}
+
 .public-empty {
   display: grid;
   justify-items: center;

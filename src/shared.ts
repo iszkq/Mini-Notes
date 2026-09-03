@@ -30,6 +30,7 @@ export type NoteSummary = {
 
 export type Note = NoteSummary & {
   content: NoteBlock[];
+  children?: NoteSummary[];
 };
 
 export type QslPuzzleRoom = {

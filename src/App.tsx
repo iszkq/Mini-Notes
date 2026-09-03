@@ -3074,6 +3074,7 @@ function App() {
   const togglePageShare = async (note: NoteSummary) => {
     const sessionEpoch = authSessionEpochRef.current;
     setPageActionMenu(null);
+    setCategoryActionMenu(null);
     setSharePending(true);
     setAppError(null);
 
@@ -3108,6 +3109,16 @@ function App() {
         draftRef.current = nextDraft;
         setDraft(nextDraft);
         setShareCopied(false);
+      }
+
+      if (note.kind === "category" && saved.shareToken && !note.shareToken && typeof window !== "undefined") {
+        const url = new URL(`/share/${saved.shareToken}`, window.location.origin).toString();
+        try {
+          await navigator.clipboard.writeText(url);
+          window.alert("文件夹分享链接已复制到剪贴板");
+        } catch {
+          window.prompt("复制这个文件夹分享链接", url);
+        }
       }
     } catch (error) {
       if (error instanceof ApiError && error.status === 401) {
@@ -3355,6 +3366,16 @@ function App() {
               >
                 <FolderPlus size={15} />
                 新建子文件夹
+              </button>
+              <button
+                className="category-context-menu__item"
+                disabled={sharePending}
+                onClick={() => void togglePageShare(contextCategory)}
+                role="menuitem"
+                type="button"
+              >
+                {contextCategory.shareToken ? <Globe2 size={15} /> : <Link2 size={15} />}
+                {contextCategory.shareToken ? "关闭文件夹分享" : "分享文件夹"}
               </button>
               <button
                 className="category-context-menu__item"
@@ -3635,6 +3656,7 @@ function App() {
               {category.title}
             </button>
           )}
+          {category.shareToken ? <em className="mini-share-badge category-share-badge">已共享</em> : null}
           <button
             aria-label={`拖动分类：${category.title}`}
             className="sidebar-drag-handle"
@@ -3919,21 +3941,45 @@ function App() {
     return (
       <main className="public-shell">
         <section className="public-page">
-          <article className="public-note">
+          <article className={clsx("public-note", publicNote.kind === "category" && "public-folder")}>
             <div className="public-note-head">
-              <NoteIcon className="public-note-icon" icon={normalizePageIcon(publicNote.icon)} />
+              {publicNote.kind === "category" ? <span className="public-note-icon public-folder-icon" aria-hidden="true"><Folder size={30} /></span> : <NoteIcon className="public-note-icon" icon={normalizePageIcon(publicNote.icon)} />}
               <div className="public-note-copy">
                 <h1 className={`title-size-${publicNote.titleSize}`}>{publicNote.title}</h1>
+                {publicNote.kind === "category" ? <p className="public-folder-subtitle">文件夹 · {publicNote.children?.length ?? 0} 个项目</p> : null}
               </div>
             </div>
 
             <Suspense fallback={<LazyViewFallback label="正在加载分享内容" />}>
+              {publicNote.kind === "category" ? (
+                <div className="public-folder-list">
+                  {(publicNote.children ?? []).length > 0 ? (publicNote.children ?? []).map((child) => (
+                    <button
+                      className="public-folder-item"
+                      key={child.id}
+                      onClick={() => {
+                        if (!initialShareToken) return;
+                        const nextPath = `/share/${encodeURIComponent(initialShareToken)}/${encodeURIComponent(child.id)}`;
+                        window.history.pushState({ shareToken: initialShareToken, noteId: child.id }, "", nextPath);
+                        void loadPublicNote(initialShareToken, child.id);
+                      }}
+                      type="button"
+                    >
+                      <span className={clsx("public-folder-item-icon", child.kind === "category" && "is-folder")}>
+                        {child.kind === "category" ? <Folder size={19} /> : <NoteIcon icon={normalizePageIcon(child.icon)} />}
+                      </span>
+                      <span className="public-folder-item-copy"><strong>{child.title}</strong><small>{child.kind === "category" ? "文件夹" : "页面"}</small></span>
+                      <ChevronRight size={18} />
+                    </button>
+                  )) : <div className="public-folder-empty">这个文件夹暂时为空</div>}
+                </div>
+              ) : (
               <NotebookEditor
                 key={`public-${publicNote.id}`}
                 note={publicNote}
                 onChange={() => undefined}
                 readOnly
-              />
+              />)}
             </Suspense>
           </article>
         </section>
@@ -4827,6 +4873,29 @@ function App() {
                 </div>
               </div>
               <div className="notes-overview__actions">
+                {overviewCategory ? (
+                  <button
+                    className="toolbar-button"
+                    disabled={sharePending}
+                    onClick={async () => {
+                      if (overviewCategory.shareToken && typeof window !== "undefined") {
+                        const url = new URL(`/share/${overviewCategory.shareToken}`, window.location.origin).toString();
+                        try {
+                          await navigator.clipboard.writeText(url);
+                          window.alert("文件夹分享链接已复制到剪贴板");
+                        } catch {
+                          window.prompt("复制这个文件夹分享链接", url);
+                        }
+                        return;
+                      }
+                      void togglePageShare(overviewCategory);
+                    }}
+                    type="button"
+                  >
+                    {overviewCategory.shareToken ? <Globe2 size={16} /> : <Link2 size={16} />}
+                    {overviewCategory.shareToken ? "复制分享链接" : "分享文件夹"}
+                  </button>
+                ) : null}
                 <button
                   className="toolbar-button"
                   onClick={() => void createCategory(overviewParentId)}

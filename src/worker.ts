@@ -2749,7 +2749,7 @@ async function getPublicSharedNote(
   password?: string | null
 ): Promise<Response> {
   const rootNote = await findSharedNoteByToken(env, shareToken);
-  if (!rootNote || cleanNoteKind(rootNote.kind) !== "page" || !rootNote.userId) {
+  if (!rootNote || !rootNote.userId || (cleanNoteKind(rootNote.kind) !== "page" && cleanNoteKind(rootNote.kind) !== "category")) {
     return error("分享页面不存在或已关闭。", 404);
   }
 
@@ -2768,7 +2768,7 @@ async function getPublicSharedNote(
     ? await findSharedDescendantNote(env, rootNote, linkedNoteId)
     : rootNote;
 
-  if (!targetNote || cleanNoteKind(targetNote.kind) !== "page") {
+  if (!targetNote || (cleanNoteKind(targetNote.kind) !== "page" && cleanNoteKind(targetNote.kind) !== "category")) {
     return error("子页面不存在，或不在这个分享页面中。", 404);
   }
 
@@ -3111,7 +3111,7 @@ async function enableNoteShare(
     return error("页面不存在。", 404);
   }
 
-  if (cleanNoteKind(current.kind) !== "page") {
+  if (cleanNoteKind(current.kind) !== "page" && cleanNoteKind(current.kind) !== "category") {
     return error("分类不支持共享。", 400);
   }
 
@@ -3173,7 +3173,7 @@ async function disableNoteShare(
     return error("页面不存在。", 404);
   }
 
-  if (cleanNoteKind(current.kind) !== "page") {
+  if (cleanNoteKind(current.kind) !== "page" && cleanNoteKind(current.kind) !== "category") {
     return error("分类不支持共享。", 400);
   }
 
@@ -3413,8 +3413,8 @@ async function getPublicStoredFile(
     return error("分享页面不存在或已关闭。", 404);
   }
 
-  const blocks = await readNoteContent(env, note, note.userId ?? undefined);
-  if (!extractUploadIdsFromBlocks(blocks).has(uploadId)) {
+  const ownerNote = await findPublicUploadNote(env, note, uploadId);
+  if (!ownerNote) {
     return error("文件不存在。", 404);
   }
 
@@ -3913,10 +3913,15 @@ async function rowToPublicNote(env: Env, row: DbNoteRow, shareToken: string): Pr
       })
     : content;
 
+  const children = cleanNoteKind(row.kind) === "category"
+    ? await listPublicDirectChildren(env, row)
+    : undefined;
+
   return {
     ...rowToSummary(row),
     shareToken,
-    content: rewriteBlocksForPublicShare(hydratedContent, shareToken)
+    content: rewriteBlocksForPublicShare(hydratedContent, shareToken),
+    ...(children ? { children } : {})
   };
 }
 
@@ -5112,7 +5117,7 @@ async function findSharedDescendantNote(
     .bind(linkedNoteId, userId)
     .first<DbNoteRow>();
 
-  if (!note || cleanNoteKind(note.kind) !== "page") {
+  if (!note || (cleanNoteKind(note.kind) !== "page" && cleanNoteKind(note.kind) !== "category")) {
     return null;
   }
 
@@ -5151,6 +5156,38 @@ async function isDescendantOfNote(
   }
 
   return false;
+}
+
+async function listPublicDirectChildren(env: Env, rootNote: DbNoteRow): Promise<NoteSummary[]> {
+  const userId = rootNote.userId;
+  if (!userId) return [];
+  const { results } = await env.DB.prepare(
+    `SELECT ${NOTE_COLUMNS} FROM notes
+     WHERE user_id = ? AND is_archived = 0
+     ORDER BY sort_order ASC, created_at ASC`
+  ).bind(userId).all<DbNoteRow>();
+  return results.filter((row) => row.parentId === rootNote.id).map((row) => ({
+    ...rowToSummary(row),
+    shareToken: null,
+    sharedAt: null,
+    sharePasswordProtected: false
+  }));
+}
+
+async function findPublicUploadNote(env: Env, rootNote: DbNoteRow, uploadId: string): Promise<DbNoteRow | null> {
+  const userId = rootNote.userId;
+  if (!userId) return null;
+  const { results } = await env.DB.prepare(
+    `SELECT ${NOTE_COLUMNS}, user_id AS userId, content FROM notes
+     WHERE user_id = ? AND is_archived = 0`
+  ).bind(userId).all<DbNoteRow>();
+  for (const candidate of results) {
+    if (cleanNoteKind(candidate.kind) !== "page") continue;
+    if (candidate.id !== rootNote.id && !(await isDescendantOfNote(env, userId, candidate.parentId, rootNote.id))) continue;
+    const blocks = await readNoteContent(env, candidate, userId);
+    if (extractUploadIdsFromBlocks(blocks).has(uploadId)) return candidate;
+  }
+  return null;
 }
 
 async function cleanupRemovedUploadsForUser(
