@@ -37,7 +37,8 @@ import {
   Trash2,
   Undo2,
   UploadCloud,
-  WifiOff
+  WifiOff,
+  X
 } from "lucide-react";
 import {
   Fragment,
@@ -294,6 +295,9 @@ function App() {
   const [shareCopied, setShareCopied] = useState(false);
   const [sharePassword, setSharePassword] = useState("");
   const [showSharePassword, setShowSharePassword] = useState(false);
+  const [folderShareOpen, setFolderShareOpen] = useState(false);
+  const [folderShareTarget, setFolderShareTarget] = useState<NoteSummary | null>(null);
+  const [folderShareCopied, setFolderShareCopied] = useState(false);
   const [exportOpen, setExportOpen] = useState(false);
   const [exportPending, setExportPending] = useState(false);
   const [exportSelection, setExportSelection] = useState<string[]>([]);
@@ -456,6 +460,15 @@ function App() {
   }, [mobileSidebarOpen]);
 
   useEffect(() => {
+    if (!folderShareOpen) return;
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setFolderShareOpen(false);
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [folderShareOpen]);
+
+  useEffect(() => {
     setMobileSidebarOpen(false);
   }, [selectedId, workspaceView]);
 
@@ -479,6 +492,9 @@ function App() {
     resetPageHistory(null);
     setShareOpen(false);
     setShareCopied(false);
+    setFolderShareOpen(false);
+    setFolderShareTarget(null);
+    setFolderShareCopied(false);
     setPageActionMenu(null);
     setExportOpen(false);
     setExportPending(false);
@@ -1076,6 +1092,13 @@ function App() {
 
     return new URL(`/share/${draft.shareToken}`, window.location.origin).toString();
   }, [draft?.shareToken]);
+
+  const folderShareUrl = useMemo(() => {
+    if (!folderShareTarget?.shareToken || typeof window === "undefined") {
+      return "";
+    }
+    return new URL(`/share/${folderShareTarget.shareToken}`, window.location.origin).toString();
+  }, [folderShareTarget?.shareToken]);
 
   const saveDraft = useCallback(
     (snapshot: Note, revision: number): Promise<boolean> => {
@@ -3071,6 +3094,22 @@ function App() {
     queueRecordMove(noteId, parentId, null);
   };
 
+  const openFolderSharePanel = (category: NoteSummary) => {
+    setFolderShareTarget(category);
+    setFolderShareCopied(false);
+    setFolderShareOpen(true);
+  };
+
+  const copyFolderShareLink = async () => {
+    if (!folderShareUrl) return;
+    try {
+      await navigator.clipboard.writeText(folderShareUrl);
+      setFolderShareCopied(true);
+    } catch {
+      setAppError("复制失败，请手动复制下方链接。");
+    }
+  };
+
   const togglePageShare = async (note: NoteSummary) => {
     const sessionEpoch = authSessionEpochRef.current;
     setPageActionMenu(null);
@@ -3111,14 +3150,10 @@ function App() {
         setShareCopied(false);
       }
 
-      if (note.kind === "category" && saved.shareToken && !note.shareToken && typeof window !== "undefined") {
-        const url = new URL(`/share/${saved.shareToken}`, window.location.origin).toString();
-        try {
-          await navigator.clipboard.writeText(url);
-          window.alert("文件夹分享链接已复制到剪贴板");
-        } catch {
-          window.prompt("复制这个文件夹分享链接", url);
-        }
+      if (note.kind === "category" && saved.shareToken && !note.shareToken) {
+        setFolderShareTarget(saved);
+        setFolderShareCopied(false);
+        setFolderShareOpen(true);
       }
     } catch (error) {
       if (error instanceof ApiError && error.status === 401) {
@@ -3325,6 +3360,58 @@ function App() {
           document.body
         )
       : null;
+
+  const folderSharePanel = folderShareOpen && folderShareTarget && folderShareUrl && typeof document !== "undefined"
+    ? createPortal(
+        <div className="folder-share-modal-layer">
+          <button
+            aria-label="关闭文件夹分享面板"
+            className="folder-share-modal-backdrop"
+            onClick={() => setFolderShareOpen(false)}
+            type="button"
+          />
+          <section
+            aria-labelledby="folder-share-modal-title"
+            aria-modal="true"
+            className="folder-share-modal"
+            role="dialog"
+          >
+            <header className="folder-share-modal__head">
+              <div className="folder-share-modal__icon"><Folder size={21} /></div>
+              <div>
+                <span>文件夹分享</span>
+                <h2 id="folder-share-modal-title">分享“{folderShareTarget.title}”</h2>
+              </div>
+              <button
+                aria-label="关闭"
+                className="folder-share-modal__close"
+                onClick={() => setFolderShareOpen(false)}
+                type="button"
+              >
+                <X size={18} />
+              </button>
+            </header>
+            <p className="folder-share-modal__hint">文件夹内的页面和子文件夹都可以通过这个链接查看。</p>
+            <label className="folder-share-modal__field">
+              <span>分享链接</span>
+              <input aria-label="文件夹分享链接" readOnly type="text" value={folderShareUrl} />
+            </label>
+            <div className="folder-share-modal__actions">
+              <button className="toolbar-button" onClick={() => void copyFolderShareLink()} type="button">
+                <Copy size={15} />
+                {folderShareCopied ? "已复制" : "复制链接"}
+              </button>
+              <a className="primary-button" href={folderShareUrl} rel="noreferrer" target="_blank">
+                <ExternalLink size={15} />
+                打开分享页
+              </a>
+            </div>
+            <small className="folder-share-modal__tip">复制按钮不可用时，也可以直接选中上方链接手动复制。</small>
+          </section>
+        </div>,
+        document.body
+      )
+    : null;
 
   const categoryActionPanel =
     categoryActionMenu && contextCategory && typeof document !== "undefined"
@@ -3620,6 +3707,7 @@ function App() {
             <Folder size={15} />
           </button>
 
+          <div className="category-row-copy">
           {isEditing ? (
             <input
               autoFocus
@@ -3657,6 +3745,7 @@ function App() {
             </button>
           )}
           {category.shareToken ? <em className="mini-share-badge category-share-badge">已共享</em> : null}
+          </div>
           <button
             aria-label={`拖动分类：${category.title}`}
             className="sidebar-drag-handle"
@@ -4877,23 +4966,17 @@ function App() {
                   <button
                     className="toolbar-button"
                     disabled={sharePending}
-                    onClick={async () => {
-                      if (overviewCategory.shareToken && typeof window !== "undefined") {
-                        const url = new URL(`/share/${overviewCategory.shareToken}`, window.location.origin).toString();
-                        try {
-                          await navigator.clipboard.writeText(url);
-                          window.alert("文件夹分享链接已复制到剪贴板");
-                        } catch {
-                          window.prompt("复制这个文件夹分享链接", url);
-                        }
-                        return;
+                    onClick={() => {
+                      if (overviewCategory.shareToken) {
+                        openFolderSharePanel(overviewCategory);
+                      } else {
+                        void togglePageShare(overviewCategory);
                       }
-                      void togglePageShare(overviewCategory);
                     }}
                     type="button"
                   >
                     {overviewCategory.shareToken ? <Globe2 size={16} /> : <Link2 size={16} />}
-                    {overviewCategory.shareToken ? "复制分享链接" : "分享文件夹"}
+                    {overviewCategory.shareToken ? "查看分享链接" : "分享文件夹"}
                   </button>
                 ) : null}
                 <button
@@ -5084,6 +5167,7 @@ function App() {
       {pageActionPanel}
       {exportPanel}
       {pageIconPicker}
+      {folderSharePanel}
     </main>
   );
 }
